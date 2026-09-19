@@ -1,13 +1,13 @@
 import torch
 
 from model.model import NovaLanguageModel
-from model.tokenizer import ByteLevelBPETokenizer
+from model.tokenizer import ByteBPETokenizer
 
 
 @torch.no_grad()
 def generate(
     model: NovaLanguageModel,
-    tokenizer: ByteLevelBPETokenizer,
+    tokenizer: ByteBPETokenizer,
     prompt: str,
     max_new_tokens: int = 50,
     temperature: float = 1.0,
@@ -17,8 +17,7 @@ def generate(
     model.eval()
 
     input_ids = tokenizer.encode(
-        prompt,
-        add_special_tokens=False,
+        prompt
     )
 
     input_ids = torch.tensor(
@@ -83,12 +82,11 @@ def generate(
             dim=1,
         )
 
-        if next_token.item() == tokenizer.eos_token_id:
-            break
+        # if next_token.item() == tokenizer.eos_token_id:
+        #     break
 
     generated_ids = input_ids[0].tolist()
 
     return tokenizer.decode(
         generated_ids,
-        skip_special_tokens=True,
     )
