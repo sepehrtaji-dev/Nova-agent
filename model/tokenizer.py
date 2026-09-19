@@ -196,14 +196,7 @@ class ByteBPETokenizer:
             if token in self.SPECIAL_TOKENS:
                 continue
 
-            if token.startswith("<0x") and token.endswith(">"):
-                try:
-                    byte_data.append(int(token[3:-1], 16))
-                except ValueError:
-                    continue
-            else:
-                for byte in self._token_to_bytes(token):
-                    byte_data.extend(byte)
+            byte_data.extend(self._token_to_bytes(token))
 
         return byte_data.decode("utf-8", errors="replace")
 
