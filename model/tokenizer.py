@@ -5,12 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
+from typing import Iterable
 
 
 @dataclass
 class TokenizerConfig:
     vocab_size: int = 32000
     min_frequency: int = 2
+    max_unique_words: int = 200000
 
 
 class ByteBPETokenizer:
@@ -20,6 +22,8 @@ class ByteBPETokenizer:
         "<bos>": 2,
         "<eos>": 3,
     }
+
+    BYTE_TOKEN_COUNT = 256
 
     def __init__(self, config: TokenizerConfig | None = None):
         self.config = config or TokenizerConfig()
@@ -31,6 +35,7 @@ class ByteBPETokenizer:
         }
 
         self.merges: dict[tuple[str, str], str] = {}
+        self.merge_ranks: dict[tuple[str, str], int] = {}
 
     @property
     def vocab_size(self) -> int:
@@ -45,37 +50,71 @@ class ByteBPETokenizer:
 
     def _pair_counts(
         self,
-        sequences: list[list[str]],
+        sequences: list[tuple[list[str], int]],
     ) -> Counter[tuple[str, str]]:
-        counts = Counter()
+        counts: Counter[tuple[str, str]] = Counter()
 
-        for sequence in sequences:
+        for sequence, frequency in sequences:
+            if frequency <= 0:
+                continue
+
             for i in range(len(sequence) - 1):
-                counts[(sequence[i], sequence[i + 1])] += 1
+                counts[(sequence[i], sequence[i + 1])] += frequency
 
         return counts
 
-    def train(self, texts: list[str]) -> None:
-        if not texts:
-            raise ValueError("Training data cannot be empty.")
-
-        sequences = []
-
-        for text in texts:
-            for word in self._split_words(text):
-                if word:
-                    sequences.append(self._word_to_symbols(word))
-
-        if not sequences:
-            raise ValueError("No usable text was found.")
-
-        for byte in range(256):
+    def _add_base_tokens(self) -> None:
+        for byte in range(self.BYTE_TOKEN_COUNT):
             token = f"<0x{byte:02X}>"
 
             if token not in self.token_to_id:
                 token_id = len(self.token_to_id)
                 self.token_to_id[token] = token_id
                 self.id_to_token[token_id] = token
+
+    def train(
+        self,
+        texts: Iterable[str],
+        max_unique_words: int | None = None,
+    ) -> None:
+        if texts is None:
+            raise ValueError("Training data cannot be empty.")
+
+        limit = (
+            self.config.max_unique_words
+            if max_unique_words is None
+            else max_unique_words
+        )
+
+        if limit <= 0:
+            raise ValueError("max_unique_words must be greater than 0.")
+
+        word_frequencies: Counter[str] = Counter()
+
+        for text in texts:
+            if not isinstance(text, str):
+                continue
+
+            for word in self._split_words(text):
+                if not word:
+                    continue
+
+                if word in word_frequencies:
+                    word_frequencies[word] += 1
+                elif len(word_frequencies) < limit:
+                    word_frequencies[word] = 1
+
+        if not word_frequencies:
+            raise ValueError("No usable text was found.")
+
+        self._add_base_tokens()
+
+        sequences: list[tuple[list[str], int]] = [
+            (self._word_to_symbols(word), frequency)
+            for word, frequency in word_frequencies.items()
+        ]
+
+        del word_frequencies
 
         while len(self.token_to_id) < self.config.vocab_size:
             pair_counts = self._pair_counts(sequences)
@@ -94,15 +133,16 @@ class ByteBPETokenizer:
                 break
 
             self.merges[pair] = merged
+            self.merge_ranks[pair] = len(self.merge_ranks)
 
             token_id = len(self.token_to_id)
             self.token_to_id[merged] = token_id
             self.id_to_token[token_id] = merged
 
-            new_sequences = []
+            updated_sequences: list[tuple[list[str], int]] = []
 
-            for sequence in sequences:
-                new_sequence = []
+            for sequence, word_frequency in sequences:
+                new_sequence: list[str] = []
                 i = 0
 
                 while i < len(sequence):
@@ -116,33 +156,31 @@ class ByteBPETokenizer:
                         new_sequence.append(sequence[i])
                         i += 1
 
-                new_sequences.append(new_sequence)
+                updated_sequences.append((new_sequence, word_frequency))
 
-            sequences = new_sequences
+            sequences = updated_sequences
+
+        del sequences
 
     def _apply_merges(self, symbols: list[str]) -> list[str]:
         symbols = symbols[:]
 
-        while True:
+        while len(symbols) > 1:
             best_pair = None
             best_order = None
+            best_index = -1
 
-            for pair in self.merges:
-                try:
-                    index = next(
-                        i
-                        for i in range(len(symbols) - 1)
-                        if (symbols[i], symbols[i + 1]) == pair
-                    )
-                except StopIteration:
+            for i in range(len(symbols) - 1):
+                pair = (symbols[i], symbols[i + 1])
+                order = self.merge_ranks.get(pair)
+
+                if order is None:
                     continue
-
-                order = list(self.merges).index(pair)
 
                 if best_order is None or order < best_order:
                     best_pair = pair
                     best_order = order
-                    best_index = index
+                    best_index = i
 
             if best_pair is None:
                 break
@@ -215,6 +253,7 @@ class ByteBPETokenizer:
             "config": {
                 "vocab_size": self.config.vocab_size,
                 "min_frequency": self.config.min_frequency,
+                "max_unique_words": self.config.max_unique_words,
             },
             "token_to_id": self.token_to_id,
             "merges": [
@@ -244,7 +283,12 @@ class ByteBPETokenizer:
         with path.open("r", encoding="utf-8") as file:
             data = json.load(file)
 
-        config = TokenizerConfig(**data["config"])
+        config_data = data["config"]
+
+        if "max_unique_words" not in config_data:
+            config_data["max_unique_words"] = 200000
+
+        config = TokenizerConfig(**config_data)
         tokenizer = cls(config)
 
         tokenizer.token_to_id = {
@@ -260,6 +304,11 @@ class ByteBPETokenizer:
         tokenizer.merges = {
             (item["left"], item["right"]): item["merged"]
             for item in data["merges"]
+        }
+
+        tokenizer.merge_ranks = {
+            pair: rank
+            for rank, pair in enumerate(tokenizer.merges)
         }
 
         return tokenizer
