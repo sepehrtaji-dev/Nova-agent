@@ -18,39 +18,45 @@ from training.dataset import create_train_val_dataloaders
 
 @dataclass
 class TrainConfig:
-    max_steps: int = 1000
-    sequence_length: int = 256
+    max_steps: int = 12_208
+
+    sequence_length: int = 512
     batch_size: int = 1
     gradient_accumulation_steps: int = 8
 
     learning_rate: float = 3e-4
     min_learning_rate: float = 3e-5
-    warmup_steps: int = 50
+
+    warmup_steps: int = 500
+
     weight_decay: float = 0.1
     max_grad_norm: float = 1.0
 
-    max_train_documents: int = 10000
-    max_train_tokens: int = 2_000_000
-    max_validation_documents: int = 200
-    max_validation_tokens: int = 50_000
+    max_train_documents: int = 50_000
+    max_train_tokens: int = 10_000_000
 
-    validation_interval: int = 100
-    checkpoint_interval: int = 100
+    max_validation_documents: int = 500
+    max_validation_tokens: int = 100_000
 
-    num_workers: int = 0
+    validation_interval: int = 500
+    checkpoint_interval: int = 500
+
     seed: int = 42
 
     checkpoint_dir: str = "data/checkpoints"
-    resume_from: Optional[str] = None
+
+    resume_from: Optional[str] = "data/checkpoints/best.pt"
 
     use_amp: bool = True
     amp_dtype: str = "float16"
+
     save_rng_state: bool = True
 
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
+
     torch.manual_seed(seed)
 
     if torch.cuda.is_available():
@@ -76,10 +82,10 @@ def restore_rng_state(state) -> None:
 
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
-    torch.set_rng_state(state["torch"])
+    torch.set_rng_state(torch.as_tensor(state["torch"], dtype=torch.uint8, device="cpu"))
 
     if torch.cuda.is_available() and "cuda" in state:
-        torch.cuda.set_rng_state_all(state["cuda"])
+        torch.set_rng_state(torch.as_tensor(state["torch"], dtype=torch.uint8, device="cpu"))
 
 
 def build_optimizer(
@@ -89,14 +95,14 @@ def build_optimizer(
     decay_params = []
     no_decay_params = []
 
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
             continue
 
-        if param.ndim >= 2 and "bias" not in name:
-            decay_params.append(param)
+        if parameter.ndim >= 2 and "bias" not in name:
+            decay_params.append(parameter)
         else:
-            no_decay_params.append(param)
+            no_decay_params.append(parameter)
 
     return torch.optim.AdamW(
         [
@@ -114,11 +120,11 @@ def build_optimizer(
     )
 
 
-def lr_lambda(
+def get_lr_multiplier(
     step: int,
     config: TrainConfig,
 ) -> float:
-    if step < config.warmup_steps:
+    if step <= config.warmup_steps:
         return max(step, 1) / max(config.warmup_steps, 1)
 
     if config.max_steps <= config.warmup_steps:
@@ -130,10 +136,16 @@ def lr_lambda(
         config.max_steps - config.warmup_steps
     )
 
-    progress = min(max(progress, 0.0), 1.0)
+    progress = min(
+        max(progress, 0.0),
+        1.0,
+    )
 
     cosine = 0.5 * (
-        1.0 + math.cos(math.pi * progress)
+        1.0
+        + math.cos(
+            math.pi * progress
+        )
     )
 
     min_ratio = (
@@ -141,9 +153,10 @@ def lr_lambda(
         / config.learning_rate
     )
 
-    return min_ratio + (
-        1.0 - min_ratio
-    ) * cosine
+    return (
+        min_ratio
+        + (1.0 - min_ratio) * cosine
+    )
 
 
 def build_scheduler(
@@ -152,11 +165,16 @@ def build_scheduler(
 ):
     return torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        lambda step: lr_lambda(step, config),
+        lambda step: get_lr_multiplier(
+            step,
+            config,
+        ),
     )
 
 
-def get_amp_dtype(config: TrainConfig):
+def get_amp_dtype(
+    config: TrainConfig,
+):
     if config.amp_dtype.lower() == "bfloat16":
         return torch.bfloat16
 
@@ -197,15 +215,16 @@ def save_checkpoint(
         exist_ok=True,
     )
 
-    torch.save(payload, path)
+    torch.save(
+        payload,
+        path,
+    )
 
 
 def load_checkpoint(
     path,
     model,
     optimizer,
-    scheduler,
-    scaler,
     device,
 ):
     checkpoint = torch.load(
@@ -222,16 +241,11 @@ def load_checkpoint(
         checkpoint["optimizer"]
     )
 
-    scheduler.load_state_dict(
-        checkpoint["scheduler"]
-    )
-
-    scaler.load_state_dict(
-        checkpoint["scaler"]
-    )
-
     return (
-        checkpoint.get("step", 0),
+        checkpoint.get(
+            "step",
+            0,
+        ),
         checkpoint.get(
             "best_val_loss",
             float("inf"),
@@ -245,7 +259,7 @@ def load_checkpoint(
             0,
         ),
         checkpoint.get(
-            "rng_state"
+            "rng_state",
         ),
     )
 
@@ -267,15 +281,21 @@ def evaluate(
         and device.type == "cuda"
     )
 
-    dtype = get_amp_dtype(config)
+    dtype = get_amp_dtype(
+        config
+    )
 
     for batch in loader:
-        input_ids = batch["input_ids"].to(
+        input_ids = batch[
+            "input_ids"
+        ].to(
             device,
             non_blocking=True,
         )
 
-        target_ids = batch["target_ids"].to(
+        target_ids = batch[
+            "target_ids"
+        ].to(
             device,
             non_blocking=True,
         )
@@ -301,21 +321,32 @@ def evaluate(
     model.train()
 
     if total_tokens == 0:
-        return float("inf"), float("inf")
+        return (
+            float("inf"),
+            float("inf"),
+        )
 
-    avg_loss = (
+    average_loss = (
         total_loss
         / total_tokens
     )
 
     perplexity = math.exp(
-        min(avg_loss, 20.0)
+        min(
+            average_loss,
+            20.0,
+        )
     )
 
-    return avg_loss, perplexity
+    return (
+        average_loss,
+        perplexity,
+    )
 
 
-def format_time(seconds: float) -> str:
+def format_time(
+    seconds: float,
+) -> str:
     if not math.isfinite(seconds):
         return "--:--:--"
 
@@ -347,7 +378,9 @@ def train(
         ModelConfig
     ] = None,
 ):
-    set_seed(config.seed)
+    set_seed(
+        config.seed
+    )
 
     device = torch.device(
         "cuda"
@@ -367,17 +400,14 @@ def train(
         config,
     )
 
-    scheduler = build_scheduler(
-        optimizer,
-        config,
-    )
-
     use_amp = (
         config.use_amp
         and device.type == "cuda"
     )
 
-    dtype = get_amp_dtype(config)
+    dtype = get_amp_dtype(
+        config
+    )
 
     scaler = torch.amp.GradScaler(
         "cuda",
@@ -391,25 +421,26 @@ def train(
         "data/tokenizer/nova_tokenizer.json"
     )
 
-    train_loader, validation_loader = (
-        create_train_val_dataloaders(
-            tokenizer_path=tokenizer_path,
-            sequence_length=config.sequence_length,
-            batch_size=config.batch_size,
-            train_max_documents=(
-                config.max_train_documents
-            ),
-            train_max_tokens=(
-                config.max_train_tokens
-            ),
-            validation_max_documents=(
-                config.max_validation_documents
-            ),
-            validation_max_tokens=(
-                config.max_validation_tokens
-            ),
-            seed=config.seed,
-        )
+    (
+        train_loader,
+        validation_loader,
+    ) = create_train_val_dataloaders(
+        tokenizer_path=tokenizer_path,
+        sequence_length=config.sequence_length,
+        batch_size=config.batch_size,
+        train_max_documents=(
+            config.max_train_documents
+        ),
+        train_max_tokens=(
+            config.max_train_tokens
+        ),
+        validation_max_documents=(
+            config.max_validation_documents
+        ),
+        validation_max_tokens=(
+            config.max_validation_tokens
+        ),
+        seed=config.seed,
     )
 
     start_step = 0
@@ -428,8 +459,6 @@ def train(
             config.resume_from,
             model,
             optimizer,
-            scheduler,
-            scaler,
             device,
         )
 
@@ -437,36 +466,73 @@ def train(
             rng_state
         )
 
-    print("=" * 68)
-    print("NOVA TRAINER V4")
-    print("=" * 68)
+        print(
+            f"Resumed from: "
+            f"{config.resume_from}"
+        )
+
+        print(
+            f"Resume step: "
+            f"{start_step}"
+        )
+
+        print(
+            f"Tokens already seen: "
+            f"{tokens_seen:,}"
+        )
+
+    scheduler = build_scheduler(
+        optimizer,
+        config,
+    )
+
+    if start_step > 0:
+        scheduler.last_epoch = start_step
+
+        lr_multiplier = get_lr_multiplier(
+            start_step,
+            config,
+        )
+
+        new_lr = (
+            config.learning_rate
+            * lr_multiplier
+        )
+
+        for group in optimizer.param_groups:
+            group["lr"] = new_lr
+
+    print("=" * 72)
+    print("NOVA LARGE — CONTINUED PRETRAINING")
+    print("=" * 72)
 
     print(
         f"Device: {device}"
     )
 
     if device.type == "cuda":
-        props = (
+        properties = (
             torch.cuda
             .get_device_properties(0)
         )
 
         print(
-            f"GPU: {props.name}"
+            f"GPU: {properties.name}"
         )
 
         print(
             "GPU memory: "
-            f"{props.total_memory / 1024**3:.2f} GB"
+            f"{properties.total_memory / 1024**3:.2f} GB"
         )
 
     parameters = sum(
-        p.numel()
-        for p in model.parameters()
+        parameter.numel()
+        for parameter in model.parameters()
     )
 
     print(
-        f"Parameters: {parameters:,}"
+        f"Parameters: "
+        f"{parameters:,}"
     )
 
     print(
@@ -485,24 +551,43 @@ def train(
     )
 
     print(
-        "Effective batch: "
+        "Effective batch size: "
         f"{config.batch_size * config.gradient_accumulation_steps}"
     )
 
     print(
-        f"AMP: {use_amp} "
-        f"({config.amp_dtype})"
+        f"Learning rate: "
+        f"{config.learning_rate}"
     )
 
     print(
-        f"Training steps: "
-        f"{start_step + 1} "
-        f"-> {config.max_steps}"
+        f"Warmup steps: "
+        f"{config.warmup_steps}"
     )
 
-    print("=" * 68)
+    print(
+        f"Max steps: "
+        f"{config.max_steps}"
+    )
 
-    train_iter = iter(
+    print(
+        "Target tokens: "
+        f"{config.max_steps * config.batch_size * config.gradient_accumulation_steps * config.sequence_length:,}"
+    )
+
+    print(
+        f"Current tokens: "
+        f"{tokens_seen:,}"
+    )
+
+    print(
+        f"AMP: "
+        f"{use_amp} ({config.amp_dtype})"
+    )
+
+    print("=" * 72)
+
+    train_iterator = iter(
         train_loader
     )
 
@@ -527,16 +612,16 @@ def train(
         ):
             try:
                 batch = next(
-                    train_iter
+                    train_iterator
                 )
 
             except StopIteration:
-                train_iter = iter(
+                train_iterator = iter(
                     train_loader
                 )
 
                 batch = next(
-                    train_iter
+                    train_iterator
                 )
 
             input_ids = batch[
@@ -572,7 +657,6 @@ def train(
                 scaler.scale(
                     loss_for_backward
                 ).backward()
-
             else:
                 loss_for_backward.backward()
 
@@ -585,7 +669,10 @@ def train(
             )
 
             tokens_seen += batch_tokens
-            window_tokens += batch_tokens
+
+            window_tokens += (
+                batch_tokens
+            )
 
         if use_amp:
             scaler.unscale_(
@@ -623,9 +710,12 @@ def train(
             - window_start
         )
 
-        tokens_per_sec = (
+        tokens_per_second = (
             window_tokens
-            / max(elapsed, 1e-9)
+            / max(
+                elapsed,
+                1e-9,
+            )
         )
 
         steps_done = max(
@@ -633,17 +723,23 @@ def train(
             1,
         )
 
-        avg_step_time = (
+        average_step_time = (
             time.perf_counter()
             - total_start
         ) / steps_done
 
+        remaining_steps = (
+            config.max_steps
+            - step
+        )
+
         eta = (
-            config.max_steps - step
-        ) * avg_step_time
+            remaining_steps
+            * average_step_time
+        )
 
         if (
-            step == 1
+            step == start_step + 1
             or step % 10 == 0
             or step == config.max_steps
         ):
@@ -662,10 +758,18 @@ def train(
                     / 1024**3
                 )
 
+                peak = (
+                    torch.cuda
+                    .max_memory_allocated()
+                    / 1024**3
+                )
+
                 memory = (
                     f" | VRAM: "
                     f"{allocated:.2f}/"
                     f"{reserved:.2f} GB"
+                    f" | Peak: "
+                    f"{peak:.2f} GB"
                 )
 
             print(
@@ -676,7 +780,7 @@ def train(
                 f"LR: "
                 f"{optimizer.param_groups[0]['lr']:.7f} | "
                 f"Tok/s: "
-                f"{tokens_per_sec:.1f} | "
+                f"{tokens_per_second:.1f} | "
                 f"Grad: "
                 f"{float(grad_norm):.3f} | "
                 f"ETA: "
@@ -690,25 +794,33 @@ def train(
 
             window_tokens = 0
 
-        if (
+        should_validate = (
             step % config.validation_interval == 0
             or step == config.max_steps
-        ):
-            val_loss, val_ppl = evaluate(
-                model,
-                validation_loader,
-                device,
-                config,
+        )
+
+        if should_validate:
+            validation_loss, validation_ppl = (
+                evaluate(
+                    model,
+                    validation_loader,
+                    device,
+                    config,
+                )
             )
 
             print(
                 f"Validation | "
-                f"Loss: {val_loss:.4f} | "
-                f"PPL: {val_ppl:.2f}"
+                f"Loss: "
+                f"{validation_loss:.4f} | "
+                f"PPL: "
+                f"{validation_ppl:.2f}"
             )
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if validation_loss < best_val_loss:
+                best_val_loss = (
+                    validation_loss
+                )
 
                 save_checkpoint(
                     Path(
@@ -729,14 +841,18 @@ def train(
                     "Saved: best.pt"
                 )
 
-        if (
+        should_checkpoint = (
             step % config.checkpoint_interval == 0
             or step == config.max_steps
-        ):
+        )
+
+        if should_checkpoint:
+            checkpoint_dir = Path(
+                config.checkpoint_dir
+            )
+
             save_checkpoint(
-                Path(
-                    config.checkpoint_dir
-                ) / "last.pt",
+                checkpoint_dir / "last.pt",
                 model,
                 optimizer,
                 scheduler,
@@ -749,9 +865,8 @@ def train(
             )
 
             save_checkpoint(
-                Path(
-                    config.checkpoint_dir
-                ) / f"checkpoint_step_{step}.pt",
+                checkpoint_dir
+                / f"checkpoint_step_{step}.pt",
                 model,
                 optimizer,
                 scheduler,
@@ -768,8 +883,9 @@ def train(
                 f"at step {step}"
             )
 
-    print("=" * 68)
+    print("=" * 72)
     print("TRAINING COMPLETE")
+    print("=" * 72)
 
     print(
         f"Final step: "
@@ -786,21 +902,52 @@ def train(
         f"{best_val_loss:.4f}"
     )
 
-    print("=" * 68)
+    print("=" * 72)
 
 
 if __name__ == "__main__":
     config = TrainConfig(
-        max_steps=50,
-        sequence_length=256,
+        max_steps=12_208,
+
+        sequence_length=512,
+
         batch_size=1,
+
         gradient_accumulation_steps=8,
-        max_train_documents=5000,
-        max_train_tokens=500_000,
-        max_validation_documents=100,
-        max_validation_tokens=20_000,
-        validation_interval=10,
-        checkpoint_interval=10,
+
+        learning_rate=3e-4,
+
+        min_learning_rate=3e-5,
+
+        warmup_steps=500,
+
+        weight_decay=0.1,
+
+        max_grad_norm=1.0,
+
+        max_train_documents=50_000,
+
+        max_train_tokens=10_000_000,
+
+        max_validation_documents=500,
+
+        max_validation_tokens=100_000,
+
+        validation_interval=500,
+
+        checkpoint_interval=500,
+
+        seed=42,
+
+        checkpoint_dir="data/checkpoints",
+
+        resume_from="data/checkpoints/best.pt",
+
+        use_amp=True,
+
+        amp_dtype="float16",
+
+        save_rng_state=True,
     )
 
     train(config)
