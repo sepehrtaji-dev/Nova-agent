@@ -5,7 +5,6 @@ import os
 import random
 import signal
 import time
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +25,7 @@ TOKENIZER_PATH = Path(
     "data/tokenizer/nova_tokenizer.json"
 )
 
+
 SEQUENCE_LENGTH = 512
 BATCH_SIZE = 1
 GRADIENT_ACCUMULATION_STEPS = 8
@@ -38,7 +38,6 @@ WARMUP_STEPS = 500
 WEIGHT_DECAY = 0.1
 MAX_GRAD_NORM = 1.0
 
-TARGET_NEW_TOKENS = 120_000_000
 
 TOKENS_PER_STEP = (
     SEQUENCE_LENGTH
@@ -46,9 +45,12 @@ TOKENS_PER_STEP = (
     * GRADIENT_ACCUMULATION_STEPS
 )
 
+TARGET_NEW_TOKENS = 120_000_000
+
 TARGET_STEPS = math.ceil(
     TARGET_NEW_TOKENS / TOKENS_PER_STEP
 )
+
 
 VALIDATION_INTERVAL = 500
 CHECKPOINT_INTERVAL = 500
@@ -105,6 +107,7 @@ def restore_rng_state(state) -> None:
 
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
+
     torch.set_rng_state(
         torch.as_tensor(
             state["torch"],
@@ -193,11 +196,25 @@ def get_lr_multiplier(step: int) -> float:
     )
 
 
-def build_scheduler(optimizer):
-    return torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=get_lr_multiplier,
+def build_scheduler():
+    return {
+        "last_step": 0,
+    }
+
+
+def set_learning_rate(
+    optimizer,
+    step: int,
+) -> None:
+    multiplier = get_lr_multiplier(step)
+
+    learning_rate = (
+        LEARNING_RATE
+        * multiplier
     )
+
+    for group in optimizer.param_groups:
+        group["lr"] = learning_rate
 
 
 def force_scheduler_position(
@@ -205,21 +222,11 @@ def force_scheduler_position(
     scheduler,
     step: int,
 ):
-    scheduler.last_epoch = step
-    scheduler._step_count = step + 1
-
-    multiplier = get_lr_multiplier(step)
-
-    for group in optimizer.param_groups:
-        group["lr"] = (
-            LEARNING_RATE
-            * multiplier
-        )
-
-    scheduler.base_lrs = [
-        LEARNING_RATE
-        for _ in optimizer.param_groups
-    ]
+    scheduler["last_step"] = step
+    set_learning_rate(
+        optimizer,
+        step,
+    )
 
 
 def atomic_save(
@@ -256,16 +263,18 @@ def save_checkpoint(
     best_val_loss: float,
     last_train_loss: float,
     tokens_seen: int,
+    base_tokens_seen: int,
 ):
     payload = {
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
-        "scheduler": scheduler.state_dict(),
+        "scheduler": dict(scheduler),
         "scaler": scaler.state_dict(),
         "step": step,
         "best_val_loss": best_val_loss,
         "train_loss": last_train_loss,
         "tokens_seen": tokens_seen,
+        "base_tokens_seen": base_tokens_seen,
         "rng_state": capture_rng_state(),
         "config": {
             "sequence_length": SEQUENCE_LENGTH,
@@ -301,13 +310,13 @@ def evaluate(
     total_loss = 0.0
     total_tokens = 0
 
-    for input_ids, target_ids in loader:
-        input_ids = input_ids.to(
+    for batch in loader:
+        input_ids = batch["input_ids"].to(
             device,
             non_blocking=True,
         )
 
-        target_ids = target_ids.to(
+        target_ids = batch["target_ids"].to(
             device,
             non_blocking=True,
         )
@@ -325,7 +334,8 @@ def evaluate(
         tokens = target_ids.numel()
 
         total_loss += (
-            loss.item() * tokens
+            loss.item()
+            * tokens
         )
 
         total_tokens += tokens
@@ -453,9 +463,27 @@ def load_long_checkpoint(
         checkpoint["optimizer"]
     )
 
-    scheduler.load_state_dict(
-        checkpoint["scheduler"]
+    scheduler_state = checkpoint.get(
+        "scheduler",
+        {
+            "last_step": checkpoint.get(
+                "step",
+                0,
+            )
+        },
     )
+
+    scheduler.clear()
+
+    if "last_step" in scheduler_state:
+        scheduler["last_step"] = scheduler_state[
+            "last_step"
+        ]
+    else:
+        scheduler["last_step"] = checkpoint.get(
+            "step",
+            0,
+        )
 
     scaler.load_state_dict(
         checkpoint["scaler"]
@@ -469,6 +497,11 @@ def load_long_checkpoint(
     tokens_seen = checkpoint.get(
         "tokens_seen",
         0,
+    )
+
+    base_tokens_seen = checkpoint.get(
+        "base_tokens_seen",
+        tokens_seen,
     )
 
     train_loss = checkpoint.get(
@@ -485,9 +518,18 @@ def load_long_checkpoint(
         "rng_state"
     )
 
+    set_learning_rate(
+        optimizer,
+        min(
+            scheduler["last_step"] + 1,
+            TARGET_STEPS,
+        ),
+    )
+
     return (
         step,
         tokens_seen,
+        base_tokens_seen,
         train_loss,
         best_val_loss,
         rng_state,
@@ -545,9 +587,7 @@ def main():
         model
     )
 
-    scheduler = build_scheduler(
-        optimizer
-    )
+    scheduler = build_scheduler()
 
     scaler = torch.amp.GradScaler(
         "cuda",
@@ -561,6 +601,7 @@ def main():
 
     start_step = 0
     tokens_seen = 0
+    base_tokens_seen = 0
     last_train_loss = 0.0
     best_val_loss = float("inf")
 
@@ -569,6 +610,7 @@ def main():
         (
             start_step,
             tokens_seen,
+            base_tokens_seen,
             last_train_loss,
             best_val_loss,
             rng_state,
@@ -613,6 +655,7 @@ def main():
         )
 
         tokens_seen = previous_tokens
+        base_tokens_seen = previous_tokens
         last_train_loss = previous_train_loss
 
         restore_rng_state(
@@ -623,6 +666,12 @@ def main():
             optimizer,
             scheduler,
             0,
+        )
+
+        # First optimizer update uses warmup step 1.
+        set_learning_rate(
+            optimizer,
+            1,
         )
 
         print(
@@ -656,6 +705,7 @@ def main():
     print("=" * 72)
     print("NOVA LARGE — LONG PRETRAINING")
     print("=" * 72)
+
     print(
         f"Device: {device}"
     )
@@ -739,11 +789,15 @@ def main():
 
     window_tokens = 0
 
+    step = start_step
+
     try:
+
         for step in range(
             start_step + 1,
             TARGET_STEPS + 1,
         ):
+
             if STOP_REQUESTED:
                 break
 
@@ -754,11 +808,12 @@ def main():
             for _ in range(
                 GRADIENT_ACCUMULATION_STEPS
             ):
+
                 if STOP_REQUESTED:
                     break
 
                 try:
-                    input_ids, target_ids = next(
+                    batch = next(
                         train_iterator
                     )
 
@@ -767,9 +822,17 @@ def main():
                         train_loader
                     )
 
-                    input_ids, target_ids = next(
+                    batch = next(
                         train_iterator
                     )
+
+                input_ids = batch[
+                    "input_ids"
+                ]
+
+                target_ids = batch[
+                    "target_ids"
+                ]
 
                 input_ids = input_ids.to(
                     device,
@@ -786,6 +849,7 @@ def main():
                     dtype=AMP_DTYPE,
                     enabled=device.type == "cuda",
                 ):
+
                     _, loss = model(
                         input_ids,
                         target_ids,
@@ -797,10 +861,13 @@ def main():
                     )
 
                 if device.type == "cuda":
+
                     scaler.scale(
                         loss_for_backward
                     ).backward()
+
                 else:
+
                     loss_for_backward.backward()
 
                 accumulated_loss += (
@@ -818,6 +885,7 @@ def main():
                 break
 
             if device.type == "cuda":
+
                 scaler.unscale_(
                     optimizer
                 )
@@ -828,18 +896,36 @@ def main():
             )
 
             if device.type == "cuda":
+
                 scaler.step(
                     optimizer
                 )
+
                 scaler.update()
+
             else:
+
                 optimizer.step()
 
             optimizer.zero_grad(
                 set_to_none=True
             )
 
-            scheduler.step()
+            scheduler["last_step"] = step
+
+            if step < TARGET_STEPS:
+
+                set_learning_rate(
+                    optimizer,
+                    step + 1,
+                )
+
+            else:
+
+                set_learning_rate(
+                    optimizer,
+                    step,
+                )
 
             last_train_loss = (
                 accumulated_loss
@@ -853,7 +939,10 @@ def main():
 
             tokens_per_second = (
                 window_tokens
-                / max(elapsed, 1e-9)
+                / max(
+                    elapsed,
+                    1e-9,
+                )
             )
 
             completed_steps = (
@@ -869,7 +958,8 @@ def main():
             )
 
             remaining_steps = (
-                TARGET_STEPS - step
+                TARGET_STEPS
+                - step
             )
 
             eta = (
@@ -886,9 +976,11 @@ def main():
                 or step % PRINT_INTERVAL == 0
                 or step == TARGET_STEPS
             ):
+
                 memory = ""
 
                 if device.type == "cuda":
+
                     allocated = (
                         torch.cuda
                         .memory_allocated()
@@ -931,6 +1023,7 @@ def main():
             )
 
             if should_validate:
+
                 validation_loss, validation_ppl = (
                     evaluate(
                         model,
@@ -946,6 +1039,7 @@ def main():
                 )
 
                 if validation_loss < best_val_loss:
+
                     previous_best = best_val_loss
 
                     best_val_loss = (
@@ -962,6 +1056,7 @@ def main():
                         best_val_loss,
                         last_train_loss,
                         tokens_seen,
+                        base_tokens_seen,
                     )
 
                     print(
@@ -975,7 +1070,8 @@ def main():
                     )
 
                     print(
-                        f"Saved: {BEST_CHECKPOINT}"
+                        f"Saved: "
+                        f"{BEST_CHECKPOINT}"
                     )
 
             should_checkpoint = (
@@ -984,6 +1080,7 @@ def main():
             )
 
             if should_checkpoint:
+
                 save_checkpoint(
                     LONG_CHECKPOINT,
                     model,
@@ -994,6 +1091,7 @@ def main():
                     best_val_loss,
                     last_train_loss,
                     tokens_seen,
+                    base_tokens_seen,
                 )
 
                 print(
@@ -1002,10 +1100,13 @@ def main():
                 )
 
     except KeyboardInterrupt:
+
         STOP_REQUESTED = True
 
     finally:
+
         if STOP_REQUESTED:
+
             current_step = (
                 step
                 if "step" in locals()
@@ -1022,6 +1123,7 @@ def main():
                 best_val_loss,
                 last_train_loss,
                 tokens_seen,
+                base_tokens_seen,
             )
 
             print(
@@ -1036,18 +1138,26 @@ def main():
 
     new_tokens = (
         tokens_seen
-        - (
-            50_003_968
-        )
+        - base_tokens_seen
     )
 
     print()
     print("=" * 72)
 
     if STOP_REQUESTED:
-        print("LONG TRAINING STOPPED SAFELY")
-    elif start_step + TARGET_STEPS >= TARGET_STEPS:
-        print("LONG TRAINING COMPLETE")
+
+        print(
+            "LONG TRAINING STOPPED SAFELY"
+        )
+
+    elif (
+        "step" in locals()
+        and step >= TARGET_STEPS
+    ):
+
+        print(
+            "LONG TRAINING COMPLETE"
+        )
 
     print("=" * 72)
 
