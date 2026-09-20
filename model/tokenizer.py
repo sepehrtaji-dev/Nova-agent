@@ -399,7 +399,7 @@ class ByteBPETokenizer:
 
         return tokens
 
-    def decode(self, token_ids: list[int]) -> str:
+    def decode(self, token_ids):
         byte_data = bytearray()
 
         for token_id in token_ids:
@@ -411,25 +411,35 @@ class ByteBPETokenizer:
             if token in self.SPECIAL_TOKENS:
                 continue
 
-            byte_data.extend(
-                self._token_to_bytes(token)
-            )
+            byte_data.extend(self._token_to_bytes(token))
 
-        return byte_data.decode(
-            "utf-8",
-            errors="replace",
-        )
+        return byte_data.decode("utf-8", errors="replace")
 
-    def _token_to_bytes(self, token: str) -> bytes:
+
+    def _token_to_bytes(self, token):
+        if not token:
+            return b""
+
         result = bytearray()
 
-        for match in re.finditer(
-            r"<0x([0-9A-F]{2})>",
-            token,
-        ):
-            result.append(
-                int(match.group(1), 16)
-            )
+        i = 0
+
+        while i < len(token):
+            if (
+                token.startswith("<0x", i)
+                and i + 6 <= len(token)
+                and token[i + 5] == ">"
+            ):
+                hex_value = token[i + 3:i + 5]
+
+                try:
+                    result.append(int(hex_value, 16))
+                except ValueError:
+                    pass
+
+                i += 6
+            else:
+                i += 1
 
         return bytes(result)
 
@@ -470,16 +480,10 @@ class ByteBPETokenizer:
             )
 
     @classmethod
-    def load(
-        cls,
-        path: str | Path,
-    ) -> "ByteBPETokenizer":
+    def load(cls, path):    
         path = Path(path)
 
-        with path.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
+        with path.open("r", encoding="utf-8") as file:
             data = json.load(file)
 
         config_data = data["config"]
@@ -493,28 +497,22 @@ class ByteBPETokenizer:
 
         tokenizer.token_to_id = {
             token: int(token_id)
-            for token, token_id
-            in data["token_to_id"].items()
+            for token, token_id in data["token_to_id"].items()
         }
 
         tokenizer.id_to_token = {
             token_id: token
-            for token_id, token
-            in tokenizer.token_to_id.items()
+            for token, token_id in tokenizer.token_to_id.items()
         }
 
         tokenizer.merges = {
-            (
-                item["left"],
-                item["right"],
-            ): item["merged"]
+            (item["left"], item["right"]): item["merged"]
             for item in data["merges"]
         }
 
         tokenizer.merge_ranks = {
             pair: rank
-            for rank, pair
-            in enumerate(tokenizer.merges)
+            for rank, pair in enumerate(tokenizer.merges)
         }
 
         return tokenizer
