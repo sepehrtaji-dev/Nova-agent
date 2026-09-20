@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
+from heapq import heappop, heappush
 from pathlib import Path
+from typing import Iterable
 import json
 import re
-from typing import Iterable
 
 
 @dataclass
@@ -29,6 +30,7 @@ class ByteBPETokenizer:
         self.config = config or TokenizerConfig()
 
         self.token_to_id = dict(self.SPECIAL_TOKENS)
+
         self.id_to_token = {
             token_id: token
             for token, token_id in self.token_to_id.items()
@@ -48,22 +50,7 @@ class ByteBPETokenizer:
         data = word.encode("utf-8")
         return [f"<0x{byte:02X}>" for byte in data]
 
-    def _pair_counts(
-        self,
-        sequences: list[tuple[list[str], int]],
-    ) -> Counter[tuple[str, str]]:
-        counts: Counter[tuple[str, str]] = Counter()
-
-        for sequence, frequency in sequences:
-            if frequency <= 0:
-                continue
-
-            for i in range(len(sequence) - 1):
-                counts[(sequence[i], sequence[i + 1])] += frequency
-
-        return counts
-
-    def _add_base_tokens(self) -> None:
+    def _add_byte_tokens(self) -> None:
         for byte in range(self.BYTE_TOKEN_COUNT):
             token = f"<0x{byte:02X}>"
 
@@ -77,78 +64,187 @@ class ByteBPETokenizer:
         texts: Iterable[str],
         max_unique_words: int | None = None,
     ) -> None:
-        if texts is None:
-            raise ValueError("Training data cannot be empty.")
-
-        limit = (
-            self.config.max_unique_words
-            if max_unique_words is None
-            else max_unique_words
+        max_unique_words = (
+            max_unique_words
+            if max_unique_words is not None
+            else self.config.max_unique_words
         )
 
-        if limit <= 0:
-            raise ValueError("max_unique_words must be greater than 0.")
+        print()
+        print("=" * 60)
+        print("TOKENIZER TRAINING")
+        print("=" * 60)
+        print()
+        print("Stage 1/3: collecting word statistics...")
 
-        word_frequencies: Counter[str] = Counter()
+        word_counts: Counter[str] = Counter()
+        documents = 0
+        total_words = 0
 
         for text in texts:
             if not isinstance(text, str):
                 continue
 
+            documents += 1
+
             for word in self._split_words(text):
                 if not word:
                     continue
 
-                if word in word_frequencies:
-                    word_frequencies[word] += 1
-                elif len(word_frequencies) < limit:
-                    word_frequencies[word] = 1
+                total_words += 1
 
-        if not word_frequencies:
+                if word in word_counts:
+                    word_counts[word] += 1
+                    continue
+
+                if len(word_counts) < max_unique_words:
+                    word_counts[word] = 1
+
+            if documents % 1000 == 0:
+                print(
+                    f"\rDocuments processed: {documents:,} | "
+                    f"Unique words: {len(word_counts):,}",
+                    end="",
+                    flush=True,
+                )
+
+        print()
+
+        if not word_counts:
             raise ValueError("No usable text was found.")
 
-        self._add_base_tokens()
+        print()
+        print(f"Documents processed: {documents:,}")
+        print(f"Total words: {total_words:,}")
+        print(f"Unique words: {len(word_counts):,}")
 
-        sequences: list[tuple[list[str], int]] = [
-            (self._word_to_symbols(word), frequency)
-            for word, frequency in word_frequencies.items()
+        self._add_byte_tokens()
+
+        print()
+        print("Stage 2/3: building BPE statistics...")
+
+        words = list(word_counts.keys())
+        frequencies = [word_counts[word] for word in words]
+
+        sequences = [
+            self._word_to_symbols(word)
+            for word in words
         ]
 
-        del word_frequencies
+        pair_counts: Counter[tuple[str, str]] = Counter()
+        pair_words: dict[tuple[str, str], set[int]] = defaultdict(set)
 
-        while len(self.token_to_id) < self.config.vocab_size:
-            pair_counts = self._pair_counts(sequences)
+        for word_id, sequence in enumerate(sequences):
+            frequency = frequencies[word_id]
 
-            if not pair_counts:
+            for i in range(len(sequence) - 1):
+                pair = (sequence[i], sequence[i + 1])
+                pair_counts[pair] += frequency
+                pair_words[pair].add(word_id)
+
+            if word_id % 10000 == 0:
+                print(
+                    f"\rWords indexed: {word_id:,} / {len(words):,}",
+                    end="",
+                    flush=True,
+                )
+
+        print()
+        print(f"Unique pairs: {len(pair_counts):,}")
+
+        print()
+        print("Stage 3/3: training BPE merges...")
+
+        heap = []
+        heap_order = 0
+
+        for pair, count in pair_counts.items():
+            heappush(
+                heap,
+                (-count, heap_order, pair),
+            )
+            heap_order += 1
+
+        target_merges = max(
+            0,
+            self.config.vocab_size - self.vocab_size,
+        )
+
+        print(f"Target merges: {target_merges:,}")
+        print()
+
+        for merge_index in range(target_merges):
+            pair = None
+
+            while heap:
+                negative_count, _, candidate = heappop(heap)
+                current_count = pair_counts.get(candidate, 0)
+
+                if current_count <= 0:
+                    continue
+
+                if -negative_count != current_count:
+                    heappush(
+                        heap,
+                        (-current_count, heap_order, candidate),
+                    )
+                    heap_order += 1
+                    continue
+
+                pair = candidate
                 break
 
-            pair, frequency = pair_counts.most_common(1)[0]
+            if pair is None:
+                print("No more valid pairs.")
+                break
+
+            frequency = pair_counts[pair]
 
             if frequency < self.config.min_frequency:
+                print(
+                    f"Stopping: best pair frequency "
+                    f"{frequency} < minimum {self.config.min_frequency}."
+                )
                 break
 
-            merged = pair[0] + pair[1]
+            left, right = pair
+            merged = left + right
 
             if merged in self.token_to_id:
-                break
+                pair_counts[pair] = 0
+                continue
 
             self.merges[pair] = merged
-            self.merge_ranks[pair] = len(self.merge_ranks)
+            self.merge_ranks[pair] = len(self.merges)
 
             token_id = len(self.token_to_id)
+
             self.token_to_id[merged] = token_id
             self.id_to_token[token_id] = merged
 
-            updated_sequences: list[tuple[list[str], int]] = []
+            affected_words = list(
+                pair_words.get(pair, ())
+            )
 
-            for sequence, word_frequency in sequences:
-                new_sequence: list[str] = []
+            for word_id in affected_words:
+                sequence = sequences[word_id]
+                word_frequency = frequencies[word_id]
+
+                old_pairs = []
+
+                for i in range(len(sequence) - 1):
+                    old_pairs.append(
+                        (sequence[i], sequence[i + 1])
+                    )
+
                 i = 0
+                new_sequence = []
 
                 while i < len(sequence):
                     if (
                         i < len(sequence) - 1
-                        and (sequence[i], sequence[i + 1]) == pair
+                        and sequence[i] == left
+                        and sequence[i + 1] == right
                     ):
                         new_sequence.append(merged)
                         i += 2
@@ -156,30 +252,106 @@ class ByteBPETokenizer:
                         new_sequence.append(sequence[i])
                         i += 1
 
-                updated_sequences.append((new_sequence, word_frequency))
+                sequences[word_id] = new_sequence
 
-            sequences = updated_sequences
+                new_pairs = []
 
-        del sequences
+                for i in range(len(new_sequence) - 1):
+                    new_pairs.append(
+                        (
+                            new_sequence[i],
+                            new_sequence[i + 1],
+                        )
+                    )
 
-    def _apply_merges(self, symbols: list[str]) -> list[str]:
+                for old_pair in old_pairs:
+                    pair_counts[old_pair] -= word_frequency
+
+                    if pair_counts[old_pair] <= 0:
+                        pair_counts.pop(old_pair, None)
+                        pair_words.pop(old_pair, None)
+
+                    else:
+                        heappush(
+                            heap,
+                            (
+                                -pair_counts[old_pair],
+                                heap_order,
+                                old_pair,
+                            ),
+                        )
+                        heap_order += 1
+
+                    ids = pair_words.get(old_pair)
+
+                    if ids is not None:
+                        ids.discard(word_id)
+
+                        if not ids:
+                            pair_words.pop(old_pair, None)
+
+                for new_pair in new_pairs:
+                    pair_counts[new_pair] += word_frequency
+                    pair_words[new_pair].add(word_id)
+
+                    heappush(
+                        heap,
+                        (
+                            -pair_counts[new_pair],
+                            heap_order,
+                            new_pair,
+                        ),
+                    )
+                    heap_order += 1
+
+            pair_counts.pop(pair, None)
+            pair_words.pop(pair, None)
+
+            completed = merge_index + 1
+
+            if (
+                completed <= 10
+                or completed % 100 == 0
+                or completed == target_merges
+            ):
+                print(
+                    f"Merge {completed:,} / "
+                    f"{target_merges:,} | "
+                    f"Pair frequency: {frequency:,} | "
+                    f"Vocabulary: {self.vocab_size:,}",
+                    flush=True,
+                )
+
+        print()
+        print("Tokenizer training finished.")
+        print(f"Final vocabulary: {self.vocab_size:,}")
+        print(f"Total merges: {len(self.merges):,}")
+
+    def _apply_merges(
+        self,
+        symbols: list[str],
+    ) -> list[str]:
         symbols = symbols[:]
 
         while len(symbols) > 1:
             best_pair = None
-            best_order = None
-            best_index = -1
+            best_rank = None
+            best_index = None
 
             for i in range(len(symbols) - 1):
-                pair = (symbols[i], symbols[i + 1])
-                order = self.merge_ranks.get(pair)
+                pair = (
+                    symbols[i],
+                    symbols[i + 1],
+                )
 
-                if order is None:
+                rank = self.merge_ranks.get(pair)
+
+                if rank is None:
                     continue
 
-                if best_order is None or order < best_order:
+                if best_rank is None or rank < best_rank:
                     best_pair = pair
-                    best_order = order
+                    best_rank = rank
                     best_index = i
 
             if best_pair is None:
@@ -204,7 +376,9 @@ class ByteBPETokenizer:
         tokens = []
 
         if add_bos:
-            tokens.append(self.SPECIAL_TOKENS["<bos>"])
+            tokens.append(
+                self.SPECIAL_TOKENS["<bos>"]
+            )
 
         for word in self._split_words(text):
             symbols = self._word_to_symbols(word)
@@ -215,10 +389,13 @@ class ByteBPETokenizer:
                     symbol,
                     self.SPECIAL_TOKENS["<unk>"],
                 )
+
                 tokens.append(token_id)
 
         if add_eos:
-            tokens.append(self.SPECIAL_TOKENS["<eos>"])
+            tokens.append(
+                self.SPECIAL_TOKENS["<eos>"]
+            )
 
         return tokens
 
@@ -234,15 +411,25 @@ class ByteBPETokenizer:
             if token in self.SPECIAL_TOKENS:
                 continue
 
-            byte_data.extend(self._token_to_bytes(token))
+            byte_data.extend(
+                self._token_to_bytes(token)
+            )
 
-        return byte_data.decode("utf-8", errors="replace")
+        return byte_data.decode(
+            "utf-8",
+            errors="replace",
+        )
 
     def _token_to_bytes(self, token: str) -> bytes:
         result = bytearray()
 
-        for match in re.finditer(r"<0x([0-9A-F]{2})>", token):
-            result.append(int(match.group(1), 16))
+        for match in re.finditer(
+            r"<0x([0-9A-F]{2})>",
+            token,
+        ):
+            result.append(
+                int(match.group(1), 16)
+            )
 
         return bytes(result)
 
@@ -266,9 +453,15 @@ class ByteBPETokenizer:
             ],
         }
 
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        with path.open("w", encoding="utf-8") as file:
+        with path.open(
+            "w",
+            encoding="utf-8",
+        ) as file:
             json.dump(
                 data,
                 file,
@@ -277,10 +470,16 @@ class ByteBPETokenizer:
             )
 
     @classmethod
-    def load(cls, path: str | Path) -> "ByteBPETokenizer":
+    def load(
+        cls,
+        path: str | Path,
+    ) -> "ByteBPETokenizer":
         path = Path(path)
 
-        with path.open("r", encoding="utf-8") as file:
+        with path.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
             data = json.load(file)
 
         config_data = data["config"]
@@ -289,26 +488,33 @@ class ByteBPETokenizer:
             config_data["max_unique_words"] = 200000
 
         config = TokenizerConfig(**config_data)
+
         tokenizer = cls(config)
 
         tokenizer.token_to_id = {
             token: int(token_id)
-            for token, token_id in data["token_to_id"].items()
+            for token, token_id
+            in data["token_to_id"].items()
         }
 
         tokenizer.id_to_token = {
             token_id: token
-            for token, token_id in tokenizer.token_to_id.items()
+            for token_id, token
+            in tokenizer.token_to_id.items()
         }
 
         tokenizer.merges = {
-            (item["left"], item["right"]): item["merged"]
+            (
+                item["left"],
+                item["right"],
+            ): item["merged"]
             for item in data["merges"]
         }
 
         tokenizer.merge_ranks = {
             pair: rank
-            for rank, pair in enumerate(tokenizer.merges)
+            for rank, pair
+            in enumerate(tokenizer.merges)
         }
 
         return tokenizer
