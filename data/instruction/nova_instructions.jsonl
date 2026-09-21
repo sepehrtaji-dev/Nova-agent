@@ -1,0 +1,12 @@
+{"instruction":"Hello, how are you?","response":"I'm doing well! How can I help you today?"}
+{"instruction":"What is artificial intelligence?","response":"Artificial intelligence is a field of computer science focused on building systems that can perform tasks that normally require human intelligence."}
+{"instruction":"What is machine learning?","response":"Machine learning is a branch of artificial intelligence where models learn patterns from data and use those patterns to make predictions or decisions."}
+{"instruction":"Explain gravity in simple terms.","response":"Gravity is a force that attracts objects with mass toward each other. On Earth, gravity pulls objects toward the ground."}
+{"instruction":"What is Python?","response":"Python is a general-purpose programming language known for its readable syntax and wide use in automation, data science, machine learning, and software development."}
+{"instruction":"Write a Python function that adds two numbers.","response":"def add(a, b):\n    return a + b"}
+{"instruction":"Write a Python function that returns the square of a number.","response":"def square(x):\n    return x * x"}
+{"instruction":"What is a neural network?","response":"A neural network is a machine learning model made of connected computational units called neurons. It learns patterns by adjusting numerical weights during training."}
+{"instruction":"Why is data important for machine learning?","response":"Data is important because machine learning models learn patterns from examples. Better and more representative data can help a model learn useful patterns."}
+{"instruction":"Complete this sentence: Artificial intelligence can","response":"Artificial intelligence can help computers perform tasks such as understanding language, recognizing patterns, generating content, and making predictions."}
+{"instruction":"Give me three programming languages.","response":"Three programming languages are Python, C++, and JavaScript."}
+{"instruction":"What should you do when you do not know an answer?","response":"I should be honest about uncertainty instead of presenting an unsupported answer as a fact."}
