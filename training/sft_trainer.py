@@ -16,7 +16,7 @@ from training.instruction_dataset import (
 
 
 CHECKPOINT_PATH = "data/checkpoints/best.pt"
-OUTPUT_PATH = "data/checkpoints/sft_test.pt"
+OUTPUT_PATH = "data/checkpoints/best.pt"
 
 TOKENIZER_PATH = "data/tokenizer/nova_tokenizer.json"
 DATASET_PATH = "data/instruction/nova_instructions.jsonl"
@@ -116,7 +116,7 @@ def save_checkpoint(
         "config": ModelConfig().__dict__,
     }
 
-    temp_path = OUTPUT_PATH + ".tmp"
+    temp_path = OUTPUT_PATH + ".sft_tmp"
 
     torch.save(
         checkpoint,
@@ -184,9 +184,6 @@ def main():
     optimizer_step = 0
     micro_step = 0
 
-    epoch_loss = 0.0
-    accumulated_loss = 0.0
-
     start_time = time.time()
 
     for epoch in range(EPOCHS):
@@ -200,6 +197,7 @@ def main():
 
         epoch_loss = 0.0
         accumulated_loss = 0.0
+        accumulated_batches = 0
 
         for batch_idx, batch in enumerate(
             dataloader
@@ -233,6 +231,7 @@ def main():
 
             epoch_loss += loss_value
             accumulated_loss += loss_value
+            accumulated_batches += 1
 
             loss_for_backward = (
                 loss
@@ -274,18 +273,11 @@ def main():
 
                 average_loss = (
                     accumulated_loss
-                    / min(
-                        GRADIENT_ACCUMULATION,
-                        micro_step
-                        % GRADIENT_ACCUMULATION
-                        if micro_step
-                        % GRADIENT_ACCUMULATION
-                        != 0
-                        else GRADIENT_ACCUMULATION,
-                    )
+                    / accumulated_batches
                 )
 
                 accumulated_loss = 0.0
+                accumulated_batches = 0
 
                 if (
                     optimizer_step
@@ -341,7 +333,7 @@ def main():
 
     print()
     print("=" * 72)
-    print("SFT TEST COMPLETE")
+    print("SFT COMPLETE")
     print("=" * 72)
     print(
         f"Epochs: {EPOCHS}"
