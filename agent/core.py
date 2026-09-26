@@ -14,41 +14,55 @@ class NovaCore:
 
         self.memory = MemoryManager()
 
-        self.extractor = MemoryExtractor()
+        self.extractor = MemoryExtractor(
+            self.brain
+        )
 
 
 
-    def ask(self,message):
+    def ask(self, message):
 
 
-        memories = self.extractor.extract(
+        extracted = self.extractor.extract(
             message
         )
 
 
-        for memory in memories:
+        for item in extracted.get(
+            "memories",
+            []
+        ):
 
             self.memory.remember(
-                *memory
+                item["category"],
+                item["key"],
+                item["value"]
             )
 
 
-        context = self.memory.get_memory()
+        memory_context = self.memory.get_memory()
+
 
 
         prompt = f"""
 
-You are Nova, a local AI agent.
+You are Nova.
 
-User memory:
-{context}
+You are a local AI agent powered by Llama 3.2:3B.
+
+Use this user memory when relevant:
+
+{memory_context}
 
 
-User:
+User message:
+
 {message}
 
 Answer naturally.
 """
 
 
-        return self.brain.generate(prompt)
+        return self.brain.generate(
+            prompt
+        )

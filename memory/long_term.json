@@ -1,8 +1,16 @@
 {
     "profile": {
-        "name": "sepehr"
+        "name": "Sepehr",
+        "age": "14"
     },
-    "projects": [],
+    "projects": [
+        {
+            "chess-model": {
+                "description": "a project called chess-model"
+            }
+        }
+    ],
+    "skills": [],
     "preferences": [],
     "facts": []
 }

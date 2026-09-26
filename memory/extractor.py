@@ -1,54 +1,65 @@
-import re
+import json
 
 
 class MemoryExtractor:
 
+    def __init__(self, brain):
+        self.brain = brain
+
 
     def extract(self, text):
 
-        memories = []
+        prompt = f"""
+You are Nova's memory system.
+
+Analyze the user's message.
+
+Extract ONLY useful long-term memories.
+
+Store things like:
+- name
+- skills
+- projects
+- hardware
+- preferences
+- important facts
+
+Do NOT store:
+- greetings
+- temporary questions
+- casual conversation
 
 
-        patterns = [
+Return ONLY valid JSON.
 
-            (
-                "profile",
-                "name",
-                r"my name is (.+)"
-            ),
+Format:
 
-            (
-                "projects",
-                "project",
-                r"i am working on (.+)"
-            ),
-
-            (
-                "skills",
-                "skill",
-                r"i know (.+)"
-            )
-
-        ]
+{{
+    "memories": [
+        {{
+            "category": "profile",
+            "key": "name",
+            "value": "example"
+        }}
+    ]
+}}
 
 
-        for category,key,pattern in patterns:
+User message:
 
-            result = re.search(
-                pattern,
-                text,
-                re.I
-            )
-
-            if result:
-
-                memories.append(
-                    (
-                        category,
-                        key,
-                        result.group(1)
-                    )
-                )
+{text}
+"""
 
 
-        return memories
+        response = self.brain.generate(prompt)
+
+
+        try:
+            data = json.loads(response)
+            return data
+
+        except Exception:
+
+            return {
+                "memories": []
+            }

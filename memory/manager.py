@@ -7,6 +7,7 @@ class MemoryManager:
     def __init__(self):
 
         self.storage = MemoryStorage()
+
         self.data = self.storage.load()
 
 
@@ -18,15 +19,24 @@ class MemoryManager:
         value
     ):
 
-        if category == "profile":
+        if category not in self.data:
 
-            self.data["profile"][key] = value
+            self.data[category] = {}
+
+
+        if isinstance(
+            self.data[category],
+            dict
+        ):
+
+            self.data[category][key] = value
+
 
         else:
 
             self.data[category].append(
                 {
-                    key: value
+                    key:value
                 }
             )
 
