@@ -8,9 +8,19 @@
             "chess-model": {
                 "description": "a project called chess-model"
             }
+        },
+        {
+            "programming_languages": "Python"
         }
     ],
-    "skills": [],
+    "skills": [
+        {
+            "project": "run"
+        }
+    ],
     "preferences": [],
-    "facts": []
+    "facts": [],
+    "hardware": {
+        "operating_systems": "Python 3.9"
+    }
 }

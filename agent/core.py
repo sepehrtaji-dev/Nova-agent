@@ -1,8 +1,8 @@
 from model.ollama import OllamaBrain
-
+from tools import load_tools
 from memory.manager import MemoryManager
 from memory.extractor import MemoryExtractor
-
+from memory.short_term import ShortTermMemory
 
 
 class NovaCore:
@@ -17,6 +17,10 @@ class NovaCore:
         self.extractor = MemoryExtractor(
             self.brain
         )
+
+        self.short_memory = ShortTermMemory()
+
+        self.tools = load_tools()
 
 
 
@@ -42,27 +46,43 @@ class NovaCore:
 
         memory_context = self.memory.get_memory()
 
+        available_tools = self.tools.get_descriptions()
+
+        self.short_memory.add("user",message)
 
 
+        conversation = self.short_memory.get()
         prompt = f"""
 
-You are Nova.
+You are Nova, a local AI agent.
 
-You are a local AI agent powered by Llama 3.2:3B.
 
-Use this user memory when relevant:
+Conversation history:
+
+{conversation}
+
+
+Long term memory:
 
 {memory_context}
 
 
-User message:
+Current user message:
 
 {message}
 
-Answer naturally.
+
+Answer naturally and remember the conversation.
 """
 
 
-        return self.brain.generate(
-            prompt
+        response = self.brain.generate(prompt)
+
+
+        self.short_memory.add(
+            "assistant",
+            response
         )
+
+
+        return response
