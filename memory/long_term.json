@@ -1,11 +1,12 @@
 {
     "profile": {
-        "name": "sepehr",
+        "name": "user_name",
         "age": "14",
         "powers": "qwen2.5:3b through qwen",
         "skills": "developer",
-        "projects": "developed Nova",
-        "hardware": "tools to access terminal, files and web search"
+        "projects": "Python calculator project",
+        "hardware": "tools to access terminal, files and web search",
+        "programming_languages": "Python"
     },
     "projects": [
         {
@@ -39,6 +40,18 @@
         },
         {
             "calc.py": "write a calculator on the desktop"
+        },
+        {
+            "name": "Python Calculator Project"
+        },
+        {
+            "Python calculator": "create a Python calculator project, run it, and fix any errors"
+        },
+        {
+            "Python calculator project": "Create a Python calculator project"
+        },
+        {
+            "name": "Python Calculator"
         }
     ],
     "skills": [
@@ -50,6 +63,9 @@
         },
         {
             "problem-solving": "example"
+        },
+        {
+            "programmingLanguages": "Python"
         }
     ],
     "preferences": [
@@ -93,6 +109,11 @@
         "file-name": "calc.py"
     },
     "actions": {
-        "saves": true
+        "saves": true,
+        "run project": "Run the created Python calculator project",
+        "fix errors": "Fix any errors in the Python calculator project"
+    },
+    "software_setup": {
+        "programming_language": "Python"
     }
 }

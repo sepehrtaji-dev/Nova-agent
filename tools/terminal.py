@@ -6,32 +6,17 @@ import json
 class TerminalTool:
     def __init__(self):
         self.history = []
-
         self.base_path = os.path.abspath(os.getcwd())
-
         self.projects_path = os.path.abspath(
-            os.path.join(
-                self.base_path,
-                "projects"
-            )
+            os.path.join(self.base_path, "projects")
         )
-
         self.desktop_path = os.path.abspath(
-            os.path.join(
-                os.path.expanduser("~"),
-                "Desktop"
-            )
+            os.path.join(os.path.expanduser("~"), "Desktop")
         )
-
-        os.makedirs(
-            self.projects_path,
-            exist_ok=True
-        )
+        os.makedirs(self.projects_path, exist_ok=True)
 
     def _get_cwd(self, location):
-        location = (
-            location or "projects"
-        ).lower().strip()
+        location = (location or "projects").lower().strip()
 
         if location == "desktop":
             return self.desktop_path
@@ -73,36 +58,56 @@ class TerminalTool:
 
         return False
 
-    def run(self, input_data):
-        if not isinstance(input_data, str):
-            return "Terminal error: input must be a string."
-
-        command = input_data.strip()
+    def _parse_input(self, input_data):
+        command = input_data
         location = "projects"
+        stdin_data = None
 
-        try:
-            data = json.loads(input_data)
+        if isinstance(input_data, dict):
+            command = input_data.get("command")
+            location = input_data.get("location", "projects")
+            stdin_data = input_data.get("input")
 
-            if isinstance(data, dict):
-                command = data.get("command")
-                location = data.get(
-                    "location",
-                    "projects"
-                )
+        elif isinstance(input_data, str):
+            text = input_data.strip()
 
-        except json.JSONDecodeError:
-            pass
+            try:
+                data = json.loads(text)
+
+                if isinstance(data, dict):
+                    command = data.get("command")
+                    location = data.get(
+                        "location",
+                        "projects"
+                    )
+                    stdin_data = data.get("input")
+
+            except json.JSONDecodeError:
+                command = input_data
 
         if not isinstance(command, str):
-            return "Terminal error: command must be a string."
-
-        command = command.strip()
-
-        if not command:
-            return "Terminal error: empty command."
+            return None, None, None
 
         if not isinstance(location, str):
             location = "projects"
+
+        if stdin_data is not None and not isinstance(
+            stdin_data,
+            str
+        ):
+            stdin_data = str(stdin_data)
+
+        return command.strip(), location.strip(), stdin_data
+
+    def run(self, input_data):
+        command, location, stdin_data = self._parse_input(
+            input_data
+        )
+
+        if not command:
+            return (
+                "Terminal error: command must be a non-empty string."
+            )
 
         if self._is_blocked(command):
             return "Command blocked for safety."
@@ -112,33 +117,50 @@ class TerminalTool:
 
             self.history.append({
                 "command": command,
-                "location": location
+                "location": location,
+                "input_provided": stdin_data is not None
             })
+
+            run_kwargs = {
+                "shell": True,
+                "cwd": cwd,
+                "capture_output": True,
+                "text": True,
+                "timeout": 20,
+            }
+
+            if stdin_data is None:
+                run_kwargs["stdin"] = subprocess.DEVNULL
+            else:
+                run_kwargs["input"] = stdin_data
 
             result = subprocess.run(
                 command,
-                shell=True,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=30
+                **run_kwargs
             )
 
             output_parts = [
                 f"Exit code: {result.returncode}",
-                f"Working directory: {cwd}"
+                f"Working directory: {cwd}",
             ]
+
+            if stdin_data is not None:
+                output_parts.append(
+                    "STDIN: PROVIDED"
+                )
+            else:
+                output_parts.append(
+                    "STDIN: EOF"
+                )
 
             if result.stdout.strip():
                 output_parts.append(
-                    "STDOUT:\n" +
-                    result.stdout.strip()
+                    "STDOUT:\n" + result.stdout.strip()
                 )
 
             if result.stderr.strip():
                 output_parts.append(
-                    "STDERR:\n" +
-                    result.stderr.strip()
+                    "STDERR:\n" + result.stderr.strip()
                 )
 
             if result.returncode == 0:
@@ -155,8 +177,14 @@ class TerminalTool:
         except subprocess.TimeoutExpired:
             return (
                 "STATUS: ERROR\n"
-                "Terminal command timed out after 30 seconds."
+                "Terminal command timed out after 20 seconds.\n"
+                "If the program is interactive, provide test input "
+                "through the terminal input field instead of waiting "
+                "for interactive user input."
             )
 
         except Exception as e:
-            return f"Terminal error: {e}"
+            return (
+                "Terminal error: "
+                f"{type(e).__name__}: {e}"
+            )

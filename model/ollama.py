@@ -1,9 +1,7 @@
-
 import ollama
 
 
 class OllamaBrain:
-
     def __init__(self, model="qwen2.5:3b"):
         self.model = model
 
@@ -18,8 +16,8 @@ You are Nova, a local AI agent.
 
 You are powered by qwen2.5:3b through Ollama.
 
-You have access to user memory and persistent knowledge
-when they are provided in the current prompt.
+You have access to user memory and persistent
+knowledge when they are provided in the current prompt.
 
 Use provided memory and knowledge when relevant.
 
@@ -31,13 +29,29 @@ memory, or system information.
                     "role": "user",
                     "content": prompt
                 }
-            ]
+            ],
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 4096
+            }
         }
 
         if json_mode:
             kwargs["format"] = "json"
 
-        response = ollama.chat(**kwargs)
+        try:
+            
+
+            response = ollama.chat(**kwargs)
+
+            
+
+        except Exception as e:
+            print(
+                f"[NOVA] Ollama error: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise
 
         content = response.get("message", {}).get("content", "")
 
@@ -45,4 +59,3 @@ memory, or system information.
             content = str(content)
 
         return content.strip()
-

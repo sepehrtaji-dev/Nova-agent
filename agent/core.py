@@ -7,6 +7,7 @@ from memory.extractor import MemoryExtractor
 from memory.short_term import ShortTermMemory
 from memory.knowledge import KnowledgeMemory
 from agent.router import ToolRouter
+from agent.planner import Planner
 from tools import load_tools
 
 
@@ -25,6 +26,7 @@ class NovaCore:
             self.brain,
             self.tools
         )
+        self.planner = Planner(self.brain)
 
         self.max_steps = 12
 
@@ -1000,6 +1002,38 @@ a real tool result proves it.
             f"Task type: {task_type}"
         )
 
+        plan = {
+            "goal": message,
+            "steps": []
+        }
+
+        if task_type == "computer":
+            self._status(
+                "Creating task plan..."
+            )
+
+            plan = self.planner.create_plan(
+                goal=message,
+                context=self.short_memory.get()
+            )
+
+            if not plan.get("steps"):
+                plan = {
+                    "goal": message,
+                    "steps": [
+                        {
+                            "id": 1,
+                            "description": message,
+                            "status": "pending",
+                            "result": None
+                        }
+                    ]
+                }
+
+            self._status(
+                "Plan ready..."
+            )
+
         completed = False
         last_tool_error = None
         web_search_used = False
@@ -1035,7 +1069,8 @@ a real tool result proves it.
                 task_type=task_type,
                 conversation=conversation,
                 knowledge=knowledge_context,
-                tool_history=history
+                tool_history=history,
+                plan=self.planner.get_plan_summary(plan)
             )
 
             if not isinstance(
@@ -1477,6 +1512,33 @@ Tool success:
 """
             )
 
+            current_step = self.planner.get_next_step(
+                plan
+            )
+
+            current_step_id = (
+                current_step.get("id")
+                if isinstance(current_step, dict)
+                else None
+            )
+
+            if current_step_id is not None and succeeded:
+                self.planner.update_step(
+                    plan,
+                    current_step_id,
+                    result,
+                    status="completed"
+                )
+
+            plan = self.planner.replan(
+                plan=plan,
+                goal=message,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                result=result,
+                success=succeeded
+            )
+
             if not succeeded:
 
                 last_tool_error = (
@@ -1641,6 +1703,9 @@ Tool success:
                                 self._status(
                                     "File verification failed..."
                                 )
+
+        if task_type == "computer" and self.planner.is_complete(plan):
+            completed = True
 
         knowledge_context = (
             self.knowledge.get_context(

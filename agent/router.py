@@ -189,15 +189,38 @@ class ToolRouter:
 
                 if command:
 
+                    stdin_match = re.search(
+                        r"""
+                        (?:input|stdin)
+                        \s*=\s*
+                        (?:
+                            "([^"]*)"
+                            |
+                            '([^']*)'
+                        )
+                        """,
+                        arguments,
+                        flags=re.IGNORECASE | re.VERBOSE
+                    )
+
+                    payload = {
+                        "command": command,
+                        "location": "projects"
+                    }
+
+                    if stdin_match:
+                        payload["input"] = (
+                            stdin_match.group(1)
+                            if stdin_match.group(1) is not None
+                            else stdin_match.group(2)
+                        )
+
                     return {
                         "action": "tool",
                         "task_type": "computer",
                         "tool": "terminal",
                         "input": json.dumps(
-                            {
-                                "command": command,
-                                "location": "projects"
-                            },
+                            payload,
                             ensure_ascii=False
                         )
                     }
@@ -783,7 +806,8 @@ USER REQUEST:
         task_type,
         conversation,
         knowledge,
-        tool_history
+        tool_history,
+        plan="No plan."
     ):
 
         has_tool_result = bool(
@@ -810,6 +834,18 @@ You are Nova's autonomous action planner.
 Your ONLY job is to choose the NEXT REAL ACTION.
 
 You are NOT the final answer generator.
+
+TERMINAL INTERACTIVE PROGRAM RULE
+
+If a terminal command launches an interactive program
+that expects input, do not leave it waiting for a human.
+
+Prefer providing test input in the terminal input field,
+for example:
+{{"command":"python calc.py","input":"2+3\n"}}
+
+Or use a non-interactive command that tests the program.
+Never assume a command succeeded merely because it started.
 
 AVAILABLE TOOLS:
 
@@ -844,6 +880,15 @@ Never invent:
 - file contents
 - successful operations
 - web search results
+
+CURRENT PLAN:
+
+{plan}
+
+The plan describes the goal and ordered work.
+Use it to choose the next real tool action.
+Do not assume a plan step is complete unless
+the tool history contains real evidence.
 
 CURRENT STATE:
 
@@ -1154,7 +1199,8 @@ For conversation:
         self,
         message,
         task_type,
-        tool_history
+        tool_history,
+        plan="No plan."
     ):
 
         return f"""
@@ -1173,6 +1219,10 @@ USER REQUEST:
 REAL TOOL HISTORY:
 
 {tool_history}
+
+CURRENT PLAN:
+
+{plan}
 
 If the computer task is incomplete,
 choose the next real tool.
@@ -1430,7 +1480,8 @@ Generate the complete file now.
         task_type,
         conversation="",
         knowledge="",
-        tool_history=""
+        tool_history="",
+        plan="No plan."
     ):
 
         has_successful_tool = (
@@ -1444,7 +1495,8 @@ Generate the complete file now.
             task_type=task_type,
             conversation=conversation,
             knowledge=knowledge,
-            tool_history=tool_history
+            tool_history=tool_history,
+            plan=plan
         )
 
         try:
@@ -1545,7 +1597,8 @@ Generate the complete file now.
         repair_prompt = self._build_repair_prompt(
             message=message,
             task_type=task_type,
-            tool_history=tool_history
+            tool_history=tool_history,
+            plan=plan
         )
 
         try:
