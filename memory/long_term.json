@@ -1,7 +1,11 @@
 {
     "profile": {
-        "name": "example",
-        "age": "14"
+        "name": "sepehr",
+        "age": "14",
+        "powers": "qwen2.5:3b through qwen",
+        "skills": "developer",
+        "projects": "developed Nova",
+        "hardware": "tools to access terminal, files and web search"
     },
     "projects": [
         {
@@ -19,9 +23,6 @@
             "games": "Minecraft Version Update"
         },
         {
-            "ChatGPT Models": "Latest model is 'Chatterbot 3.1'"
-        },
-        {
             "chatgpt": "ChatGPT"
         },
         {
@@ -35,6 +36,9 @@
         },
         {
             "calculationProjectLocation": "desktop"
+        },
+        {
+            "calc.py": "write a calculator on the desktop"
         }
     ],
     "skills": [
@@ -51,6 +55,12 @@
     "preferences": [
         {
             "games": "Minecraft"
+        },
+        {
+            "user_preference": "create_files"
+        },
+        {
+            "terminal_command": "run it in terminal yourself"
         }
     ],
     "facts": [],
@@ -58,7 +68,8 @@
         "operating_systems": "Linux",
         "Web Search": "Google",
         "model": "latest model",
-        "desktop": "exists"
+        "desktop": "exists",
+        "operating_system": "Windows"
     },
     "calculations": {
         "previous-question": "what is 2131*56",

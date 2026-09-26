@@ -75,7 +75,7 @@ class KnowledgeMemory:
                 if word in text
             )
 
-            if score > 0:
+            if score >= 2:
                 results.append(
                     (score, item)
                 )

@@ -1,11 +1,11 @@
 import html
+import json
 import re
 import urllib.parse
 import urllib.request
 
 
 class WebSearchTool:
-
     def __init__(self):
         self.user_agent = (
             "Mozilla/5.0 "
@@ -14,16 +14,49 @@ class WebSearchTool:
             "Chrome/145.0 Safari/537.36"
         )
 
-    def run(self, query):
+    def _parse_input(self, input_data):
+        if isinstance(input_data, dict):
+            return input_data.get("query", "")
 
-        query = str(query).strip()
+        if not isinstance(input_data, str):
+            return ""
+
+        text = input_data.strip()
+
+        if not text:
+            return ""
+
+        try:
+            data = json.loads(text)
+
+            if isinstance(data, dict):
+                query = (
+                    data.get("query")
+                    or data.get("search")
+                    or data.get("q")
+                    or data.get("text")
+                    or ""
+                )
+
+                if isinstance(query, str):
+                    return query.strip()
+
+                return ""
+
+        except json.JSONDecodeError:
+            pass
+
+        return text
+
+    def run(self, input_data):
+        query = self._parse_input(input_data)
 
         if not query:
-            return "Search query is empty."
+            return "Web search error: Search query is empty."
 
-        encoded = urllib.parse.urlencode(
-            {"q": query}
-        )
+        encoded = urllib.parse.urlencode({
+            "q": query
+        })
 
         url = (
             "https://html.duckduckgo.com/html/"
@@ -38,52 +71,82 @@ class WebSearchTool:
         )
 
         try:
-
             with urllib.request.urlopen(
                 request,
                 timeout=15
             ) as response:
-
                 raw = response.read().decode(
                     "utf-8",
                     errors="ignore"
                 )
 
         except Exception as e:
-
             return (
-                "Web search failed: "
-                f"{e}"
+                "Web search error: "
+                f"{type(e).__name__}: {e}"
             )
 
-        pattern = re.compile(
+        result_pattern = re.compile(
+            r'<div[^>]+class="result[^"]*"[^>]*>'
+            r'.*?'
             r'<a[^>]+class="result__a"[^>]+'
             r'href="([^"]+)"[^>]*>'
-            r'(.*?)</a>',
-            re.IGNORECASE |
-            re.DOTALL
+            r'(.*?)'
+            r'</a>'
+            r'.*?'
+            r'<a[^>]+class="result__snippet"[^>]*>'
+            r'(.*?)'
+            r'</a>',
+            re.IGNORECASE | re.DOTALL
         )
 
-        matches = pattern.findall(raw)
+        matches = result_pattern.findall(raw)
 
         if not matches:
-            return "No web search results found."
+            fallback_pattern = re.compile(
+                r'<a[^>]+class="result__a"[^>]+'
+                r'href="([^"]+)"[^>]*>'
+                r'(.*?)'
+                r'</a>',
+                re.IGNORECASE | re.DOTALL
+            )
+
+            matches = [
+                (link, title, "")
+                for link, title
+                in fallback_pattern.findall(raw)
+            ]
+
+        if not matches:
+            return (
+                "Web search error: "
+                "No web search results found."
+            )
 
         results = []
 
-        for index, (link, title) in enumerate(
+        for index, (link, title, snippet) in enumerate(
             matches[:6],
             start=1
         ):
-
             title = re.sub(
                 r"<.*?>",
                 "",
                 title
             )
 
+            snippet = re.sub(
+                r"<.*?>",
+                "",
+                snippet
+            )
+
             title = html.unescape(
                 title
+            ).strip()
+
+            snippet = html.unescape(
+                snippet
             ).strip()
 
             link = html.unescape(
@@ -96,7 +159,8 @@ class WebSearchTool:
             results.append(
                 f"[{index}]\n"
                 f"Title: {title}\n"
-                f"URL: {link}"
+                f"URL: {link}\n"
+                f"Snippet: {snippet}"
             )
 
         return "\n\n".join(results)

@@ -1,3 +1,4 @@
+
 import json
 import re
 
@@ -7,31 +8,33 @@ class ToolRouter:
     def __init__(self, brain, tools):
         self.brain = brain
         self.tools = tools
+        self._last_file_generation = None
 
     def _extract_json(self, response):
+
         if not response:
             return None
 
         response = str(response).strip()
 
         response = re.sub(
-            r"^```json\s*",
+            r"^\s*```json\s*",
             "",
             response,
             flags=re.IGNORECASE
         )
 
         response = re.sub(
-            r"^```\s*",
+            r"^\s*```\s*",
             "",
             response
         )
 
         response = re.sub(
-            r"\s*```$",
+            r"\s*```\s*$",
             "",
             response
-        )
+        ).strip()
 
         try:
             data = json.loads(response)
@@ -42,26 +45,167 @@ class ToolRouter:
         except json.JSONDecodeError:
             pass
 
-        start = response.find("{")
-        end = response.rfind("}")
+        decoder = json.JSONDecoder()
 
-        if start == -1 or end == -1 or end <= start:
+        for index, char in enumerate(response):
+
+            if char != "{":
+                continue
+
+            try:
+                data, _ = decoder.raw_decode(
+                    response[index:]
+                )
+
+                if isinstance(data, dict):
+                    return data
+
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _extract_function_call(self, response):
+
+        if not response:
             return None
 
-        try:
-            data = json.loads(
-                response[start:end + 1]
+        text = str(response).strip()
+
+        pattern = re.compile(
+            r"\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*"
+            r"\(\s*(.*?)\s*\)\s*\]",
+            re.DOTALL
+        )
+
+        match = pattern.search(text)
+
+        if not match:
+            return None
+
+        tool_name = match.group(1).strip()
+        arguments = match.group(2).strip()
+
+        if not self.tools.exists(tool_name):
+            return None
+
+        if tool_name == "web_search":
+
+            query_match = re.search(
+                r"""
+                (?:query|search|q|text)
+                \s*=\s*
+                (?:
+                    "([^"]*)"
+                    |
+                    '([^']*)'
+                )
+                """,
+                arguments,
+                flags=re.IGNORECASE | re.VERBOSE
             )
 
-            if isinstance(data, dict):
-                return data
+            if query_match:
 
-        except json.JSONDecodeError:
-            return None
+                query = (
+                    query_match.group(1)
+                    if query_match.group(1) is not None
+                    else query_match.group(2)
+                )
+
+                query = query.strip()
+
+                if query:
+
+                    return {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": "web_search",
+                        "input": json.dumps(
+                            {
+                                "query": query
+                            },
+                            ensure_ascii=False
+                        )
+                    }
+
+            if arguments:
+
+                cleaned = arguments.strip()
+
+                if (
+                    cleaned.startswith('"')
+                    and cleaned.endswith('"')
+                ):
+                    cleaned = cleaned[1:-1]
+
+                elif (
+                    cleaned.startswith("'")
+                    and cleaned.endswith("'")
+                ):
+                    cleaned = cleaned[1:-1]
+
+                cleaned = cleaned.strip()
+
+                if cleaned:
+
+                    return {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": "web_search",
+                        "input": json.dumps(
+                            {
+                                "query": cleaned
+                            },
+                            ensure_ascii=False
+                        )
+                    }
+
+        if tool_name == "terminal":
+
+            command_match = re.search(
+                r"""
+                (?:command|cmd)
+                \s*=\s*
+                (?:
+                    "([^"]*)"
+                    |
+                    '([^']*)'
+                )
+                """,
+                arguments,
+                flags=re.IGNORECASE | re.VERBOSE
+            )
+
+            if command_match:
+
+                command = (
+                    command_match.group(1)
+                    if command_match.group(1) is not None
+                    else command_match.group(2)
+                )
+
+                command = command.strip()
+
+                if command:
+
+                    return {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": "terminal",
+                        "input": json.dumps(
+                            {
+                                "command": command,
+                                "location": "projects"
+                            },
+                            ensure_ascii=False
+                        )
+                    }
 
         return None
 
     def _normalize_task_type(self, value):
+
         if not isinstance(value, str):
             return None
 
@@ -85,6 +229,7 @@ class ToolRouter:
         return None
 
     def _normalize_action(self, value):
+
         if not isinstance(value, str):
             return None
 
@@ -113,13 +258,15 @@ class ToolRouter:
         return None
 
     def _has_successful_tool(self, tool_history):
+
         if not tool_history:
             return False
 
         markers = [
             "STATUS: SUCCESS",
             "FILE_CREATED",
-            "DIRECTORY_CREATED"
+            "DIRECTORY_CREATED",
+            "Tool: web_search"
         ]
 
         return any(
@@ -128,6 +275,7 @@ class ToolRouter:
         )
 
     def _get_tool_names(self):
+
         if not self.tools.tools:
             return []
 
@@ -136,6 +284,7 @@ class ToolRouter:
         )
 
     def _contains_placeholder(self, value):
+
         if not isinstance(value, str):
             return False
 
@@ -165,7 +314,9 @@ class ToolRouter:
         )
 
     def _normalize_tool_input(self, tool_input):
+
         if isinstance(tool_input, dict):
+
             return json.dumps(
                 tool_input,
                 ensure_ascii=False
@@ -179,11 +330,13 @@ class ToolRouter:
                 return None
 
             try:
+
                 parsed = json.loads(
                     stripped
                 )
 
                 if isinstance(parsed, dict):
+
                     return json.dumps(
                         parsed,
                         ensure_ascii=False
@@ -196,11 +349,73 @@ class ToolRouter:
 
         return None
 
+    def _normalize_web_search_input(self, tool_input):
+
+        if isinstance(tool_input, str):
+
+            stripped = tool_input.strip()
+
+            if not stripped:
+                return None
+
+            try:
+
+                parsed = json.loads(
+                    stripped
+                )
+
+                if isinstance(parsed, dict):
+                    tool_input = parsed
+
+                else:
+
+                    return json.dumps(
+                        {
+                            "query": stripped
+                        },
+                        ensure_ascii=False
+                    )
+
+            except json.JSONDecodeError:
+
+                return json.dumps(
+                    {
+                        "query": stripped
+                    },
+                    ensure_ascii=False
+                )
+
+        if not isinstance(tool_input, dict):
+            return None
+
+        query = (
+            tool_input.get("query")
+            or tool_input.get("search")
+            or tool_input.get("q")
+            or tool_input.get("text")
+        )
+
+        if not isinstance(query, str):
+            return None
+
+        query = query.strip()
+
+        if not query:
+            return None
+
+        return json.dumps(
+            {
+                "query": query
+            },
+            ensure_ascii=False
+        )
+
     def _validate_basic_tool_input(
         self,
         tool_name,
         tool_input
     ):
+
         if not isinstance(
             tool_input,
             dict
@@ -241,15 +456,27 @@ class ToolRouter:
                 "path"
             )
 
+            location = tool_input.get(
+                "location",
+                "projects"
+            )
+
             if not isinstance(
                 path,
                 str
             ):
                 return False
 
-            return bool(
-                path.strip()
-            )
+            if not path.strip():
+                return False
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False
+
+            return True
 
         if tool_name == "list_files":
 
@@ -258,10 +485,24 @@ class ToolRouter:
                 "."
             )
 
-            return isinstance(
+            location = tool_input.get(
+                "location",
+                "projects"
+            )
+
+            if not isinstance(
                 path,
                 str
-            )
+            ):
+                return False
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False
+
+            return True
 
         if tool_name == "create_directory":
 
@@ -308,27 +549,85 @@ class ToolRouter:
                 "command"
             )
 
+            location = tool_input.get(
+                "location",
+                "projects"
+            )
+
             if not isinstance(
                 command,
                 str
             ):
                 return False
 
-            return bool(
-                command.strip()
-            )
+            if not command.strip():
+                return False
 
-        if tool_name == "web_search":
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False
 
             return True
 
+        if tool_name == "web_search":
+
+            query = (
+                tool_input.get("query")
+                or tool_input.get("search")
+                or tool_input.get("q")
+                or tool_input.get("text")
+            )
+
+            return (
+                isinstance(query, str)
+                and bool(query.strip())
+            )
+
         return False
+
+    _search_intent_pattern = re.compile(
+        r"""
+        \b
+        (?:
+            web\s*search
+            | search\s+(?:the\s+)?(?:web|internet)
+            | search\s+(?:about|for|up)
+            | go\s+and\s+search
+            | google\s+
+            | look\s+up
+            | find\s+(?:about|information\s+about)
+        )
+        \b
+        """,
+        re.IGNORECASE | re.VERBOSE
+    )
+
+    def _has_search_intent(self, message):
+        if not isinstance(
+            message,
+            str
+        ):
+            return False
+
+        return bool(
+            self._search_intent_pattern.search(
+                message
+            )
+        )
 
     def classify_task(
         self,
         message,
         conversation=""
     ):
+
+        if self._has_search_intent(
+            message
+        ):
+            return "computer"
+
         prompt = f"""
 You are Nova's task classifier.
 
@@ -366,6 +665,7 @@ Use "computer" when the user asks Nova to:
 - inspect terminal output
 - work on a project
 - operate on the desktop
+- search the public web
 
 Use "conversation" when the user only wants:
 
@@ -381,7 +681,7 @@ Use "conversation" when the user only wants:
 
 If the user asks to CREATE, SAVE, MODIFY,
 READ, RUN, TEST, COMPILE, DEBUG, INSPECT,
-or OPERATE on something, use:
+OPERATE, or SEARCH something, use:
 
 computer
 
@@ -393,7 +693,7 @@ PREVIOUS CONVERSATION:
 
 {conversation}
 
-Return ONLY JSON.
+Return ONLY valid JSON.
 
 {{"task_type":"conversation"}}
 
@@ -402,18 +702,22 @@ or
 {{"task_type":"computer"}}
 """
 
-        raw = self.brain.generate(
-            prompt
-        )
+        try:
+
+            raw = self.brain.generate(
+                prompt,
+                json_mode=True
+            )
+
+        except Exception:
+
+            raw = ""
 
         data = self._extract_json(
             raw
         )
 
-        if isinstance(
-            data,
-            dict
-        ):
+        if isinstance(data, dict):
 
             task_type = (
                 self._normalize_task_type(
@@ -437,25 +741,30 @@ or
 
 Use computer when Nova must actually
 create, save, modify, read, run, compile,
-test, debug, inspect, or operate something.
+test, debug, inspect, search the web,
+or operate something.
 
 USER REQUEST:
 
 {message}
 """
 
-        raw = self.brain.generate(
-            repair_prompt
-        )
+        try:
+
+            raw = self.brain.generate(
+                repair_prompt,
+                json_mode=True
+            )
+
+        except Exception:
+
+            raw = ""
 
         data = self._extract_json(
             raw
         )
 
-        if isinstance(
-            data,
-            dict
-        ):
+        if isinstance(data, dict):
 
             task_type = (
                 self._normalize_task_type(
@@ -476,6 +785,7 @@ USER REQUEST:
         knowledge,
         tool_history
     ):
+
         has_tool_result = bool(
             tool_history.strip()
         )
@@ -497,8 +807,7 @@ USER REQUEST:
         return f"""
 You are Nova's autonomous action planner.
 
-Your ONLY job is to choose the NEXT REAL
-ACTION.
+Your ONLY job is to choose the NEXT REAL ACTION.
 
 You are NOT the final answer generator.
 
@@ -534,6 +843,7 @@ Never invent:
 - compilation results
 - file contents
 - successful operations
+- web search results
 
 CURRENT STATE:
 
@@ -580,6 +890,25 @@ terminal
 Searching the public web:
 web_search
 
+IMPORTANT:
+
+If the user explicitly asks to search the web,
+you MUST select:
+
+web_search
+
+Do not answer from memory.
+
+Do not say you cannot access the web.
+
+Do not generate a fake search result.
+
+WEB SEARCH INPUT:
+
+{{
+  "query": "search query"
+}}
+
 IMPORTANT WRITE_FILE RULE:
 
 When selecting write_file, DO NOT generate
@@ -597,7 +926,7 @@ Therefore write_file input MUST contain:
 
 {{
   "path": "filename",
-  "location": "desktop"
+  "location": "projects"
 }}
 
 Do NOT put "content" in this decision.
@@ -606,7 +935,7 @@ COMPLETION:
 
 Return "respond" ONLY if the user's requested
 operation is already completely finished and
-verified.
+verified by a real tool result.
 
 If more work is required, return "tool".
 
@@ -622,7 +951,7 @@ KNOWLEDGE:
 
 {knowledge}
 
-Return ONLY JSON.
+Return ONLY valid JSON.
 
 For an unfinished computer task:
 
@@ -656,24 +985,21 @@ For conversation:
         data,
         task_type
     ):
+
         if not isinstance(
             data,
             dict
         ):
             return None
 
-        action = (
-            self._normalize_action(
-                data.get("action")
-            )
+        action = self._normalize_action(
+            data.get("action")
         )
 
         if action != "tool":
             return None
 
-        tool = data.get(
-            "tool"
-        )
+        tool = data.get("tool")
 
         if not isinstance(
             tool,
@@ -699,6 +1025,7 @@ For conversation:
             raw_input,
             dict
         ):
+
             tool_input_object = raw_input
 
         elif isinstance(
@@ -707,12 +1034,22 @@ For conversation:
         ):
 
             try:
+
                 tool_input_object = json.loads(
                     raw_input
                 )
 
             except json.JSONDecodeError:
-                return None
+
+                if tool == "web_search":
+
+                    tool_input_object = {
+                        "query": raw_input
+                    }
+
+                else:
+
+                    return None
 
             if not isinstance(
                 tool_input_object,
@@ -721,7 +1058,23 @@ For conversation:
                 return None
 
         else:
+
             return None
+
+        if tool == "web_search":
+
+            normalized_web_input = (
+                self._normalize_web_search_input(
+                    tool_input_object
+                )
+            )
+
+            if normalized_web_input is None:
+                return None
+
+            tool_input_object = json.loads(
+                normalized_web_input
+            )
 
         if not self._validate_basic_tool_input(
             tool,
@@ -751,16 +1104,15 @@ For conversation:
         task_type,
         has_successful_tool
     ):
+
         if not isinstance(
             data,
             dict
         ):
             return None
 
-        action = (
-            self._normalize_action(
-                data.get("action")
-            )
+        action = self._normalize_action(
+            data.get("action")
         )
 
         if action != "respond":
@@ -783,9 +1135,7 @@ For conversation:
             }
 
         goal_complete = (
-            data.get(
-                "goal_complete"
-            ) is True
+            data.get("goal_complete") is True
         )
 
         if not goal_complete:
@@ -806,6 +1156,7 @@ For conversation:
         task_type,
         tool_history
     ):
+
         return f"""
 You are Nova's action validator.
 
@@ -832,44 +1183,82 @@ Available tools:
 
 IMPORTANT:
 
-For write_file, ONLY return:
+If the user explicitly requested a web search
+and no successful web_search result exists,
+YOU MUST choose web_search.
+
+For web_search:
 
 {{
-  "path": "filename",
-  "location": "desktop"
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "web_search",
+  "input": {{
+    "query": "search query"
+  }}
+}}
+
+For write_file:
+
+{{
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "write_file",
+  "input": {{
+    "path": "filename",
+    "location": "projects"
+  }}
 }}
 
 Do NOT generate file content in the
 decision JSON.
 
-File content is generated separately.
-
 For read_file:
 
 {{
-  "path": "filename",
-  "location": "desktop"
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "read_file",
+  "input": {{
+    "path": "filename",
+    "location": "projects"
+  }}
 }}
 
 For list_files:
 
 {{
-  "path": ".",
-  "location": "desktop"
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "list_files",
+  "input": {{
+    "path": ".",
+    "location": "projects"
+  }}
 }}
 
 For create_directory:
 
 {{
-  "path": "directory_name",
-  "location": "desktop"
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "create_directory",
+  "input": {{
+    "path": "directory_name",
+    "location": "projects"
+  }}
 }}
 
 For terminal:
 
 {{
-  "command": "command",
-  "location": "desktop"
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "terminal",
+  "input": {{
+    "command": "command",
+    "location": "projects"
+  }}
 }}
 
 If the entire task is completed:
@@ -891,11 +1280,11 @@ Return JSON only.
         conversation="",
         tool_history=""
     ):
+
         prompt = f"""
 You are Nova's code generation engine.
 
-Generate the COMPLETE ACTUAL CONTENT of
-ONE FILE.
+Generate the COMPLETE ACTUAL CONTENT of ONE FILE.
 
 The file will be written directly to disk.
 
@@ -955,9 +1344,16 @@ when they are necessary.
 Generate the complete file now.
 """
 
-        raw = self.brain.generate(
-            prompt
-        )
+        try:
+
+            raw = self.brain.generate(
+                prompt,
+                json_mode=False
+            )
+
+        except Exception:
+
+            return None
 
         if not isinstance(
             raw,
@@ -974,10 +1370,12 @@ Generate the complete file now.
             lines = content.splitlines()
 
             if lines:
-
                 lines = lines[1:]
 
-            if lines and lines[-1].strip() == "```":
+            if (
+                lines
+                and lines[-1].strip() == "```"
+            ):
                 lines = lines[:-1]
 
             content = "\n".join(
@@ -994,6 +1392,38 @@ Generate the complete file now.
 
         return content
 
+    def _remember_file_generation(
+        self,
+        tool_decision
+    ):
+
+        if (
+            not tool_decision
+            or tool_decision.get("tool")
+            != "write_file"
+        ):
+            return
+
+        try:
+
+            tool_input = json.loads(
+                tool_decision["input"]
+            )
+
+            self._last_file_generation = {
+                "path": tool_input.get(
+                    "path"
+                ),
+                "location": tool_input.get(
+                    "location",
+                    "projects"
+                )
+            }
+
+        except Exception:
+
+            self._last_file_generation = None
+
     def decide(
         self,
         message,
@@ -1002,6 +1432,7 @@ Generate the complete file now.
         knowledge="",
         tool_history=""
     ):
+
         has_successful_tool = (
             self._has_successful_tool(
                 tool_history
@@ -1016,9 +1447,16 @@ Generate the complete file now.
             tool_history=tool_history
         )
 
-        raw = self.brain.generate(
-            prompt
-        )
+        try:
+
+            raw = self.brain.generate(
+                prompt,
+                json_mode=True
+            )
+
+        except Exception:
+
+            raw = ""
 
         data = self._extract_json(
             raw
@@ -1039,6 +1477,13 @@ Generate the complete file now.
 
         if task_type == "computer":
 
+            search_requested = (
+                self._has_search_intent(
+                    message
+                )
+                and not has_successful_tool
+            )
+
             tool_decision = (
                 self._validate_tool_decision(
                     data,
@@ -1046,32 +1491,45 @@ Generate the complete file now.
                 )
             )
 
+            if (
+                tool_decision
+                and search_requested
+                and tool_decision.get(
+                    "tool"
+                ) != "web_search"
+            ):
+                tool_decision = None
+
             if tool_decision:
 
-                if (
-                    tool_decision["tool"]
-                    == "write_file"
-                ):
-
-                    tool_input = json.loads(
-                        tool_decision["input"]
-                    )
-
-                    path = tool_input.get(
-                        "path"
-                    )
-
-                    location = tool_input.get(
-                        "location",
-                        "projects"
-                    )
-
-                    self._last_file_generation = {
-                        "path": path,
-                        "location": location
-                    }
+                self._remember_file_generation(
+                    tool_decision
+                )
 
                 return tool_decision
+
+            function_call = (
+                self._extract_function_call(
+                    raw
+                )
+            )
+
+            if function_call:
+
+                validated_function_call = (
+                    self._validate_tool_decision(
+                        function_call,
+                        "computer"
+                    )
+                )
+
+                if validated_function_call:
+
+                    self._remember_file_generation(
+                        validated_function_call
+                    )
+
+                    return validated_function_call
 
             response_decision = (
                 self._validate_response_decision(
@@ -1090,9 +1548,16 @@ Generate the complete file now.
             tool_history=tool_history
         )
 
-        raw = self.brain.generate(
-            repair_prompt
-        )
+        try:
+
+            raw = self.brain.generate(
+                repair_prompt,
+                json_mode=True
+            )
+
+        except Exception:
+
+            raw = ""
 
         data = self._extract_json(
             raw
@@ -1109,26 +1574,34 @@ Generate the complete file now.
 
             if tool_decision:
 
-                if (
-                    tool_decision["tool"]
-                    == "write_file"
-                ):
-
-                    tool_input = json.loads(
-                        tool_decision["input"]
-                    )
-
-                    self._last_file_generation = {
-                        "path": tool_input.get(
-                            "path"
-                        ),
-                        "location": tool_input.get(
-                            "location",
-                            "projects"
-                        )
-                    }
+                self._remember_file_generation(
+                    tool_decision
+                )
 
                 return tool_decision
+
+            function_call = (
+                self._extract_function_call(
+                    raw
+                )
+            )
+
+            if function_call:
+
+                validated_function_call = (
+                    self._validate_tool_decision(
+                        function_call,
+                        "computer"
+                    )
+                )
+
+                if validated_function_call:
+
+                    self._remember_file_generation(
+                        validated_function_call
+                    )
+
+                    return validated_function_call
 
             response_decision = (
                 self._validate_response_decision(
@@ -1161,3 +1634,4 @@ Generate the complete file now.
             "action": "retry",
             "task_type": "conversation"
         }
+

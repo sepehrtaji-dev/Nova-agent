@@ -1,41 +1,1777 @@
-import ollama
+import json
+import re
+
+from model.ollama import OllamaBrain
+from memory.manager import MemoryManager
+from memory.extractor import MemoryExtractor
+from memory.short_term import ShortTermMemory
+from memory.knowledge import KnowledgeMemory
+from agent.router import ToolRouter
+from tools import load_tools
 
 
-class OllamaBrain:
+class NovaCore:
 
-    def __init__(self, model="qwen2.5:3b"):
-        # qwen2.5:3b is small (~2GB) but excellent at JSON and coding tasks
-        # Upgrade options: qwen2.5:7b, qwen2.5:14b
-        self.model = model
+    def __init__(self, status_callback=None):
+        self.status_callback = status_callback
+        self.brain = OllamaBrain()
+        self.long_memory = MemoryManager()
+        self.short_memory = ShortTermMemory()
+        self.knowledge = KnowledgeMemory()
+        self.extractor = MemoryExtractor(self.brain)
+        self.tools = load_tools()
 
-    def generate(self, prompt, system_prompt=None):
-
-        system = system_prompt or (
-            "You are Nova, a local AI agent running on the user's computer. "
-            "You have real tools to create files, run terminal commands, "
-            "read files, and search the web. "
-            "When asked to perform a computer task, you MUST use the tools — "
-            "never pretend to do something without actually doing it. "
-            "Always return valid JSON when the task requires it."
+        self.router = ToolRouter(
+            self.brain,
+            self.tools
         )
 
-        response = ollama.chat(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system
-                },
-                {
-                    "role": "user",
-                    "content": prompt
+        self.max_steps = 12
+
+    def _status(self, message):
+        if self.status_callback:
+            try:
+                self.status_callback(message)
+            except Exception:
+                pass
+
+    def _extract_json(self, response):
+        if not response:
+            return None
+
+        response = str(response).strip()
+
+        response = re.sub(
+            r"^```json\s*",
+            "",
+            response,
+            flags=re.IGNORECASE
+        )
+
+        response = re.sub(
+            r"^```\s*",
+            "",
+            response
+        )
+
+        response = re.sub(
+            r"\s*```$",
+            "",
+            response
+        ).strip()
+
+        try:
+            data = json.loads(response)
+
+            if isinstance(data, dict):
+                return data
+
+        except json.JSONDecodeError:
+            pass
+
+        decoder = json.JSONDecoder()
+
+        for index, char in enumerate(response):
+            if char != "{":
+                continue
+
+            try:
+                data, _ = decoder.raw_decode(
+                    response[index:]
+                )
+
+                if isinstance(data, dict):
+                    return data
+
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _tool_succeeded(self, tool_name, result):
+        if not isinstance(result, str):
+            return False
+
+        result = result.strip()
+
+        if not result:
+            return False
+
+        if result.startswith(
+            "Web search error:"
+        ):
+            return False
+
+        if result.startswith(
+            "Web search failed:"
+        ):
+            return False
+
+        if result.startswith(
+            "TOOL_EXECUTION_EXCEPTION"
+        ):
+            return False
+
+        if tool_name == "web_search":
+            return (
+                "Title:" in result
+                and "URL:" in result
+            )
+
+        if tool_name == "write_file":
+            return "FILE_CREATED" in result
+
+        if tool_name == "create_directory":
+            return "DIRECTORY_CREATED" in result
+
+        if tool_name == "terminal":
+            return "STATUS: SUCCESS" in result
+
+        if tool_name == "read_file":
+            return (
+                not result.startswith(
+                    "Filesystem error:"
+                )
+                and not result.startswith(
+                    "File does not exist."
+                )
+                and not result.startswith(
+                    "Path is not a file."
+                )
+            )
+
+        if tool_name == "list_files":
+            return (
+                not result.startswith(
+                    "Filesystem error:"
+                )
+                and not result.startswith(
+                    "Path does not exist:"
+                )
+                and not result.startswith(
+                    "Not a directory:"
+                )
+            )
+
+        return False
+
+    def _success_line_matches(self, text):
+        if not isinstance(text, str):
+            return False
+
+        return re.search(
+            r"Tool success:\s*True",
+            text.replace("\\n", "\n")
+        ) is not None
+
+    def _has_successful_tool(self, tool_history):
+        if not tool_history:
+            return False
+
+        if isinstance(tool_history, list):
+            for entry in tool_history:
+
+                if isinstance(entry, dict):
+                    if entry.get("success") is True:
+                        return True
+
+                    tool_name = entry.get(
+                        "tool"
+                    )
+
+                    result = entry.get(
+                        "result",
+                        ""
+                    )
+
+                    if tool_name and self._tool_succeeded(
+                        tool_name,
+                        result
+                    ):
+                        return True
+
+                elif isinstance(entry, str):
+                    if self._success_line_matches(
+                        entry
+                    ):
+                        return True
+
+        text = str(tool_history)
+
+        return (
+            self._success_line_matches(text)
+            or
+            "FILE_CREATED" in text
+            or
+            "DIRECTORY_CREATED" in text
+            or
+            "STATUS: SUCCESS" in text
+        )
+
+    def _has_successful_web_search(
+        self,
+        tool_history
+    ):
+        if not tool_history:
+            return False
+
+        if isinstance(tool_history, list):
+            for entry in tool_history:
+
+                if isinstance(entry, dict):
+                    if (
+                        entry.get("tool")
+                        == "web_search"
+                        and
+                        entry.get("success")
+                        is True
+                    ):
+                        return True
+
+                    if (
+                        entry.get("tool")
+                        == "web_search"
+                    ):
+                        result = entry.get(
+                            "result",
+                            ""
+                        )
+
+                        if self._tool_succeeded(
+                            "web_search",
+                            result
+                        ):
+                            return True
+
+                elif isinstance(entry, str):
+                    if (
+                        "Tool: web_search"
+                        in entry
+                        and
+                        self._success_line_matches(
+                            entry
+                        )
+                    ):
+                        return True
+
+        text = str(tool_history)
+
+        return (
+            "Tool: web_search" in text
+            and
+            self._success_line_matches(text)
+        )
+
+    def _parse_tool_input(self, tool_input):
+        if isinstance(tool_input, dict):
+            return tool_input
+
+        if not isinstance(tool_input, str):
+            return None
+
+        try:
+            data = json.loads(tool_input)
+
+            if isinstance(data, dict):
+                return data
+
+        except json.JSONDecodeError:
+            return None
+
+        return None
+
+    def _contains_placeholder(self, value):
+        if not isinstance(value, str):
+            return False
+
+        text = value.lower()
+
+        bad_patterns = [
+            "...",
+            "…",
+            "<code>",
+            "</code>",
+            "<code here>",
+            "code here",
+            "insert code here",
+            "your code here",
+            "actual code",
+            "actual python code",
+            "actual python calculator code",
+            "write code here",
+            "put code here",
+            "todo",
+            "tbd"
+        ]
+
+        return any(
+            pattern in text
+            for pattern in bad_patterns
+        )
+
+    def _validate_tool_request(
+        self,
+        message,
+        tool_name,
+        tool_input
+    ):
+        if not isinstance(
+            tool_name,
+            str
+        ):
+            return False, "Invalid tool name."
+
+        if not self.tools.exists(
+            tool_name
+        ):
+            return False, (
+                f"Unknown tool: {tool_name}"
+            )
+
+        data = self._parse_tool_input(
+            tool_input
+        )
+
+        if not isinstance(
+            data,
+            dict
+        ):
+            return False, (
+                f"Invalid input for {tool_name}."
+            )
+
+        if tool_name == "write_file":
+
+            path = data.get("path")
+            content = data.get("content")
+            location = data.get(
+                "location",
+                "projects"
+            )
+
+            if not isinstance(
+                path,
+                str
+            ):
+                return False, (
+                    "write_file requires a path."
+                )
+
+            if not path.strip():
+                return False, (
+                    "write_file path is empty."
+                )
+
+            if not isinstance(
+                content,
+                str
+            ):
+                return False, (
+                    "write_file requires file content."
+                )
+
+            if not content.strip():
+                return False, (
+                    "write_file content is empty."
+                )
+
+            if self._contains_placeholder(
+                content
+            ):
+                return False, (
+                    "write_file content contains "
+                    "a placeholder instead of real "
+                    "file content."
+                )
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False, (
+                    "Invalid write_file location."
+                )
+
+        elif tool_name == "create_directory":
+
+            path = data.get("path")
+            location = data.get(
+                "location",
+                "projects"
+            )
+
+            if not isinstance(
+                path,
+                str
+            ):
+                return False, (
+                    "create_directory requires a path."
+                )
+
+            path = path.strip()
+
+            if not path:
+                return False, (
+                    "Directory path is empty."
+                )
+
+            if path in {
+                "~",
+                "/",
+                "\\",
+                ".",
+                ".."
+            }:
+                return False, (
+                    "Directory path is not a valid "
+                    "explicit project directory."
+                )
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False, (
+                    "Invalid directory location."
+                )
+
+        elif tool_name == "read_file":
+
+            path = data.get("path")
+
+            if not isinstance(
+                path,
+                str
+            ):
+                return False, (
+                    "read_file requires a path."
+                )
+
+            if not path.strip():
+                return False, (
+                    "read_file path is empty."
+                )
+
+        elif tool_name == "list_files":
+
+            path = data.get(
+                "path",
+                "."
+            )
+
+            if not isinstance(
+                path,
+                str
+            ):
+                return False, (
+                    "list_files path is invalid."
+                )
+
+        elif tool_name == "terminal":
+
+            command = data.get("command")
+
+            if not isinstance(
+                command,
+                str
+            ):
+                return False, (
+                    "terminal requires a command."
+                )
+
+            if not command.strip():
+                return False, (
+                    "terminal command is empty."
+                )
+
+            location = data.get(
+                "location",
+                "projects"
+            )
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False, (
+                    "Invalid terminal location."
+                )
+
+        elif tool_name == "web_search":
+
+            query = (
+                data.get("query")
+                or data.get("search")
+                or data.get("q")
+                or data.get("text")
+            )
+
+            if not isinstance(
+                query,
+                str
+            ):
+                return False, (
+                    "web_search requires a search query."
+                )
+
+            if not query.strip():
+                return False, (
+                    "web_search query is empty."
+                )
+
+        return True, None
+
+    def _learn_from_search(
+        self,
+        query,
+        result
+    ):
+        if not result:
+            return
+
+        prompt = f"""
+You are Nova's search-result extractor.
+
+USER QUERY:
+
+{query}
+
+REAL WEB SEARCH RESULT:
+
+{result}
+
+Your job is ONLY to extract facts that are
+explicitly supported by the search result.
+
+Do NOT use:
+
+- prior knowledge
+- personal memory
+- persistent knowledge
+- assumptions
+- guesses
+
+Return JSON only.
+
+Schema:
+
+{{
+  "facts": [
+    {{
+      "topic": "topic",
+      "fact": "fact directly supported by result",
+      "source": "source",
+      "confidence": 0.0,
+      "freshness": "volatile"
+    }}
+  ]
+}}
+
+For current/latest/recent information,
+use freshness "volatile".
+
+If the search result does not explicitly
+support a fact, DO NOT include it.
+
+If nothing reliable can be extracted:
+
+{{"facts":[]}}
+"""
+
+        try:
+            raw = self.brain.generate(
+                prompt,
+                json_mode=True
+            )
+
+            data = self._extract_json(
+                raw
+            )
+
+            if not isinstance(
+                data,
+                dict
+            ):
+                return
+
+            facts = data.get(
+                "facts",
+                []
+            )
+
+            if not isinstance(
+                facts,
+                list
+            ):
+                return
+
+            for item in facts:
+
+                if not isinstance(
+                    item,
+                    dict
+                ):
+                    continue
+
+                topic = item.get(
+                    "topic"
+                )
+
+                fact = item.get(
+                    "fact"
+                )
+
+                source = item.get(
+                    "source",
+                    ""
+                )
+
+                confidence = item.get(
+                    "confidence",
+                    0.0
+                )
+
+                freshness = item.get(
+                    "freshness",
+                    "volatile"
+                )
+
+                if not topic or not fact:
+                    continue
+
+                try:
+                    confidence = float(
+                        confidence
+                    )
+                except Exception:
+                    confidence = 0.0
+
+                if confidence < 0.65:
+                    continue
+
+                if freshness not in {
+                    "stable",
+                    "temporary",
+                    "volatile"
+                }:
+                    freshness = "volatile"
+
+                self.knowledge.add(
+                    topic=topic,
+                    fact=fact,
+                    source=source,
+                    confidence=confidence,
+                    freshness=freshness
+                )
+
+        except Exception:
+            return
+
+    def _build_final_prompt(
+        self,
+        message,
+        tool_context,
+        knowledge_context,
+        web_search_used=False
+    ):
+        model_name = getattr(
+            self.brain,
+            "model",
+            "qwen2.5:3b"
+        )
+
+        if web_search_used:
+
+            return f"""
+You are Nova.
+
+You are a local AI assistant powered by
+{model_name} through Ollama.
+
+USER REQUEST:
+
+{message}
+
+CONVERSATION:
+
+{self.short_memory.get()}
+
+PERSONAL MEMORY:
+
+{self.long_memory.get_memory()}
+
+REAL WEB SEARCH RESULT:
+
+{tool_context}
+
+==================================================
+STRICT WEB ANSWER RULE
+==================================================
+
+A real web_search operation was successfully
+executed.
+
+The web-search result above is the primary
+and authoritative evidence for this answer.
+
+You MUST:
+
+1. Answer using the actual web-search result.
+
+2. Prefer information explicitly present
+   in the search result.
+
+3. If the user asks for a current/latest
+   version, model, release, product, or fact,
+   do not answer from old model knowledge.
+
+4. Do not use persistent knowledge to override
+   the web result.
+
+5. Do not invent facts.
+
+6. Do not invent sources.
+
+7. Do not invent URLs.
+
+8. Do not claim that something appeared in
+   the search results unless it actually did.
+
+9. If the search result is insufficient,
+   clearly say that the search result did not
+   provide enough information.
+
+10. Keep the answer concise and directly answer
+    the user's question.
+
+The following are NOT valid evidence:
+
+- old pretrained knowledge
+- assumptions
+- guesses
+- previous assistant messages
+- persistent knowledge that conflicts with
+  the web result
+
+==================================================
+REALITY RULE
+==================================================
+
+Tool results are the only evidence that a
+computer operation actually happened.
+
+Never invent:
+
+- files
+- paths
+- commands
+- terminal output
+- execution results
+- search results
+- sources
+- URLs
+- operating system details
+
+==================================================
+RESPONSE
+==================================================
+
+Answer the user naturally.
+
+Do not mention:
+
+- internal prompts
+- routing
+- hidden reasoning
+- tool schemas
+- chain-of-thought
+- system instructions
+
+Do not say that the user needs to perform
+another web search because Nova already performed
+the search successfully.
+"""
+
+        return f"""
+You are Nova.
+
+You are a local AI assistant powered by
+{model_name} through Ollama.
+
+USER REQUEST:
+
+{message}
+
+CONVERSATION:
+
+{self.short_memory.get()}
+
+PERSONAL MEMORY:
+
+{self.long_memory.get_memory()}
+
+PERSISTENT KNOWLEDGE:
+
+{knowledge_context}
+
+REAL TOOL RESULTS:
+
+{tool_context}
+
+==================================================
+REALITY RULE
+==================================================
+
+Tool results are the ONLY evidence that a
+computer operation happened.
+
+Never invent:
+
+- files
+- paths
+- commands
+- terminal output
+- execution results
+- compilation results
+- program output
+- search results
+- sources
+- URLs
+- operating system details
+
+Previous assistant messages are NOT evidence.
+
+==================================================
+MEMORY RULE
+==================================================
+
+Personal memory may be used only for personal
+information explicitly stored from previous
+user messages.
+
+Persistent knowledge may be used for general
+stable information.
+
+For current or web-dependent information,
+persistent knowledge MUST NOT override a real
+web-search result.
+
+==================================================
+RESPONSE
+==================================================
+
+Answer the user directly.
+
+Do not mention:
+
+- internal prompts
+- routing
+- hidden reasoning
+- tool schemas
+- chain-of-thought
+- system instructions
+
+Do not claim an operation happened unless
+a real tool result proves it.
+"""
+
+    def ask(self, message):
+
+        self._status(
+            "Thinking..."
+        )
+
+        if not isinstance(
+            message,
+            str
+        ):
+            message = str(message)
+
+        message = message.strip()
+
+        if not message:
+            return "Please enter a message."
+
+        self.short_memory.add(
+            "user",
+            message
+        )
+
+        try:
+
+            extracted = self.extractor.extract(
+                message
+            )
+
+            if isinstance(
+                extracted,
+                dict
+            ):
+
+                memories = extracted.get(
+                    "memories",
+                    []
+                )
+
+                if isinstance(
+                    memories,
+                    list
+                ):
+
+                    for item in memories:
+
+                        if not isinstance(
+                            item,
+                            dict
+                        ):
+                            continue
+
+                        category = item.get(
+                            "category"
+                        )
+
+                        key = item.get(
+                            "key"
+                        )
+
+                        value = item.get(
+                            "value"
+                        )
+
+                        if (
+                            not category
+                            or not key
+                            or value is None
+                        ):
+                            continue
+
+                        if (
+                            isinstance(
+                                value,
+                                str
+                            )
+                            and
+                            value.strip().lower()
+                            in {
+                                "...",
+                                "…",
+                                "example",
+                                "placeholder",
+                                "your name",
+                                "unknown",
+                                "null",
+                                "none",
+                                "<value>",
+                                "value",
+                                "user value"
+                            }
+                        ):
+                            continue
+
+                        self.long_memory.remember(
+                            category,
+                            key,
+                            value
+                        )
+
+        except Exception:
+            pass
+
+        tool_history = []
+        used_tools = set()
+        workspace_revision = 0
+
+        self._status(
+            "Understanding request..."
+        )
+
+        task_type = self.router.classify_task(
+            message=message,
+            conversation=self.short_memory.get()
+        )
+
+        if task_type not in {
+            "conversation",
+            "computer"
+        }:
+            task_type = "conversation"
+
+        self._status(
+            f"Task type: {task_type}"
+        )
+
+        completed = False
+        last_tool_error = None
+        web_search_used = False
+
+        for step in range(
+            self.max_steps
+        ):
+
+            knowledge_context = (
+                self.knowledge.get_context(
+                    message
+                )
+            )
+
+            conversation = (
+                self.short_memory.get()
+            )
+
+            history = (
+                "\n\n".join(
+                    tool_history
+                )
+                if tool_history
+                else ""
+            )
+
+            self._status(
+                "Deciding what to do..."
+            )
+
+            decision = self.router.decide(
+                message=message,
+                task_type=task_type,
+                conversation=conversation,
+                knowledge=knowledge_context,
+                tool_history=history
+            )
+
+            if not isinstance(
+                decision,
+                dict
+            ):
+                decision = {
+                    "action": "retry",
+                    "task_type": task_type
                 }
-            ],
-            options={
-                # Lower temperature = more deterministic JSON output
-                "temperature": 0.1,
-                "top_p": 0.9,
-            }
+
+            action = decision.get(
+                "action"
+            )
+
+            if (
+                task_type == "conversation"
+                and action == "respond"
+            ):
+                completed = True
+                break
+
+            if task_type == "computer":
+
+                if action == "respond":
+
+                    goal_complete = (
+                        decision.get(
+                            "goal_complete",
+                            False
+                        ) is True
+                    )
+
+                    has_success = (
+                        self._has_successful_tool(
+                            tool_history
+                        )
+                    )
+
+                    if (
+                        goal_complete
+                        and has_success
+                    ):
+                        completed = True
+                        break
+
+                    tool_history.append(
+                        """
+Router attempted to finish a computer task
+without sufficient verified evidence.
+
+The task is NOT complete.
+"""
+                    )
+
+                    self._status(
+                        "Re-evaluating..."
+                    )
+
+                    continue
+
+            if action == "retry":
+
+                tool_history.append(
+                    """
+Router returned an invalid decision.
+
+Nova must choose another real action.
+"""
+                )
+
+                self._status(
+                    "Re-evaluating..."
+                )
+
+                continue
+
+            if action != "tool":
+
+                tool_history.append(
+                    """
+Router returned an unsupported action.
+
+No computer operation was performed.
+"""
+                )
+
+                self._status(
+                    "Re-evaluating..."
+                )
+
+                continue
+
+            tool_name = decision.get(
+                "tool"
+            )
+
+            tool_input = decision.get(
+                "input"
+            )
+
+            if not isinstance(
+                tool_name,
+                str
+            ):
+
+                tool_history.append(
+                    """
+Router selected a tool without a valid
+tool name.
+"""
+                )
+
+                self._status(
+                    "Re-evaluating..."
+                )
+
+                continue
+
+            if not isinstance(
+                tool_input,
+                str
+            ):
+
+                if isinstance(
+                    tool_input,
+                    dict
+                ):
+
+                    tool_input = json.dumps(
+                        tool_input,
+                        ensure_ascii=False
+                    )
+
+                else:
+
+                    tool_history.append(
+                        f"""
+Tool: {tool_name}
+
+Router provided invalid tool input.
+"""
+                    )
+
+                    self._status(
+                        "Re-evaluating..."
+                    )
+
+                    continue
+
+            if tool_name == "write_file":
+
+                try:
+
+                    file_data = (
+                        self._parse_tool_input(
+                            tool_input
+                        )
+                    )
+
+                    if not isinstance(
+                        file_data,
+                        dict
+                    ):
+
+                        tool_history.append(
+                            """
+Router returned invalid write_file input.
+
+The file was NOT written.
+"""
+                        )
+
+                        self._status(
+                            "Invalid file request..."
+                        )
+
+                        continue
+
+                    path = file_data.get(
+                        "path"
+                    )
+
+                    location = file_data.get(
+                        "location",
+                        "projects"
+                    )
+
+                    if (
+                        not isinstance(
+                            path,
+                            str
+                        )
+                        or not path.strip()
+                    ):
+
+                        tool_history.append(
+                            """
+write_file requires a valid file path.
+
+The file was NOT written.
+"""
+                        )
+
+                        self._status(
+                            "Invalid file path..."
+                        )
+
+                        continue
+
+                    if location not in {
+                        "projects",
+                        "desktop"
+                    }:
+
+                        tool_history.append(
+                            """
+write_file received an invalid location.
+
+The file was NOT written.
+"""
+                        )
+
+                        self._status(
+                            "Invalid file location..."
+                        )
+
+                        continue
+
+                    self._status(
+                        "Generating file content..."
+                    )
+
+                    generated_content = (
+                        self.router.generate_file_content(
+                            user_request=message,
+                            path=path,
+                            location=location,
+                            conversation=conversation,
+                            tool_history=history
+                        )
+                    )
+
+                    if not isinstance(
+                        generated_content,
+                        str
+                    ):
+                        generated_content = str(
+                            generated_content
+                        )
+
+                    generated_content = (
+                        generated_content.strip()
+                    )
+
+                    if not generated_content:
+
+                        tool_history.append(
+                            """
+File content generation returned empty
+content.
+
+The file was NOT written.
+"""
+                        )
+
+                        self._status(
+                            "File generation failed..."
+                        )
+
+                        continue
+
+                    if self._contains_placeholder(
+                        generated_content
+                    ):
+
+                        tool_history.append(
+                            """
+Generated file content appears to contain
+a placeholder instead of a complete
+implementation.
+
+The file was NOT written.
+"""
+                        )
+
+                        self._status(
+                            "Generated content rejected..."
+                        )
+
+                        continue
+
+                    file_data["content"] = (
+                        generated_content
+                    )
+
+                    tool_input = json.dumps(
+                        file_data,
+                        ensure_ascii=False
+                    )
+
+                except Exception as exc:
+
+                    tool_history.append(
+                        f"""
+File content generation failed.
+
+Error:
+
+{type(exc).__name__}: {exc}
+
+The file was NOT written.
+"""
+                    )
+
+                    self._status(
+                        "File generation failed..."
+                    )
+
+                    continue
+
+            valid, validation_error = (
+                self._validate_tool_request(
+                    message,
+                    tool_name,
+                    tool_input
+                )
+            )
+
+            if not valid:
+
+                tool_history.append(
+                    f"""
+Tool: {tool_name}
+
+Input:
+
+{tool_input}
+
+Validation rejected this operation:
+
+{validation_error}
+
+The tool was NOT executed.
+
+Nova must choose another useful action.
+"""
+                )
+
+                self._status(
+                    "Invalid tool decision..."
+                )
+
+                continue
+
+            tool_key = (
+                tool_name,
+                tool_input.strip(),
+                workspace_revision
+            )
+
+            if tool_key in used_tools:
+
+                tool_history.append(
+                    f"""
+Tool: {tool_name}
+
+Input:
+
+{tool_input}
+
+This exact operation was already executed
+in the current workspace state.
+
+Nova must choose another useful action.
+"""
+                )
+
+                self._status(
+                    "Re-evaluating..."
+                )
+
+                continue
+
+            used_tools.add(
+                tool_key
+            )
+
+            self._status(
+                f"Using {tool_name}..."
+            )
+
+            try:
+
+                result = self.tools.execute(
+                    tool_name,
+                    tool_input
+                )
+
+            except Exception as exc:
+
+                result = (
+                    "TOOL_EXECUTION_EXCEPTION\n"
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+            if not isinstance(
+                result,
+                str
+            ):
+                result = str(result)
+
+            succeeded = self._tool_succeeded(
+                tool_name,
+                result
+            )
+
+            self._status(
+                "Processing tool result..."
+            )
+
+            tool_history.append(
+                f"""
+Step: {step + 1}
+
+Tool: {tool_name}
+
+Input:
+
+{tool_input}
+
+Result:
+
+{result}
+
+Tool success:
+
+{succeeded}
+"""
+            )
+
+            if not succeeded:
+
+                last_tool_error = (
+                    f"{tool_name}: {result}"
+                )
+
+                self._status(
+                    "Tool reported an error..."
+                )
+
+                continue
+
+            last_tool_error = None
+
+            if tool_name in {
+                "write_file",
+                "create_directory"
+            }:
+
+                workspace_revision += 1
+
+            if tool_name == "web_search":
+
+                web_search_used = True
+
+                self._status(
+                    "Learning from search..."
+                )
+
+                search_data = (
+                    self._parse_tool_input(
+                        tool_input
+                    )
+                )
+
+                query = ""
+
+                if isinstance(
+                    search_data,
+                    dict
+                ):
+
+                    query = (
+                        search_data.get("query")
+                        or search_data.get("search")
+                        or search_data.get("q")
+                        or search_data.get("text")
+                        or ""
+                    )
+
+                self._learn_from_search(
+                    query,
+                    result
+                )
+
+            if tool_name == "write_file":
+
+                data = (
+                    self._parse_tool_input(
+                        tool_input
+                    )
+                )
+
+                if isinstance(
+                    data,
+                    dict
+                ):
+
+                    path = data.get(
+                        "path"
+                    )
+
+                    location = data.get(
+                        "location",
+                        "projects"
+                    )
+
+                    if (
+                        isinstance(
+                            path,
+                            str
+                        )
+                        and path.strip()
+                    ):
+
+                        verify_input = json.dumps(
+                            {
+                                "path": path,
+                                "location": location
+                            },
+                            ensure_ascii=False
+                        )
+
+                        verify_key = (
+                            "read_file",
+                            verify_input,
+                            workspace_revision
+                        )
+
+                        if verify_key not in used_tools:
+
+                            used_tools.add(
+                                verify_key
+                            )
+
+                            self._status(
+                                "Verifying created file..."
+                            )
+
+                            verify_result = (
+                                self.tools.execute(
+                                    "read_file",
+                                    verify_input
+                                )
+                            )
+
+                            if not isinstance(
+                                verify_result,
+                                str
+                            ):
+                                verify_result = str(
+                                    verify_result
+                                )
+
+                            verify_success = (
+                                self._tool_succeeded(
+                                    "read_file",
+                                    verify_result
+                                )
+                            )
+
+                            tool_history.append(
+                                f"""
+Step: {step + 1}
+
+Tool: read_file
+
+Purpose: Verify write_file result
+
+Input:
+
+{verify_input}
+
+Result:
+
+{verify_result}
+
+Tool success:
+
+{verify_success}
+"""
+                            )
+
+                            if not verify_success:
+
+                                last_tool_error = (
+                                    "write_file succeeded, "
+                                    "but the created file "
+                                    "could not be verified."
+                                )
+
+                                self._status(
+                                    "File verification failed..."
+                                )
+
+        knowledge_context = (
+            self.knowledge.get_context(
+                message
+            )
         )
 
-        return response["message"]["content"]
+        if tool_history:
+
+            tool_context = (
+                "\n\n".join(
+                    tool_history
+                )
+            )
+
+        else:
+
+            tool_context = (
+                "No tools were executed."
+            )
+
+        successful_web_search = (
+            self._has_successful_web_search(
+                tool_context
+            )
+        )
+
+        if (
+            task_type == "computer"
+            and not completed
+        ):
+
+            if successful_web_search:
+
+                completed = True
+
+            else:
+
+                self._status(
+                    "Preparing final answer..."
+                )
+
+                if last_tool_error:
+
+                    response = (
+                        "I couldn't complete the "
+                        "requested computer operation.\n\n"
+                        f"Last tool result:\n"
+                        f"{last_tool_error}"
+                    )
+
+                elif tool_history:
+
+                    response = (
+                        "I couldn't verify completion "
+                        "of the requested computer "
+                        "operation. No successful "
+                        "completion was confirmed."
+                    )
+
+                else:
+
+                    response = (
+                        "I couldn't perform the "
+                        "requested computer operation "
+                        "because no real tool operation "
+                        "was successfully completed."
+                    )
+
+                self._status(
+                    "Done"
+                )
+
+                self.short_memory.add(
+                    "assistant",
+                    response
+                )
+
+                return response
+
+        if (
+            web_search_used
+            and not successful_web_search
+        ):
+
+            response = (
+                "I couldn't verify that a real "
+                "web search was completed, so I "
+                "won't provide an answer based "
+                "on unsupported information."
+            )
+
+            self._status(
+                "Done"
+            )
+
+            self.short_memory.add(
+                "assistant",
+                response
+            )
+
+            return response
+
+        prompt = self._build_final_prompt(
+            message=message,
+            tool_context=tool_context,
+            knowledge_context=knowledge_context,
+            web_search_used=successful_web_search
+        )
+
+        self._status(
+            "Preparing final answer..."
+        )
+
+        response = self.brain.generate(
+            prompt
+        )
+
+        if not isinstance(
+            response,
+            str
+        ):
+            response = str(response)
+
+        self._status(
+            "Done"
+        )
+
+        self.short_memory.add(
+            "assistant",
+            response
+        )
+
+        return response

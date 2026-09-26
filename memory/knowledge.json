@@ -70,5 +70,86 @@
     "learned_at": "2026-09-26T11:40:40.466502",
     "last_verified": "2026-09-26T11:40:40.466502",
     "expires_at": null
+  },
+  {
+    "topic": "Minecraft version",
+    "fact": "The latest Minecraft version is 26.3, released on September 15, 2026",
+    "source": "https://mcreference.com/latest",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:26:00.633224",
+    "last_verified": "2026-09-26T15:26:00.633224",
+    "expires_at": "2026-10-03T15:26:00.633224"
+  },
+  {
+    "topic": "Minecraft Version History",
+    "fact": "Complete list of all Minecraft Java and Bedrock Edition versions. Latest release, snapshots, and full version history with release dates.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.mcstate.net%2Fversions&rut=e1c2b52021d69845d9a1288de6d46ba44187245bd1dcbac511473de889b68c5f",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:26:34.838658",
+    "last_verified": "2026-09-26T15:26:34.838658",
+    "expires_at": "2026-10-03T15:26:34.838658"
+  },
+  {
+    "topic": "Minecraft Java Edition 26.3",
+    "fact": "Wilderness Bound is out now in Minecraft Java Edition! Pack your supplies and set off on an expedition into the dappled forest where the trails end and adventure begins.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.minecraft.net%2Fen%2Dus%2Farticle%2Fminecraft%2Djava%2Dedition%2D26%2D3&rut=f914c4e394b9d7d1c689fe1958c3e50ba3b11aea7d59fec874247eaf948d6a00",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:26:34.841036",
+    "last_verified": "2026-09-26T15:26:34.841036",
+    "expires_at": "2026-10-03T15:26:34.841036"
+  },
+  {
+    "topic": "Latest Minecraft version",
+    "fact": "The latest Minecraft version is 26.3, out 15 Sept 2026.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fmcreference.com%2Flatest&rut=120e4a2d247ee4f2b5686997fe720aaf99d97db6890e8f224f25c9b8e3fa90d4",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:26:34.843130",
+    "last_verified": "2026-09-26T15:26:34.843130",
+    "expires_at": "2026-10-03T15:26:34.843130"
+  },
+  {
+    "topic": "ChatGPT Models",
+    "fact": "The latest ChatGPT model is GPT-6 Astra, which OpenAI introduced on September 3, 2026.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fopenai.com%2Findex%2Fgpt%2D6%2Dastra%2F&rut=c3b82daba94af41992b5c4592641f92e7bbe732396207dff73ab60c33ece0778",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:34:14.844619",
+    "last_verified": "2026-09-26T15:34:14.844619",
+    "expires_at": "2026-10-03T15:34:14.844619"
+  },
+  {
+    "topic": "ChatGPT Models",
+    "fact": "GPT-6 Astra is described as our most intelligent and aligned model yet with state-of-the-art capabilities across various fields.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fopenai.com%2Findex%2Fgpt%2D6%2Dastra%2F&rut=c3b82daba94af41992b5c4592641f92e7bbe732396207dff73ab60c33ece0778",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:34:14.846958",
+    "last_verified": "2026-09-26T15:34:14.846958",
+    "expires_at": "2026-10-03T15:34:14.846958"
+  },
+  {
+    "topic": "ChatGPT Models",
+    "fact": "GPT-6 Astra is available in the Pro ($100 and $200), Business and Enterprise plans, and Plus gets Astra inside ChatGPT Work and Codex.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.ai%2Dtoolbox.co%2Fchatgpt%2Dmodels%2Fchatgpt%2Dmodels%2Dexplained%2Dcomplete%2Dcomparison%2D2026&rut=80aa7302d845aa0865e0af8e0151bdc678d8dd34a406ec807a09a228d56e66bd",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:34:14.848953",
+    "last_verified": "2026-09-26T15:34:14.848953",
+    "expires_at": "2026-10-03T15:34:14.848953"
+  },
+  {
+    "topic": "Claude models",
+    "fact": "Our latest model, Claude Opus 4.7, is now generally available and shows improvements in software engineering and complex, long-running coding tasks, as well as better vision, allowing it to see images in higher resolution.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fsupport.claude.com%2Fen%2Farticles%2F12138966%2Drelease%2Dnotes&rut=d3347e638e7c5f1888cb3dc0829225e935159923ae50658993da98768cfbe03b",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:55:58.027308",
+    "last_verified": "2026-09-26T15:55:58.027308",
+    "expires_at": "2026-10-03T15:55:58.027308"
+  },
+  {
+    "topic": "Claude models",
+    "fact": "Claude Opus 5.5 is the first model in the new Claude 5.5 family, performing at the level of Claude Fable 5.1 and costing 40% less to run than Opus 5.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.anthropic.com%2Fclaude%2Dopus%2D5%2D5&rut=37ac6a24d4980fab075f0bb740b464b565df91271f64f7854fb632006bb5cb5e",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T15:55:58.029684",
+    "last_verified": "2026-09-26T15:55:58.029684",
+    "expires_at": "2026-10-03T15:55:58.029684"
   }
 ]

@@ -53,7 +53,7 @@ def render_header():
     )
 
     title.append(
-        "Llama 3.2 · Local",
+        "qwen 2.5 · Local",
         style="dim"
     )
 
