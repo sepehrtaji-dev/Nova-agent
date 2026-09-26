@@ -9,37 +9,46 @@ class MemoryExtractor:
         memories = []
 
 
-        name = re.search(
-            r"my name is (.+)",
-            text,
-            re.I
-        )
+        patterns = [
 
-        if name:
-            memories.append(
-                (
-                    "profile",
-                    "name",
-                    name.group(1)
-                )
+            (
+                "profile",
+                "name",
+                r"my name is (.+)"
+            ),
+
+            (
+                "projects",
+                "project",
+                r"i am working on (.+)"
+            ),
+
+            (
+                "skills",
+                "skill",
+                r"i know (.+)"
             )
 
+        ]
 
-        project = re.search(
-            r"i am working on (.+)",
-            text,
-            re.I
-        )
 
-        if project:
+        for category,key,pattern in patterns:
 
-            memories.append(
-                (
-                    "projects",
-                    "project",
-                    project.group(1)
-                )
+            result = re.search(
+                pattern,
+                text,
+                re.I
             )
+
+            if result:
+
+                memories.append(
+                    (
+                        category,
+                        key,
+                        result.group(1)
+                    )
+                )
 
 
         return memories
