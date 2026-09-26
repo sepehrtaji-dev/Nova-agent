@@ -1,193 +1,209 @@
 import json
-
+import re
 
 
 class ToolRouter:
 
-
-    def __init__(
-        self,
-        brain,
-        tools
-    ):
-
+    def __init__(self, brain, tools):
         self.brain = brain
         self.tools = tools
 
+    def _extract_json(self, response):
 
+        if not response:
+            return None
+
+        response = response.strip()
+
+        response = re.sub(
+            r"^```json\s*",
+            "",
+            response,
+            flags=re.IGNORECASE
+        )
+
+        response = re.sub(
+            r"^```\s*",
+            "",
+            response
+        )
+
+        response = re.sub(
+            r"\s*```$",
+            "",
+            response
+        )
+
+        try:
+            return json.loads(response)
+
+        except json.JSONDecodeError:
+            pass
+
+        start = response.find("{")
+        end = response.rfind("}")
+
+        if start == -1 or end == -1:
+            return None
+
+        try:
+
+            return json.loads(
+                response[
+                    start:end + 1
+                ]
+            )
+
+        except json.JSONDecodeError:
+            return None
 
     def decide(
         self,
-        message
+        message,
+        conversation="",
+        knowledge="",
+        tool_history=""
     ):
 
-
-        text = message.lower()
-
-
-
-        # Direct rules for common commands
-
-        if (
-            "python version" in text
-            or "show python" in text
-            or "check python" in text
-        ):
-
-            return {
-                "use_tool": True,
-                "tool": "terminal",
-                "input": "python --version"
-            }
-
-
-
-        if (
-            "current username" in text
-            or "who am i" in text
-            or "username" in text
-        ):
-
-            return {
-                "use_tool": True,
-                "tool": "terminal",
-                "input": "whoami"
-            }
-
-
-
-        if (
-            "list files" in text
-            or "show files" in text
-            or "list folder" in text
-            or "directory" in text
-        ):
-
-            return {
-                "use_tool": True,
-                "tool": "terminal",
-                "input": "dir"
-            }
-
-
-
-
         prompt = f"""
-You are Nova Tool Router.
+You are Nova's autonomous tool router.
 
-Your job is ONLY choosing tools.
+Your job is to decide what Nova should do next.
 
 Available tools:
 
 {self.tools.get_descriptions()}
 
+IMPORTANT:
 
-User message:
+Nova must NOT pretend to know information.
+
+If the available knowledge is insufficient,
+uncertain, outdated, or the user asks for current
+information, use web_search.
+
+The model itself must decide whether a tool is needed.
+
+Rules:
+
+1. Normal conversation -> respond.
+
+2. If the answer requires real computer information
+   -> use the appropriate tool.
+
+3. If the answer is unknown or uncertain
+   -> use web_search.
+
+4. If information may have changed over time
+   -> use web_search.
+
+5. If the user asks for current information
+   -> use web_search.
+
+6. If useful stored knowledge exists and is reliable,
+   Nova may answer without searching.
+
+7. Never invent tool results.
+
+8. Never invent web sources.
+
+9. Only use the tools listed above.
+
+10. Return JSON only.
+
+11. Do not explain your decision.
+
+12. Use at most one tool per decision.
+
+13. If a previous tool result already answers the
+    question, return respond.
+
+Available stored knowledge:
+
+{knowledge}
+
+Conversation:
+
+{conversation}
+
+Previous tool history:
+
+{tool_history}
+
+Current user request:
 
 {message}
 
-
-Return ONLY valid JSON.
-
-No markdown.
-No explanation.
-
-
-Tool example:
+Return exactly one of:
 
 {{
- "use_tool": true,
- "tool": "terminal",
- "input": "whoami"
+  "action": "respond"
 }}
 
-
-No tool example:
+OR:
 
 {{
- "use_tool": false
+  "action": "tool",
+  "tool": "web_search",
+  "input": "search query"
 }}
 
-Decision:
+OR:
+
+{{
+  "action": "tool",
+  "tool": "terminal",
+  "input": "python --version"
+}}
+
+JSON:
 """
 
+        raw = self.brain.generate(prompt)
 
+        data = self._extract_json(raw)
 
-        response = self.brain.generate(
-            prompt
-        )
-
-
-
-        print(
-            "ROUTER RAW:",
-            response
-        )
-
-
-
-        # Clean markdown
-
-        response = response.replace(
-            "```json",
-            ""
-        )
-
-
-        response = response.replace(
-            "```",
-            ""
-        )
-
-
-        response = response.strip()
-
-
-
-        try:
-
-            data = json.loads(
-                response
-            )
-
-
-        except Exception:
-
-
+        if not isinstance(data, dict):
             return {
-                "use_tool": False
+                "action": "respond"
             }
 
+        if data.get("action") == "respond":
 
+            return {
+                "action": "respond"
+            }
 
-        # Normalize bad Llama outputs
+        if data.get("action") == "tool":
 
+            tool = data.get("tool")
+            tool_input = data.get("input")
 
-        if (
-            data.get("use_tool") is True
-        ):
+            if not isinstance(tool, str):
+                return {
+                    "action": "respond"
+                }
 
+            if not isinstance(
+                tool_input,
+                str
+            ):
+                return {
+                    "action": "respond"
+                }
 
-            if "input" not in data:
+            if not self.tools.exists(tool):
 
+                return {
+                    "action": "respond"
+                }
 
-                if "subcommands" in data:
+            return {
+                "action": "tool",
+                "tool": tool,
+                "input": tool_input
+            }
 
-                    commands = data["subcommands"]
-
-
-                    if len(commands) > 0:
-
-                        data["input"] = commands[0].get(
-                            "name",
-                            ""
-                        )
-
-
-                else:
-
-                    data["use_tool"] = False
-
-
-
-        return data
+        return {
+            "action": "respond"
+        }

@@ -1,6 +1,6 @@
 {
     "profile": {
-        "name": "Nova",
+        "name": "",
         "age": "14"
     },
     "projects": [
@@ -11,20 +11,53 @@
         },
         {
             "programming_languages": "Python"
+        },
+        {
+            "running": "example"
+        },
+        {
+            "games": "Minecraft Version Update"
+        },
+        {
+            "ChatGPT Models": "Latest model is 'Chatterbot 3.1'"
+        },
+        {
+            "chatgpt": "ChatGPT"
         }
     ],
     "skills": [
         {
             "project": "run"
+        },
+        {
+            "task-management": "runs tasks directly"
+        },
+        {
+            "problem-solving": "example"
         }
     ],
-    "preferences": [],
+    "preferences": [
+        {
+            "games": "Minecraft"
+        }
+    ],
     "facts": [],
     "hardware": {
-        "operating_systems": "Python 3.9"
+        "operating_systems": "Linux",
+        "Web Search": "Google",
+        "model": "latest model"
     },
     "calculations": {
         "previous-question": "what is 2131*56",
         "previous-answer": "120,156"
+    },
+    "software": {
+        "programming_languages": "Python"
+    },
+    "general knowledge": {
+        "shaders": "various (e.g. vertex, fragment, geometry)"
+    },
+    "important facts": {
+        "ChatGPT Models": "Developed by OpenAI"
     }
 }

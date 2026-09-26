@@ -1,0 +1,74 @@
+[
+  {
+    "topic": "Minecraft version",
+    "fact": "Minecraft Java Edition 26.3",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.minecraft.net%2Fen%2Dus%2Farticle%2Fminecraft%2Djava%2Dedition%2D26%2D3",
+    "confidence": 1.0,
+    "learned_at": "2026-09-26T11:12:24.122510",
+    "last_verified": "2026-09-26T11:12:24.122510",
+    "expires_at": null
+  },
+  {
+    "topic": "Can AI agents search the internet?",
+    "fact": "AI agents can use web search to find information.",
+    "source": "https://data4ai.com/blog/technical-how-to-build-ai-agents-with-autonomous-search/",
+    "confidence": 1.0,
+    "learned_at": "2026-09-26T11:13:10.857257",
+    "last_verified": "2026-09-26T11:13:10.857257",
+    "expires_at": null
+  },
+  {
+    "topic": "Can AI agents search the internet?",
+    "fact": "AI agents can use various search engines and tools to access the internet.",
+    "source": "https://firecrawl.dev/blog/best-ai-search-engines-agents/",
+    "confidence": 1.0,
+    "learned_at": "2026-09-26T11:13:10.860065",
+    "last_verified": "2026-09-26T11:13:10.860065",
+    "expires_at": null
+  },
+  {
+    "topic": "latest stable Python version",
+    "fact": "The latest stable Python version is 3.14.7.",
+    "source": "https://www.python.org/downloads/latest",
+    "confidence": 1.0,
+    "learned_at": "2026-09-26T11:16:10.673474",
+    "last_verified": "2026-09-26T11:16:10.673474",
+    "expires_at": null
+  },
+  {
+    "topic": "best Minecraft shaders 2026",
+    "fact": "Multiple sources listed the top Minecraft shaders for 2026, including Realistic, Cozy & FPS Friendly, 20 Best Minecraft Shaders, Top 10 Best Minecraft Shaders, and Best Minecraft Shader Packs for 2026.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fmusthavemods.com%2Fbest%2Dminecraft%2Dshaders%2D2026%2F",
+    "confidence": 0.9,
+    "learned_at": "2026-09-26T11:22:58.714746",
+    "last_verified": "2026-09-26T11:22:58.714746",
+    "expires_at": null
+  },
+  {
+    "topic": "best Minecraft shaders 2026",
+    "fact": "Some sources listed top Minecraft shaders with performance and visual guides, such as Best Minecraft Shader Packs for 2026 and Top 25 Best Minecraft Shaders.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.switchbladegaming.com%2Fminecraft%2Fshader%2Dpacks%2D2026%2F",
+    "confidence": 0.8,
+    "learned_at": "2026-09-26T11:22:58.716622",
+    "last_verified": "2026-09-26T11:22:58.716622",
+    "expires_at": null
+  },
+  {
+    "topic": "best Minecraft shaders 2026",
+    "fact": "Community-driven sources such as CurseForge listed popular Minecraft shaders, including the top 25 most downloaded.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fblog.curseforge.com%2Fthe%2D25%2Dmost%2Dpopular%2Dminecraft%2Dshaders%2Don%2Fcurseforge%2F",
+    "confidence": 0.8,
+    "learned_at": "2026-09-26T11:22:58.717758",
+    "last_verified": "2026-09-26T11:22:58.717758",
+    "expires_at": null
+  },
+  {
+    "topic": "C++",
+    "fact": "C++ is a high-performance, compiled, general-purpose programming language that is widely used for building operating systems, embedded systems, and other high-performance applications.",
+    "source": "https://en.cppreference.com/w/",
+    "confidence": 1.0,
+    "learned_at": "2026-09-26T11:40:40.466502",
+    "last_verified": "2026-09-26T11:40:40.466502",
+    "expires_at": null
+  }
+]
