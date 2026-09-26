@@ -1,28 +1,54 @@
 from model.ollama import OllamaBrain
-from memory.memory import Memory
+from memory.memory import LongTermMemory
+from memory.extractor import MemoryExtractor
 
 
 class NovaCore:
+
+
     def __init__(self):
+
         self.brain = OllamaBrain()
-        self.memory = Memory()
+
+        self.memory = LongTermMemory()
+
+        self.extractor = MemoryExtractor()
+
+
 
     def ask(self, message):
 
-        self.memory.add(
-            "user",
+
+        memories = self.extractor.extract(
             message
         )
 
-        history = self.memory.get_recent()
 
-        response = self.brain.generate(
-            history
+        for item in memories:
+
+            category, key, value = item
+
+            self.memory.add_fact(
+                category,
+                key,
+                value
+            )
+
+
+        context = self.memory.get_context()
+
+
+        prompt = f"""
+You are Nova, a local AI agent.
+
+User memory:
+{context}
+
+User message:
+{message}
+"""
+
+
+        return self.brain.generate(
+            prompt
         )
-
-        self.memory.add(
-            "assistant",
-            response
-        )
-
-        return response

@@ -7,21 +7,26 @@ class OllamaBrain:
         self.model = model
 
 
-    def generate(self, messages):
+    def generate(self, prompt):
 
         response = ollama.chat(
             model=self.model,
             messages=[
                 {
                     "role": "system",
-                    "content":
-                    """
-You are Nova.
-You are a local AI agent.
-Remember the conversation context.
+                    "content": """
+You are Nova, a local AI agent.
+
+You are powered by Llama 3.2:3B through Ollama.
+
+You have access to user memory.
+Use it when relevant.
 """
                 },
-                *messages
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ]
         )
 
