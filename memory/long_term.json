@@ -1,6 +1,6 @@
 {
     "profile": {
-        "name": "",
+        "name": "example",
         "age": "14"
     },
     "projects": [
@@ -23,6 +23,18 @@
         },
         {
             "chatgpt": "ChatGPT"
+        },
+        {
+            "task": "create something on the desktop"
+        },
+        {
+            "test": "create"
+        },
+        {
+            "calculationProject": "calc.py"
+        },
+        {
+            "calculationProjectLocation": "desktop"
         }
     ],
     "skills": [
@@ -45,7 +57,8 @@
     "hardware": {
         "operating_systems": "Linux",
         "Web Search": "Google",
-        "model": "latest model"
+        "model": "latest model",
+        "desktop": "exists"
     },
     "calculations": {
         "previous-question": "what is 2131*56",
@@ -59,5 +72,16 @@
     },
     "important facts": {
         "ChatGPT Models": "Developed by OpenAI"
+    },
+    "skill": {
+        "programming": "Python",
+        "skill-level": "intermediate"
+    },
+    "project": {
+        "calculation": "created",
+        "file-name": "calc.py"
+    },
+    "actions": {
+        "saves": true
     }
 }

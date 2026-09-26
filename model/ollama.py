@@ -3,7 +3,7 @@ import ollama
 
 class OllamaBrain:
 
-    def __init__(self, model="llama3.2:3b"):
+    def __init__(self, model="qwen2.5:3b"):
         self.model = model
 
 
@@ -17,7 +17,7 @@ class OllamaBrain:
                     "content": """
 You are Nova, a local AI agent.
 
-You are powered by Llama 3.2:3B through Ollama.
+You are powered by qwen2.5:3b through qwen.
 
 You have access to user memory.
 Use it when relevant.
