@@ -1,26 +1,28 @@
 from model.ollama import OllamaBrain
+from memory.memory import Memory
 
 
 class NovaCore:
     def __init__(self):
         self.brain = OllamaBrain()
-        self.memory = []
+        self.memory = Memory()
 
     def ask(self, message):
-        self.memory.append(
-            {
-                "role": "user",
-                "content": message,
-            }
+
+        self.memory.add(
+            "user",
+            message
         )
 
-        response = self.brain.generate(message)
+        history = self.memory.get_recent()
 
-        self.memory.append(
-            {
-                "role": "assistant",
-                "content": response,
-            }
+        response = self.brain.generate(
+            history
+        )
+
+        self.memory.add(
+            "assistant",
+            response
         )
 
         return response
