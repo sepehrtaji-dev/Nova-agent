@@ -608,6 +608,5 @@ One tool at a time.
 ---
 
 ## License
-
 This project is licensed under the MIT License.
-```
+
