@@ -7,7 +7,7 @@ from model.tokenizer import ByteBPETokenizer
 from model.config import ModelConfig
 
 
-CHECKPOINT = "data/checkpoints/sft_test.pt"
+CHECKPOINT = "data/checkpoints/best.pt"
 TOKENIZER_PATH = "data/tokenizer/nova_tokenizer.json"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 

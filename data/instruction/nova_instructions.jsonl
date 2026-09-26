@@ -1412,3 +1412,46 @@
 {"instruction": "What is 15% of 80?", "response": "12."}
 {"instruction": "If a rectangle is 6 units long and 4 units wide, what is its area?", "response": "The area is 24 square units."}
 {"instruction": "How far is it from 7 to 13 on a number line?", "response": "It is 6 units away."}
+{"instruction": "What is a checkpoint?", "response": "A checkpoint is a saved model state that can be loaded later."}
+{"instruction": "What is validation loss?", "response": "Validation loss measures how well a model performs on data it did not train on."}
+{"instruction": "Explain overfitting simply.", "response": "Overfitting happens when a model memorizes training data too closely and performs worse on new data."}
+{"instruction": "Can you help me learn Python?", "response": "Absolutely. We can start with the basics and build up through practical projects."}
+{"instruction": "My model is overfitting. What should I check first?", "response": "Check the training-versus-validation loss gap, then consider regularization, data augmentation, or reducing model capacity."}
+{"instruction": "Write a Python function that adds two numbers.", "response": "```python\ndef add(a, b):\n    return a + b\n```"}
+{"instruction": "What should a good checkpoint contain?", "response": "At minimum, the model state and enough training state to resume consistently, such as the optimizer and training step."}
+{"instruction": "Who are you?", "response": "I'm Nova, a local AI assistant built to help with coding, learning, and practical tasks."}
+{"instruction": "What is CUDA?", "response": "CUDA lets compatible NVIDIA GPUs accelerate computation."}
+{"instruction": "Why doesn't it work?", "response": "I need the relevant code and error message to identify the cause."}
+{"instruction": "How do I define a Python class?", "response": "```python\nclass MyClass:\n    def __init__(self, value):\n        self.value = value\n```"}
+{"instruction": "Explain an epoch simply.", "response": "One epoch is one complete pass through the training dataset."}
+{"instruction": "I don't understand.", "response": "No problem. Tell me which part is confusing, and I'll explain it more simply."}
+{"instruction": "How do I catch an exception in Python?", "response": "```python\ntry:\n    risky_operation()\nexcept Exception as e:\n    print(e)\n```"}
+{"instruction": "Why do we use a validation set?", "response": "To measure generalization during training without using the training examples themselves."}
+{"instruction": "How do I move a PyTorch tensor to the GPU?", "response": "```python\nx = x.to(\"cuda\")\n```"}
+{"instruction": "If you don't know something, what should you do?", "response": "Say that you're uncertain and avoid presenting a guess as a fact."}
+{"instruction": "Can you access my private files automatically?", "response": "Not automatically. I can work with files you provide or with tools you explicitly connect."}
+{"instruction": "Make it better.", "response": "I can do that, but I need the code or content you want improved."}
+{"instruction": "Why is a GPU useful for deep learning?", "response": "GPUs can perform many numerical operations in parallel, which speeds up neural-network training."}
+{"instruction": "How do I create a tensor in PyTorch?", "response": "```python\nx = torch.tensor([1, 2, 3])\n```"}
+{"instruction": "How do I check whether CUDA is available in PyTorch?", "response": "```python\nimport torch\nprint(torch.cuda.is_available())\n```"}
+{"instruction": "Are you sure?", "response": "If you mean the previous answer, I can verify it or explain what I'm uncertain about."}
+{"instruction": "My GPU memory is full during training. What can I reduce first?", "response": "Try a smaller batch size or sequence length first; gradient accumulation can preserve a larger effective batch."}
+{"instruction": "Give me a short answer.", "response": "Sure. I'll keep it concise and focus on the key point."}
+{"instruction": "Write a Python loop that prints 0 through 4.", "response": "```python\nfor i in range(5):\n    print(i)\n```"}
+{"instruction": "What does a learning rate control?", "response": "It controls how large each optimizer update is."}
+{"instruction": "How should I compare two model versions?", "response": "Evaluate both on the same validation set and compare the same metrics."}
+{"instruction": "What is the exact cause of this bug without seeing the code?", "response": "I can't determine the exact cause without the relevant code or error details."}
+{"instruction": "Fix my code.", "response": "Sure—send the code and the error or describe what it should do."}
+{"instruction": "What is 2 + 2?", "response": "4."}
+{"instruction": "What is an algorithm?", "response": "An algorithm is a step-by-step procedure for solving a problem or completing a task."}
+{"instruction": "Thanks!", "response": "You're welcome!"}
+{"instruction": "What is PyTorch?", "response": "PyTorch is a Python framework for building and training machine-learning models."}
+{"instruction": "Optimize this.", "response": "Send the code and, if relevant, the target such as speed, memory usage, or readability."}
+{"instruction": "What is perplexity?", "response": "Perplexity measures how well a language model predicts text; lower is generally better."}
+{"instruction": "What is gradient accumulation?", "response": "It combines gradients from several smaller batches before updating the model."}
+{"instruction": "What is the difference between training and validation data?", "response": "Training data updates the model; validation data measures performance during development."}
+{"instruction": "Why save checkpoints during training?", "response": "So you can resume training or recover a good model state if later training gets worse."}
+{"instruction": "Why can a lower training loss be misleading?", "response": "The model may be improving on training data while getting worse on unseen data."}
+{"instruction": "What is a dataset?", "response": "A dataset is a collection of data used for analysis, training, or evaluation."}
+{"instruction": "What is supervised fine-tuning?", "response": "It trains a pretrained model on examples of desired inputs and outputs."}
+{"instruction": "Training is too slow. What should I inspect?", "response": "Check GPU utilization, data-loading speed, batch size, sequence length, and whether the model is actually running on CUDA."}
