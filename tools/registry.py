@@ -1,10 +1,18 @@
 class ToolRegistry:
 
+
     def __init__(self):
+
         self.tools = {}
 
 
-    def register(self, name, description, function):
+
+    def register(
+        self,
+        name,
+        description,
+        function
+    ):
 
         self.tools[name] = {
             "description": description,
@@ -12,22 +20,33 @@ class ToolRegistry:
         }
 
 
+
+    def execute(
+        self,
+        name,
+        input
+    ):
+
+        if name not in self.tools:
+
+            return "Tool not found"
+
+
+        return self.tools[name]["function"](
+            input
+        )
+
+
+
     def get_descriptions(self):
 
         result = []
 
-        for name, tool in self.tools.items():
+        for name,tool in self.tools.items():
 
             result.append(
-                f"- {name}: {tool['description']}"
+                f"{name}: {tool['description']}"
             )
 
+
         return "\n".join(result)
-
-
-    def execute(self, name, *args):
-
-        if name not in self.tools:
-            return "Tool unavailable"
-
-        return self.tools[name]["function"](*args)

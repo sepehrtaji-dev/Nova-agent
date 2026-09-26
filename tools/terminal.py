@@ -1,25 +1,66 @@
 import subprocess
+import os
 
 
-def run_command(command):
 
-    allowed = [
-        "python --version",
-        "dir",
-        "whoami"
-    ]
+class TerminalTool:
 
 
-    if command not in allowed:
-        return "Command blocked"
+    def __init__(self):
+
+        self.history = []
 
 
-    result = subprocess.run(
-        command,
-        shell=True,
-        capture_output=True,
-        text=True
-    )
+
+    def run(self, command):
 
 
-    return result.stdout
+        self.history.append(
+            command
+        )
+
+
+        blocked = [
+            "format",
+            "del /f",
+            "rm -rf",
+            "shutdown",
+            "restart"
+        ]
+
+
+        for item in blocked:
+
+            if item in command.lower():
+
+                return "Command blocked for safety"
+
+
+
+        try:
+
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+
+            output = result.stdout
+
+
+            if result.stderr:
+
+                output += "\n" + result.stderr
+
+
+
+            return output.strip()
+
+
+
+        except Exception as e:
+
+            return f"Terminal error: {e}"

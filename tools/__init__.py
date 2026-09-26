@@ -1,15 +1,21 @@
 from tools.registry import ToolRegistry
-from tools.terminal import run_command
+from tools.terminal import TerminalTool
+
 
 
 def load_tools():
 
     registry = ToolRegistry()
 
+
+    terminal = TerminalTool()
+
+
     registry.register(
         "terminal",
-        "Execute approved local terminal commands",
-        run_command
+        "Execute safe terminal commands on the local computer",
+        terminal.run
     )
+
 
     return registry
