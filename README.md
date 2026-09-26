@@ -145,23 +145,23 @@ Example:
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
-│ ✦ NOVA   LOCAL AI AGENT                         QWEN 2.5 │
+│ ✦ NOVA   LOCAL AI AGENT                         QWEN 2.5│
 └──────────────────────────────────────────────────────────┘
 
 ● LOCAL   ● TOOLS ENABLED   ● PRIVATE
 
 
-┌─ ACTIVITY ────────────────────────────────────────────────┐
+┌─ ACTIVITY ───────────────────────────────────────────────┐
 │ ● Planning                                               │
 │                                                          │
-│ 21:42:03  PLAN   Creating execution plan                │
-│ 21:42:04  WEB    Searching public web                   │
-│ 21:42:07  WEB    Search completed                       │
-│ 21:42:08  THINK  Processing tool result                 │
-│ 21:42:11  TERM   Running terminal command               │
-│ 21:42:12  DONE   Task completed                         │
+│ 21:42:03  PLAN   Creating execution plan                 │
+│ 21:42:04  WEB    Searching public web                    │
+│ 21:42:07  WEB    Search completed                        │
+│ 21:42:08  THINK  Processing tool result                  │
+│ 21:42:11  TERM   Running terminal command                │
+│ 21:42:12  DONE   Task completed                          │
 │                                                          │
-│ Events: 6   ·   Elapsed: 9.4s                           │
+│ Events: 6   ·   Elapsed: 9.4s                            │
 └──────────────────────────────────────────────────────────┘
 ```
 
