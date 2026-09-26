@@ -1,6 +1,6 @@
 {
     "profile": {
-        "name": "example",
+        "name": "Nova",
         "age": "14"
     },
     "projects": [
@@ -22,5 +22,9 @@
     "facts": [],
     "hardware": {
         "operating_systems": "Python 3.9"
+    },
+    "calculations": {
+        "previous-question": "what is 2131*56",
+        "previous-answer": "120,156"
     }
 }
