@@ -22,5 +22,13 @@
     {
         "role": "assistant",
         "content": "Your name is Sepher, and we were just chatting for a brief moment before you exited."
+    },
+    {
+        "role": "user",
+        "content": "who are you?"
+    },
+    {
+        "role": "assistant",
+        "content": "I'm Nova, your local AI agent. I'm here to assist and provide information to users in the area. I'm glad we got to chat earlier, Sepher!"
     }
 ]
