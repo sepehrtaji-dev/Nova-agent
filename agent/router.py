@@ -608,7 +608,34 @@ class ToolRouter:
                 and bool(query.strip())
             )
 
+        if tool_name == "git":
+            action = tool_input.get("action")
+            return isinstance(action, str) and bool(action.strip())
+
         return False
+
+    # Keywords that always mean computer task
+    _computer_keywords = [
+        # file operations
+        "create", "save", "write", "make", "build",
+        "generate", "edit", "modify", "update", "delete",
+        "read", "open", "list", "show files", "directory",
+        "folder", "file", "script", "program", "code",
+        "desktop", "project",
+        # execution
+        "run", "execute", "compile", "test", "debug",
+        "install", "launch", "start", "fix",
+        # git
+        "git", "commit", "push", "pull", "clone",
+        "branch", "checkout", "merge", "stash", "repo",
+        "repository", "init", "diff", "log",
+        # research/study
+        "study", "analyze", "analyse", "examine", "inspect",
+        "review", "look at", "check out", "read through",
+        "understand", "explore", "investigate",
+        # download
+        "download", "fetch", "get",
+    ]
 
     _search_intent_pattern = re.compile(
         r"""
@@ -646,10 +673,14 @@ class ToolRouter:
         conversation=""
     ):
 
-        if self._has_search_intent(
-            message
-        ):
+        if self._has_search_intent(message):
             return "computer"
+
+        # Keyword pre-classification — fast and reliable for common cases
+        msg_lower = message.lower()
+        for kw in self._computer_keywords:
+            if kw in msg_lower:
+                return "computer"
 
         prompt = f"""
 You are Nova's task classifier.
@@ -934,6 +965,15 @@ terminal
 
 Searching the public web:
 web_search
+
+Git operations (clone, commit, push, pull, status, log, diff, branch, checkout):
+git
+
+Use git when the user asks to:
+- study/clone/inspect a repository
+- commit, push, pull, branch, merge
+- check git log or diff
+- any version control operation
 
 IMPORTANT:
 
@@ -1308,6 +1348,18 @@ For terminal:
   "input": {{
     "command": "command",
     "location": "projects"
+  }}
+}}
+
+For git:
+
+{{
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "git",
+  "input": {{
+    "action": "clone",
+    "url": "https://github.com/..."
   }}
 }}
 
