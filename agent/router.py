@@ -884,21 +884,27 @@ Do NOT respond after just cloning — you must also read the files.
 Only respond when you have actually read content from the repo.
 
 CREATE REPO WORKFLOW:
-If the user asks to create a new GitHub repo and push files:
-1. git: create_repo (needs token from user)
-2. git: init (local folder)
-3. write_file (create the files)
-4. git: add
-5. git: commit
-6. git: push_with_token (with token + clone_url from step 1)
+If the user wants to create a GitHub repo:
+- You NEED a GitHub Personal Access Token (PAT) from the user.
+- If the conversation does not contain a token (ghp_... string), respond with conversation and ask for it.
+- Once you have the token, follow these steps in order:
 
-For create_repo input:
-{{"action": "create_repo", "name": "repo-name", "token": "USER_PAT", "private": false}}
+Step 1 - Create repo on GitHub:
+{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "create_repo", "name": "repo-name", "token": "THE_TOKEN", "private": false}}}}
 
-For push_with_token input:
-{{"action": "push_with_token", "path": "local/folder", "token": "USER_PAT", "url": "https://github.com/user/repo.git", "branch": "main"}}
+Step 2 - Init local folder:
+{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "init", "path": "repo-name"}}}}
 
-IMPORTANT: If the user has not provided a GitHub token, ask them for it before attempting create_repo or push_with_token.
+Step 3 - Write files using write_file tool (location: projects, path: repo-name/filename.py)
+
+Step 4 - Git add:
+{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "add", "path": "repo-name"}}}}
+
+Step 5 - Git commit:
+{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "commit", "path": "repo-name", "message": "Initial commit"}}}}
+
+Step 6 - Push with token:
+{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "push_with_token", "path": "repo-name", "token": "THE_TOKEN", "url": "https://github.com/USERNAME/repo-name.git", "branch": "main"}}}}
 
 IMPORTANT:
 
