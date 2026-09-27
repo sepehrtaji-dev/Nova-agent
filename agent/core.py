@@ -156,7 +156,10 @@ class NovaCore:
             )
 
         if tool_name == "git":
-            return "STATUS: SUCCESS" in result
+            return (
+                "STATUS: SUCCESS" in result
+                and "STATUS: ERROR" not in result
+            )
 
         return False
 
@@ -1762,35 +1765,31 @@ Tool success:
         ):
 
             if successful_web_search:
+                completed = True
 
+            elif self._has_successful_tool(tool_history):
+                # Tools ran successfully — build final answer from results
+                # even if the router loop didn't explicitly mark complete
                 completed = True
 
             else:
-
-                self._status(
-                    "Preparing final answer..."
-                )
+                self._status("Preparing final answer...")
 
                 if last_tool_error:
-
                     response = (
                         "I couldn't complete the "
                         "requested computer operation.\n\n"
                         f"Last tool result:\n"
                         f"{last_tool_error}"
                     )
-
                 elif tool_history:
-
                     response = (
                         "I couldn't verify completion "
                         "of the requested computer "
                         "operation. No successful "
                         "completion was confirmed."
                     )
-
                 else:
-
                     response = (
                         "I couldn't perform the "
                         "requested computer operation "
@@ -1798,15 +1797,8 @@ Tool success:
                         "was successfully completed."
                     )
 
-                self._status(
-                    "Done"
-                )
-
-                self.short_memory.add(
-                    "assistant",
-                    response
-                )
-
+                self._status("Done")
+                self.short_memory.add("assistant", response)
                 return response
 
         if (
