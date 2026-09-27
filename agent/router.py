@@ -611,7 +611,13 @@ class ToolRouter:
 
         if tool_name == "git":
             action = tool_input.get("action")
-            return isinstance(action, str) and bool(action.strip())
+            if not isinstance(action, str) or not action.strip():
+                return False
+            if action == "create_repo":
+                return bool(tool_input.get("name", "").strip())
+            if action in {"push_with_token", "set_remote"}:
+                return True
+            return True
 
         return False
 
@@ -876,6 +882,23 @@ If the user asked to study/analyze/inspect a repository:
 
 Do NOT respond after just cloning — you must also read the files.
 Only respond when you have actually read content from the repo.
+
+CREATE REPO WORKFLOW:
+If the user asks to create a new GitHub repo and push files:
+1. git: create_repo (needs token from user)
+2. git: init (local folder)
+3. write_file (create the files)
+4. git: add
+5. git: commit
+6. git: push_with_token (with token + clone_url from step 1)
+
+For create_repo input:
+{"action": "create_repo", "name": "repo-name", "token": "USER_PAT", "private": false}
+
+For push_with_token input:
+{"action": "push_with_token", "path": "local/folder", "token": "USER_PAT", "url": "https://github.com/user/repo.git", "branch": "main"}
+
+IMPORTANT: If the user hasn't provided a GitHub token, ask them for it before attempting create_repo or push_with_token.
 
 IMPORTANT:
 
