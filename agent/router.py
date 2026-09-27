@@ -671,23 +671,26 @@ Answer "conversation" if Nova only needs to TALK:
 - Answering questions from memory
 - Writing text that the user will copy manually
 - General chat
+- Asking the user for missing information (like a token or password)
 
 KEY INSIGHT: If the user wants Nova to DO something (even passively like
 "study this", "look at this", "analyze this", "check this"), that requires
-tools. It is "computer". If the user just wants Nova to TELL them something
-from its own knowledge, that is "conversation".
+tools → computer.
+If the user just wants Nova to TELL them something → conversation.
+
+SPECIAL CASE - GitHub repo creation:
+If the user wants to create a GitHub repo but no GitHub token (ghp_...) 
+appears in the conversation, Nova must ask for it first → conversation.
+If a token IS present in the conversation → computer.
 
 Examples:
-- "study this repo https://github.com/..." → computer (needs git clone + read)
-- "analyze my project" → computer (needs read_file)
+- "study this repo https://github.com/..." → computer
+- "create a github repo" (no token in conversation) → conversation
+- "create a github repo" (token already given) → computer
 - "what is a linked list?" → conversation
-- "create a calculator" → computer
+- "create a calculator.py file" → computer
 - "how does git work?" → conversation
 - "commit my changes" → computer
-- "look at this file" → computer
-- "explain recursion" → conversation
-- "can you use git?" → conversation (just asking)
-- "use git to clone this" → computer
 
 User message: {message}
 
