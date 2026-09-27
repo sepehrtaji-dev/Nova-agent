@@ -289,7 +289,8 @@ class ToolRouter:
             "STATUS: SUCCESS",
             "FILE_CREATED",
             "DIRECTORY_CREATED",
-            "Tool: web_search"
+            "Tool: web_search",
+            "Tool: git",
         ]
 
         return any(
@@ -865,6 +866,16 @@ Use git when the user asks to:
 - commit, push, pull, branch, merge
 - check git log or diff
 - any version control operation
+
+STUDY WORKFLOW:
+If the user asked to study/analyze/inspect a repository:
+1. First: git clone
+2. Then: list_files to see structure
+3. Then: read_file README.md (or key files)
+4. Then: respond with findings
+
+Do NOT respond after just cloning — you must also read the files.
+Only respond when you have actually read content from the repo.
 
 IMPORTANT:
 
