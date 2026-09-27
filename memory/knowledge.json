@@ -151,5 +151,23 @@
     "learned_at": "2026-09-26T15:55:58.029684",
     "last_verified": "2026-09-26T15:55:58.029684",
     "expires_at": "2026-10-03T15:55:58.029684"
+  },
+  {
+    "topic": "kagglehub",
+    "fact": "Python library to access Kaggle resources",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2FKaggle%2Fkagglehub&rut=9943d94a7ee56cd8d0cbb3ebdedc65db27005228cd0a10f07a3c31d3b36f1df2",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T09:33:13.520651",
+    "last_verified": "2026-09-27T09:33:13.520651",
+    "expires_at": "2026-10-04T09:33:13.520651"
+  },
+  {
+    "topic": "kagglehub",
+    "fact": "Contribute to Kaggle/kagglehub development by creating an account on GitHub",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2FKaggle%2Fkagglehub&rut=9943d94a7ee56cd8d0cbb3ebdedc65db27005228cd0a10f07a3c31d3b36f1df2",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T09:33:13.523034",
+    "last_verified": "2026-09-27T09:33:13.523034",
+    "expires_at": "2026-10-04T09:33:13.523034"
   }
 ]
