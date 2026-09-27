@@ -608,6 +608,10 @@ class ToolRouter:
                 and bool(query.strip())
             )
 
+        if tool_name == "git":
+            action = tool_input.get("action")
+            return isinstance(action, str) and bool(action.strip())
+
         return False
 
     _search_intent_pattern = re.compile(
@@ -640,161 +644,79 @@ class ToolRouter:
             )
         )
 
-    def classify_task(
-        self,
-        message,
-        conversation=""
-    ):
+    def classify_task(self, message, conversation=""):
 
-        if self._has_search_intent(
-            message
-        ):
-            return "computer"
+        prompt = f"""You are a task classifier for Nova, a local AI agent.
 
-        prompt = f"""
-You are Nova's task classifier.
+Decide if Nova needs to USE TOOLS to respond, or just TALK.
 
-Classify ONLY the user's CURRENT request.
+Answer "computer" if Nova must actually DO something:
+- Access, read, write, create, delete, or modify files
+- Run terminal commands or scripts
+- Use git (clone, commit, push, pull, study a repo, etc.)
+- Search the web
+- Install packages
+- Inspect, analyze, or study any file, folder, URL, or repository
+- Anything that requires interacting with the computer or external systems
 
-There are exactly two possible task types:
+Answer "conversation" if Nova only needs to TALK:
+- Explaining concepts
+- Answering questions from memory
+- Writing text that the user will copy manually
+- General chat
 
-conversation
+KEY INSIGHT: If the user wants Nova to DO something (even passively like
+"study this", "look at this", "analyze this", "check this"), that requires
+tools. It is "computer". If the user just wants Nova to TELL them something
+from its own knowledge, that is "conversation".
 
-computer
+Examples:
+- "study this repo https://github.com/..." → computer (needs git clone + read)
+- "analyze my project" → computer (needs read_file)
+- "what is a linked list?" → conversation
+- "create a calculator" → computer
+- "how does git work?" → conversation
+- "commit my changes" → computer
+- "look at this file" → computer
+- "explain recursion" → conversation
+- "can you use git?" → conversation (just asking)
+- "use git to clone this" → computer
 
-A computer task means Nova must actually
-perform one or more operations using real tools.
+User message: {message}
 
-A conversation task means Nova only needs to
-answer the user and does not need to operate
-the computer.
+Previous conversation: {conversation}
 
-Use "computer" when the user asks Nova to:
-
-- create a file
-- save a file
-- write a file
-- modify a file
-- edit a project
-- create a directory
-- read a file
-- inspect files
-- list files
-- run a program
-- execute a command
-- compile code
-- test code
-- debug code
-- inspect terminal output
-- work on a project
-- operate on the desktop
-- search the public web
-
-Use "conversation" when the user only wants:
-
-- explanation
-- information
-- brainstorming
-- advice
-- normal conversation
-- code shown in chat
-- examples
-- tutorials
-- conceptual help
-
-If the user asks to CREATE, SAVE, MODIFY,
-READ, RUN, TEST, COMPILE, DEBUG, INSPECT,
-OPERATE, or SEARCH something, use:
-
-computer
-
-USER REQUEST:
-
-{message}
-
-PREVIOUS CONVERSATION:
-
-{conversation}
-
-Return ONLY valid JSON.
-
-{{"task_type":"conversation"}}
-
-or
-
-{{"task_type":"computer"}}
-"""
+Return ONLY valid JSON. No explanation.
+{{"task_type": "computer"}} or {{"task_type": "conversation"}}"""
 
         try:
-
-            raw = self.brain.generate(
-                prompt,
-                json_mode=True
-            )
-
+            raw = self.brain.generate(prompt, json_mode=True)
         except Exception:
-
             raw = ""
 
-        data = self._extract_json(
-            raw
-        )
+        data = self._extract_json(raw)
 
         if isinstance(data, dict):
-
-            task_type = (
-                self._normalize_task_type(
-                    data.get("task_type")
-                )
-            )
-
+            task_type = self._normalize_task_type(data.get("task_type"))
             if task_type:
                 return task_type
 
-        repair_prompt = f"""
-Return ONLY valid JSON.
+        # Repair pass with even simpler prompt
+        repair_prompt = f"""Does this request require Nova to use tools (files, terminal, git, web)?
 
-Classify the request as:
+Request: {message}
 
-{{"task_type":"conversation"}}
-
-or
-
-{{"task_type":"computer"}}
-
-Use computer when Nova must actually
-create, save, modify, read, run, compile,
-test, debug, inspect, search the web,
-or operate something.
-
-USER REQUEST:
-
-{message}
-"""
+Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
 
         try:
-
-            raw = self.brain.generate(
-                repair_prompt,
-                json_mode=True
-            )
-
+            raw = self.brain.generate(repair_prompt, json_mode=True)
         except Exception:
-
             raw = ""
 
-        data = self._extract_json(
-            raw
-        )
+        data = self._extract_json(raw)
 
         if isinstance(data, dict):
-
-            task_type = (
-                self._normalize_task_type(
-                    data.get("task_type")
-                )
-            )
-
+            task_type = self._normalize_task_type(data.get("task_type"))
             if task_type:
                 return task_type
 
@@ -934,6 +856,15 @@ terminal
 
 Searching the public web:
 web_search
+
+Git operations (clone, commit, push, pull, status, log, diff, branch, checkout):
+git
+
+Use git when the user asks to:
+- study/clone/inspect a repository
+- commit, push, pull, branch, merge
+- check git log or diff
+- any version control operation
 
 IMPORTANT:
 
@@ -1308,6 +1239,18 @@ For terminal:
   "input": {{
     "command": "command",
     "location": "projects"
+  }}
+}}
+
+For git:
+
+{{
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "git",
+  "input": {{
+    "action": "clone",
+    "url": "https://github.com/..."
   }}
 }}
 

@@ -155,6 +155,9 @@ class NovaCore:
                 )
             )
 
+        if tool_name == "git":
+            return "STATUS: SUCCESS" in result
+
         return False
 
     def _success_line_matches(self, text):
@@ -520,6 +523,26 @@ class NovaCore:
                 return False, (
                     "web_search query is empty."
                 )
+
+        elif tool_name == "git":
+
+            action = data.get("action")
+
+            if not isinstance(action, str):
+                return False, "git requires an action."
+
+            if not action.strip():
+                return False, "git action is empty."
+
+            valid_actions = {
+                "init", "clone", "status", "add",
+                "commit", "push", "pull", "log",
+                "diff", "branch", "checkout",
+                "create_branch", "stash"
+            }
+
+            if action.strip().lower() not in valid_actions:
+                return False, f"Unknown git action: {action}"
 
         return True, None
 
