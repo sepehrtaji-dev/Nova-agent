@@ -1,14 +1,15 @@
 {
     "profile": {
-        "name": "I",
+        "name": "USER_NAME",
         "age": "14",
         "powers": "qwen2.5:3b through qwen",
         "skills": "developer",
-        "projects": "Python calculator project",
-        "hardware": "tools to access terminal, files and web search",
+        "projects": "test.py",
+        "hardware": "Not specified",
         "programming_languages": "git",
         "developer": "Taji-soft team",
-        "version": "Nova 1.1"
+        "version": "Nova 1.1",
+        "software_setup": "Python, PyTorch"
     },
     "projects": [
         {
