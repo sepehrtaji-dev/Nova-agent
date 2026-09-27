@@ -106,37 +106,44 @@ class Planner:
                 "steps": []
             }
 
-        prompt = f"""
-You are Nova's task planner.
+        prompt = f"""You are Nova's task planner.
 
-Create an actionable plan for the user's goal.
+Create a concrete step-by-step plan. Each step must map to exactly ONE tool call.
 
-USER GOAL:
-{goal}
+Available tools:
+- write_file: create a file on disk
+- read_file: read a file
+- list_files: list directory contents
+- create_directory: make a folder
+- terminal: run a shell command
+- web_search: search the web
+- git: git operations (init, clone, add, commit, push, pull, status, log, create_repo, push_with_token)
 
-CONTEXT:
-{context}
+USER GOAL: {goal}
+
+CONTEXT: {context}
 
 Rules:
-- Break complex work into meaningful ordered steps.
-- Keep simple requests simple.
-- Do not execute tools.
-- Do not claim anything is completed.
-- Do not invent results.
-- Each step must describe one meaningful action.
-- The plan will be executed by another component.
+- Each step = one tool call. Be specific about which tool and what inputs.
+- If the task needs a GitHub token and none is in the context, first step must be: "ask user for GitHub PAT token"
+- For GitHub repo creation the steps must be in order:
+  1. ask for token (if not already provided)
+  2. git create_repo
+  3. git init
+  4. write_file (the actual files)
+  5. git add
+  6. git commit
+  7. git push_with_token
+- Do not skip steps. Do not combine steps.
 - Return JSON only.
 
 Schema:
 {{
-  "goal": "short overall goal",
+  "goal": "short goal",
   "steps": [
-    {{
-      "description": "action to perform"
-    }}
+    {{"description": "which tool to use and exactly what to do"}}
   ]
-}}
-"""
+}}"""
 
         try:
             print("\n[PLANNER] Creating plan...")
