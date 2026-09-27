@@ -848,66 +848,27 @@ Do NOT return source code as the final answer
 when the user requested an actual file.
 
 TOOL SELECTION:
+write_file     → create or save a file
+read_file      → read a file
+list_files     → list directory contents
+create_directory → make a folder
+terminal       → run a shell command
+web_search     → search the web
+git            → any git operation
 
-Creating or saving a file:
-write_file
+YOUR ONLY JOB: Execute the CURRENT STEP from the plan.
+Look at the plan. Find the first step that is still "pending".
+Execute ONLY that step. Nothing more.
 
-Reading a file:
-read_file
-
-Listing files:
-list_files
-
-Creating a directory:
-create_directory
-
-Running, compiling, testing, or executing:
-terminal
-
-Searching the public web:
-web_search
-
-Git operations (clone, commit, push, pull, status, log, diff, branch, checkout):
-git
-
-Use git when the user asks to:
-- study/clone/inspect a repository
-- commit, push, pull, branch, merge
-- check git log or diff
-- any version control operation
-
-STUDY WORKFLOW:
-If the user asked to study/analyze/inspect a repository:
-1. First: git clone
-2. Then: list_files to see structure
-3. Then: read_file README.md (or key files)
-4. Then: respond with findings
-
-Do NOT respond after just cloning — you must also read the files.
-Only respond when you have actually read content from the repo.
-
-CREATE REPO WORKFLOW:
-If the user wants to create a GitHub repo:
-- You NEED a GitHub Personal Access Token (PAT) from the user.
-- If the conversation does not contain a token (ghp_... string), respond with conversation and ask for it.
-- Once you have the token, follow these steps in order:
-
-Step 1 - Create repo on GitHub:
-{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "create_repo", "name": "repo-name", "token": "THE_TOKEN", "private": false}}}}
-
-Step 2 - Init local folder:
-{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "init", "path": "repo-name"}}}}
-
-Step 3 - Write files using write_file tool (location: projects, path: repo-name/filename.py)
-
-Step 4 - Git add:
-{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "add", "path": "repo-name"}}}}
-
-Step 5 - Git commit:
-{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "commit", "path": "repo-name", "message": "Initial commit"}}}}
-
-Step 6 - Push with token:
-{{"action": "tool", "task_type": "computer", "tool": "git", "input": {{"action": "push_with_token", "path": "repo-name", "token": "THE_TOKEN", "url": "https://github.com/USERNAME/repo-name.git", "branch": "main"}}}}
+For git tool, the input must have an "action" field.
+Examples:
+- git init:          {{"action":"init","path":"folder"}}
+- git create_repo:   {{"action":"create_repo","name":"repo","token":"ghp_xxx","private":false}}
+- git add:           {{"action":"add","path":"folder"}}
+- git commit:        {{"action":"commit","path":"folder","message":"Initial commit"}}
+- git push_with_token: {{"action":"push_with_token","path":"folder","token":"ghp_xxx","url":"https://github.com/user/repo.git","branch":"main"}}
+- git clone:         {{"action":"clone","url":"https://github.com/..."}}
+- git status:        {{"action":"status","path":"folder"}}
 
 IMPORTANT:
 
