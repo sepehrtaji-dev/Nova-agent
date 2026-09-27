@@ -893,12 +893,12 @@ If the user asks to create a new GitHub repo and push files:
 6. git: push_with_token (with token + clone_url from step 1)
 
 For create_repo input:
-{"action": "create_repo", "name": "repo-name", "token": "USER_PAT", "private": false}
+{{"action": "create_repo", "name": "repo-name", "token": "USER_PAT", "private": false}}
 
 For push_with_token input:
-{"action": "push_with_token", "path": "local/folder", "token": "USER_PAT", "url": "https://github.com/user/repo.git", "branch": "main"}
+{{"action": "push_with_token", "path": "local/folder", "token": "USER_PAT", "url": "https://github.com/user/repo.git", "branch": "main"}}
 
-IMPORTANT: If the user hasn't provided a GitHub token, ask them for it before attempting create_repo or push_with_token.
+IMPORTANT: If the user has not provided a GitHub token, ask them for it before attempting create_repo or push_with_token.
 
 IMPORTANT:
 
