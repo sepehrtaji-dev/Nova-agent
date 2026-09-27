@@ -187,5 +187,59 @@
     "learned_at": "2026-09-27T11:03:36.508510",
     "last_verified": "2026-09-27T11:03:36.508510",
     "expires_at": "2026-10-04T11:03:36.508510"
+  },
+  {
+    "topic": "WiFi hacking",
+    "fact": "Wi-Fi attacks exploit security weaknesses or vulnerabilities, allowing attackers to steal private information or disrupt routine network operations.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fsecurew2.com%2Fblog%2F8%2Dwi%2Dfi%2Dhacks%2Dhow%2Dthey%2Dwork%2Dand%2Dpreventive%2Dmeasures",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:18:21.823145",
+    "last_verified": "2026-09-27T11:18:21.823145",
+    "expires_at": "2026-10-04T11:18:21.823145"
+  },
+  {
+    "topic": "WiFi hacking",
+    "fact": "Wi-Fi hacking is the act of exploiting security weaknesses or vulnerabilities in Wi-Fi networks to steal private information or disrupt routine network operations.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.checkpoint.com%2Fcyber%2Dhub%2Fcyber%2Dsecurity%2Fwhat%2Dis%2Dhacking%2Fwi%2Dfi%2Dhacking%2Dhow%2Dit%2Dworks%2Dand%2Dhow%2Dto%2Dstay%2Dsecure",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:18:21.825525",
+    "last_verified": "2026-09-27T11:18:21.825525",
+    "expires_at": "2026-10-04T11:18:21.825525"
+  },
+  {
+    "topic": "WiFi hacking",
+    "fact": "Wi-Fi hacking involves the use of various tools and techniques to break into Wi-Fi networks.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Flinux%2Dunix%2Fkali%2Dlinux%2Dwireless%2Dattack%2Dtools%2F",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:18:21.826817",
+    "last_verified": "2026-09-27T11:18:21.826817",
+    "expires_at": "2026-10-04T11:18:21.826817"
+  },
+  {
+    "topic": "WiFi hacking tools and techniques",
+    "fact": "Wireless attack tools are specialized cybersecurity utilities designed to assess the security of wireless communication protocols such as Wi-Fi.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Flinux%2Dunix%2Fkali%2Dlinux%2Dwireless%2Dattack%2Dtools%2F&rut=686a1613d4b96ef5c001e8378589cb3c173ef459ac1690037c7b1bb1ef9b7283",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:18:37.007198",
+    "last_verified": "2026-09-27T11:18:37.007198",
+    "expires_at": "2026-10-04T11:18:37.007198"
+  },
+  {
+    "topic": "WiFi hacking tools and techniques",
+    "fact": "In this article, we'll dive into the Top 10 WiFi Hacking Tools Used by Ethical Hackers, explore why they matter, understand how they work, and discuss how you can ethically learn to use them to...",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.linkedin.com%2Fpulse%2Ftop%2D10%2Dwifi%2Dhacking%2Dtools%2Dused%2Dethical%2Dhackers%2Dmanisha%2Dchaudhary%2D8uove&rut=45984d602486494f1589247bce010271346b43d987d2ad4351a65566305f4b6a",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:18:37.010005",
+    "last_verified": "2026-09-27T11:18:37.010005",
+    "expires_at": "2026-10-04T11:18:37.010005"
+  },
+  {
+    "topic": "WiFi hacking tools and techniques",
+    "fact": "Wireless hacking refers to the unauthorised access, manipulation, or disruption of wireless networks and devices, typically carried out by cybercriminals or ethical hackers for testing purposes.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.cyberly.org%2Fen%2Fguides%2Fwireless%2Dhacking%2Findex.html&rut=8d3c32802a906ed7ac2ec986a6f5632b775d8c8a41d7742d1e5c951a2ac81918",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:18:37.011986",
+    "last_verified": "2026-09-27T11:18:37.011986",
+    "expires_at": "2026-10-04T11:18:37.011986"
   }
 ]
