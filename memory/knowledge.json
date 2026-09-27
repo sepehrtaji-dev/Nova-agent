@@ -169,5 +169,23 @@
     "learned_at": "2026-09-27T09:33:13.523034",
     "last_verified": "2026-09-27T09:33:13.523034",
     "expires_at": "2026-10-04T09:33:13.523034"
+  },
+  {
+    "topic": "NVIDIA GeForce Graphics Cards",
+    "fact": "Explore NVIDIA GeForce graphics cards. RTX 50 Series, RTX 40 Series, and more.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.nvidia.com%2Fen%2Dus%2Fgeforce%2Fgraphics%2Dcards%2F&rut=9403106eff2419035b0dcedf77e537a8a2ddf616bc9b58b91b7ae7b44ea6bde4",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:03:36.506834",
+    "last_verified": "2026-09-27T11:03:36.506834",
+    "expires_at": "2026-10-04T11:03:36.506834"
+  },
+  {
+    "topic": "NVIDIA GeForce RTX 50 Series Graphics Cards",
+    "fact": "Powered by Blackwell architecture and DLSS 4, NVIDIA's latest GeForce RTX 50 Series GPUs deliver unmatched AI-enhanced performance to gamers and creators.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.nvidia.com%2Fen%2Din%2Fgeforce%2Fgraphics%2Dcards%2F50%2Dseries%2F&rut=4377fa2d9983fdf82c47b4ccc85511cbf16a5aad7dc9fedaa535549990d87a51",
+    "confidence": 0.9,
+    "learned_at": "2026-09-27T11:03:36.508510",
+    "last_verified": "2026-09-27T11:03:36.508510",
+    "expires_at": "2026-10-04T11:03:36.508510"
   }
 ]

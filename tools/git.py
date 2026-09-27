@@ -4,6 +4,7 @@ import json
 import sys
 import urllib.request
 import urllib.error
+import shutil
 
 
 class GitTool:
@@ -117,6 +118,52 @@ class GitTool:
                 return True, b
         return False, None
 
+    def _check_gh_cli(self):
+        """Check if GitHub CLI (gh) is available."""
+        return shutil.which("gh") is not None
+
+    def _run_gh(self, args, cwd=None):
+        """Run a gh command and return structured output."""
+        try:
+            result = subprocess.run(
+                ["gh"] + args,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            parts = [
+                f"Command: gh {' '.join(args)}",
+                f"Exit code: {result.returncode}",
+            ]
+
+            if result.stdout.strip():
+                parts.append(f"OUTPUT:\n{result.stdout.strip()}")
+
+            if result.stderr.strip():
+                parts.append(f"STDERR:\n{result.stderr.strip()}")
+
+            if result.returncode == 0:
+                parts.append("STATUS: SUCCESS")
+            else:
+                parts.append("STATUS: ERROR")
+
+            return "\n".join(parts)
+
+        except subprocess.TimeoutExpired:
+            return "STATUS: ERROR\nGitHub CLI command timed out after 60 seconds."
+        except FileNotFoundError:
+            return (
+                "STATUS: ERROR\n"
+                "GitHub CLI (gh) is not installed or not in PATH.\n"
+                "Install: https://cli.github.com/"
+            )
+        except Exception as e:
+            return f"STATUS: ERROR\nGitHub CLI error: {type(e).__name__}: {e}"
+
     # ── Public run() entry point ──────────────────────────────────────────────
 
     def run(self, input_data):
@@ -132,12 +179,15 @@ class GitTool:
             "new_branch": "feature/x",  # for create_branch
             "files": ["a.py", "b.py"],  # for add (omit = add all)
             "url": "https://...",       # for clone
-            "n": 10                     # for log (number of commits)
+            "n": 10,                    # for log (number of commits)
+            "visibility": "public",     # for create_repo (public/private)
+            "description": "Repo desc"  # for create_repo
         }
 
         Supported actions:
             init, clone, status, add, commit, push, pull,
-            log, diff, branch, checkout, create_branch, stash
+            log, diff, branch, checkout, create_branch, stash,
+            create_repo
         """
         data = self._parse_input(input_data)
 
@@ -147,6 +197,52 @@ class GitTool:
 
         if not action:
             return "GIT ERROR: 'action' is required."
+
+        # ── create_repo ───────────────────────────────────────────────────────
+        if action == "create_repo":
+            if not self._check_gh_cli():
+                return (
+                    "GIT ERROR: GitHub CLI (gh) not found.\n"
+                    "Install it from https://cli.github.com/ and run 'gh auth login'"
+                )
+
+            name = data.get("name", "").strip()
+            if not name:
+                return "GIT ERROR: 'name' is required for create_repo."
+
+            visibility = data.get("visibility", "public").strip().lower()
+            if visibility not in ("public", "private"):
+                visibility = "public"
+
+            description = data.get("description", "").strip()
+
+            # Create repo on GitHub
+            args = ["repo", "create", name, f"--{visibility}"]
+            if description:
+                args.extend(["--description", description])
+
+            # Clone it locally after creation
+            clone_path = os.path.join(self.projects_path, name)
+
+            # Create repo first (without --clone)
+            result = self._run_gh(args, self.projects_path)
+
+            if "STATUS: SUCCESS" not in result:
+                return result
+
+            # Now clone the repo
+            # Get the repo URL from the output or construct it
+            # gh repo create outputs something like: https://github.com/user/repo.git
+            import re
+            url_match = re.search(r'(https?://github\.com/[^/\s]+/[^/\s]+)', result)
+            repo_url = url_match.group(1) if url_match else f"https://github.com/{name}.git"
+
+            clone_result = self._run_git(["clone", repo_url, clone_path], self.projects_path)
+
+            if "STATUS: SUCCESS" in clone_result:
+                return result + "\n\n" + clone_result + "\n\nRepository created on GitHub and cloned locally."
+            else:
+                return result + f"\n\nRepository created on GitHub. Clone it with:\ngit clone {repo_url} {clone_path}"
 
         # ── init ──────────────────────────────────────────────────────────
         if action == "init":

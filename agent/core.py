@@ -541,7 +541,7 @@ class NovaCore:
                 "init", "clone", "status", "add",
                 "commit", "push", "pull", "log",
                 "diff", "branch", "checkout",
-                "create_branch", "stash"
+                "create_branch", "stash", "create_repo"
             }
 
             if action.strip().lower() not in valid_actions:

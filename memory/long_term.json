@@ -1,12 +1,13 @@
 {
     "profile": {
-        "name": "sepehrtaji-dev",
+        "name": "Nova",
         "age": "14",
         "powers": "qwen2.5:3b through qwen",
         "skills": "developer",
         "projects": "Python calculator project",
         "hardware": "tools to access terminal, files and web search",
-        "programming_languages": "git"
+        "programming_languages": "git",
+        "developer": "Sepehr Taji"
     },
     "projects": [
         {
@@ -52,6 +53,15 @@
         },
         {
             "name": "Python Calculator"
+        },
+        {
+            "github_repo_creation": "test-nova"
+        },
+        {
+            "python_file_creation": "hello_world.py"
+        },
+        {
+            "create_github_repo": "test-nova"
         }
     ],
     "skills": [

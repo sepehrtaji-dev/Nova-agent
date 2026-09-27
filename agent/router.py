@@ -225,6 +225,57 @@ class ToolRouter:
                         )
                     }
 
+        # Generic handler for all other tools (git, write_file, read_file,
+        # list_files, create_directory, etc.): parse key="value" arguments.
+        parsed = self._parse_key_value_arguments(arguments)
+        if parsed:
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": tool_name,
+                "input": json.dumps(
+                    parsed,
+                    ensure_ascii=False
+                )
+            }
+
+        return None
+
+    def _parse_key_value_arguments(self, arguments):
+        """Parse arguments in format: key="value", key='value', or key=value"""
+        if not arguments or not arguments.strip():
+            return None
+
+        result = {}
+        # Pattern to match key="value", key='value', or key=value (no spaces around =)
+        # Handles quoted values with escaped quotes
+        pattern = re.compile(
+            r"""
+            (\w+)               # key
+            \s*=\s*             # =
+            (?:                 # value
+                "((?:[^"\\]|\\.)*)"   # double-quoted
+                |
+                '((?:[^'\\]|\\.)*)'   # single-quoted
+                |
+                ([^,\s]+)       # unquoted (no commas, no spaces)
+            )
+            """,
+            re.VERBOSE
+        )
+
+        matches = pattern.findall(arguments)
+        if matches:
+            for match in matches:
+                key = match[0]
+                # One of the three value groups will be non-empty
+                value = match[1] or match[2] or match[3]
+                if value:
+                    # Unescape quotes
+                    value = value.replace('\\"', '"').replace("\\'", "'")
+                    result[key] = value
+            return result if result else None
+
         return None
 
     def _normalize_task_type(self, value):
@@ -613,10 +664,14 @@ class ToolRouter:
             action = tool_input.get("action")
             if not isinstance(action, str) or not action.strip():
                 return False
-            if action == "create_repo":
-                return bool(tool_input.get("name", "").strip())
-            if action in {"push_with_token", "set_remote"}:
-                return True
+            valid_actions = {
+                "init", "clone", "status", "add",
+                "commit", "push", "pull", "log",
+                "diff", "branch", "checkout",
+                "create_branch", "stash", "create_repo"
+            }
+            if action.strip().lower() not in valid_actions:
+                return False
             return True
 
         return False

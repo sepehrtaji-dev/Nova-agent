@@ -55,8 +55,10 @@ def load_tools():
         (
             "Run git operations on a local repository. "
             "Supports: init, clone, status, add, commit, push, pull, "
-            "log, diff, branch, checkout, create_branch, stash. "
-            "Input: {action, path, message, branch, url, files, remote, n}"
+            "log, diff, branch, checkout, create_branch, stash, create_repo. "
+            "Input: {action, path, message, branch, url, files, remote, n, "
+            "name, visibility, description}. "
+            "create_repo creates a new GitHub repository (requires gh CLI)."
         ),
         git.run
     )
