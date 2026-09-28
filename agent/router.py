@@ -1226,7 +1226,7 @@ For conversation:
             for name, data in self.tools.tools.items():
                 if name in allowed:
                     lines.append(f"- {name}: {data['description']}")
-            tools_description = "\\n".join(lines) or "No tools are currently enabled."
+            tools_description = "\n".join(lines) or "No tools are currently enabled."
 
         return f"""
 You are Nova's action validator.
