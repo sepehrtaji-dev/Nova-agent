@@ -113,7 +113,7 @@ class ActivityItem(QFrame):
         self.setObjectName("activityItem")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(10, 7, 10, 7)
         layout.setSpacing(9)
 
         dot = QLabel("●")
@@ -144,7 +144,7 @@ class CapabilityButton(QPushButton):
         self.subtitle = subtitle
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(58)
+        self.setFixedHeight(54)
         self.toggled.connect(self._changed)
         self._refresh()
 
@@ -167,8 +167,8 @@ class NovaWindow(QMainWindow):
         self.busy = False
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(1080, 720)
-        self.resize(1320, 820)
+        self.setMinimumSize(1120, 720)
+        self.resize(1400, 860)
 
         self._build_ui()
         self._apply_style()
@@ -210,7 +210,7 @@ class NovaWindow(QMainWindow):
 
         self.chat_container = QWidget()
         self.chat_container_layout = QVBoxLayout(self.chat_container)
-        self.chat_container_layout.setContentsMargins(34, 28, 34, 20)
+        self.chat_container_layout.setContentsMargins(42, 30, 42, 24)
         self.chat_container_layout.setSpacing(0)
         self.chat_container_layout.addStretch()
 
@@ -220,7 +220,9 @@ class NovaWindow(QMainWindow):
 
         splitter.addWidget(chat)
         splitter.addWidget(self._build_activity_panel())
-        splitter.setSizes([860, 280])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([1060, 310])
 
         main_layout.addWidget(splitter, 1)
         root_layout.addWidget(main, 1)
@@ -228,7 +230,7 @@ class NovaWindow(QMainWindow):
     def _build_sidebar(self):
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(250)
+        sidebar.setFixedWidth(260)
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(14, 16, 14, 14)
@@ -266,6 +268,7 @@ class NovaWindow(QMainWindow):
         self.chat_list.setSpacing(3)
         self.chat_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.chat_list.addItem(QListWidgetItem("New conversation"))
+        self.chat_list.setMinimumHeight(120)
         self.chat_list.item(0).setSelected(True)
         layout.addWidget(self.chat_list, 1)
 
@@ -325,8 +328,8 @@ class NovaWindow(QMainWindow):
     def _build_activity_panel(self):
         panel = QFrame()
         panel.setObjectName("activityPanel")
-        panel.setMinimumWidth(245)
-        panel.setMaximumWidth(360)
+        panel.setMinimumWidth(290)
+        panel.setMaximumWidth(330)
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 18, 16, 16)
@@ -369,16 +372,19 @@ class NovaWindow(QMainWindow):
         layout.addWidget(capabilities)
 
         self.web_button = CapabilityButton("WEB SEARCH", "Public web access")
+        self.web_button.setToolTip("Allow Nova to use public web search.")
         self.git_button = CapabilityButton("GIT", "Repository operations")
+        self.git_button.setToolTip("Allow Nova to use Git repository operations.")
         self.pc_button = CapabilityButton("PC USE", "Terminal + files")
+        self.pc_button.setToolTip("Allow Nova to use terminal and filesystem tools.")
 
         self.web_button.changed.connect(lambda v: self._set_access("web", v))
         self.git_button.changed.connect(lambda v: self._set_access("git", v))
         self.pc_button.changed.connect(lambda v: self._set_access("pc", v))
 
-        layout.addWidget(self.web_button)
-        layout.addWidget(self.git_button)
-        layout.addWidget(self.pc_button)
+        layout.addWidget(self.web_button, 0)
+        layout.addWidget(self.git_button, 0)
+        layout.addWidget(self.pc_button, 0)
 
         return panel
 
@@ -387,13 +393,13 @@ class NovaWindow(QMainWindow):
         wrapper.setObjectName("composerArea")
 
         layout = QHBoxLayout(wrapper)
-        layout.setContentsMargins(26, 14, 26, 20)
+        layout.setContentsMargins(34, 14, 34, 22)
         layout.setSpacing(10)
 
         self.input = QLineEdit()
         self.input.setObjectName("composer")
         self.input.setPlaceholderText("Message Nova...")
-        self.input.setMinimumHeight(52)
+        self.input.setFixedHeight(52)
         self.input.returnPressed.connect(self._send)
         layout.addWidget(self.input, 1)
 
@@ -695,10 +701,12 @@ class NovaWindow(QMainWindow):
                         background: #171b21;
                         border: 1px solid #303641;
                         border-radius: 9px;
-                        padding: 8px 10px;
+                        padding: 6px 10px;
                         color: #dfe3ea;
                         font-size: 10px;
                         font-weight: 650;
+                        min-height: 40px;
+                        max-height: 40px;
                     }
                     QPushButton:hover {
                         background: #1c2028;
@@ -714,7 +722,7 @@ class NovaWindow(QMainWindow):
                         background: #111318;
                         border: 1px solid #20242b;
                         border-radius: 9px;
-                        padding: 8px 10px;
+                        padding: 6px 10px;
                         color: #6c7481;
                         font-size: 10px;
                         font-weight: 650;
