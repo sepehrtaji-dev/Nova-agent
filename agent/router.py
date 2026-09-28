@@ -674,7 +674,9 @@ class ToolRouter:
                 return False
             return True
 
-        return False
+        if tool_name == "generate_image":
+            prompt = tool_input.get("prompt")
+            return isinstance(prompt, str) and bool(prompt.strip())
 
     _search_intent_pattern = re.compile(
         r"""

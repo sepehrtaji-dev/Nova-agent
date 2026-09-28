@@ -547,6 +547,16 @@ class NovaCore:
             if action.strip().lower() not in valid_actions:
                 return False, f"Unknown git action: {action}"
 
+        elif tool_name == "generate_image":
+
+            prompt = data.get("prompt")
+
+            if not isinstance(prompt, str):
+                return False, "generate_image requires a prompt."
+
+            if not prompt.strip():
+                return False, "generate_image prompt is empty."
+
         return True, None
 
     def _learn_from_search(

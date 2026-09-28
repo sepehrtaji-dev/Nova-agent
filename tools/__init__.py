@@ -4,15 +4,17 @@ from tools.terminal import TerminalTool
 from tools.filesystem import FileSystemTool
 from tools.web import WebSearchTool
 from tools.git import GitTool
+from tools.image_gen import ImageGenTool
 
 
 def load_tools():
     registry = ToolRegistry()
 
-    terminal   = TerminalTool()
+    terminal = TerminalTool()
     filesystem = FileSystemTool()
-    web        = WebSearchTool()
-    git        = GitTool()
+    web = WebSearchTool()
+    git = GitTool()
+    image_gen = ImageGenTool()
 
     registry.register(
         "terminal",
@@ -61,6 +63,16 @@ def load_tools():
             "create_repo creates a new GitHub repository (requires gh CLI)."
         ),
         git.run
+    )
+
+    registry.register(
+        "generate_image",
+        (
+            "Generate an image using local Stable Diffusion (SD1.5) model. "
+            "Input: {prompt, negative_prompt, width, height, num_inference_steps, "
+            "guidance_scale, seed, filename}. Output saved to projects/generated_images/."
+        ),
+        image_gen.run
     )
 
     return registry
