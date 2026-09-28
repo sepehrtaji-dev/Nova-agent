@@ -349,14 +349,18 @@ class ToolRouter:
             for marker in markers
         )
 
-    def _get_tool_names(self):
+    def _get_tool_names(self, allowed_tools=None):
 
         if not self.tools.tools:
             return []
 
-        return list(
-            self.tools.tools.keys()
-        )
+        names = list(self.tools.tools.keys())
+
+        if allowed_tools is not None:
+            allowed = set(allowed_tools)
+            names = [name for name in names if name in allowed]
+
+        return names
 
     def _contains_placeholder(self, value):
 
@@ -796,7 +800,8 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
         conversation,
         knowledge,
         tool_history,
-        plan="No plan."
+        plan="No plan.",
+        allowed_tools=None
     ):
 
         has_tool_result = bool(
@@ -809,13 +814,28 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
             )
         )
 
-        tools_description = (
-            self.tools.get_descriptions()
-        )
+        if allowed_tools is None:
+            tools_description = self.tools.get_descriptions()
+        else:
+            allowed = set(allowed_tools)
+            lines = []
+            for name, data in self.tools.tools.items():
+                if name in allowed:
+                    lines.append(f"- {name}: {data['description']}")
+            tools_description = "\\n".join(lines) or "No tools are currently enabled."
 
         tool_names = ", ".join(
-            self._get_tool_names()
+            self._get_tool_names(allowed_tools)
         )
+
+        disabled_capabilities = ""
+        if allowed_tools is not None:
+            disabled = [name for name in self.tools.tools if name not in set(allowed_tools)]
+            if disabled:
+                disabled_capabilities = (
+                    "\\n\\nDISABLED TOOLS (NEVER SELECT THESE):\\n" +
+                    ", ".join(disabled)
+                )
 
         return f"""
 You are Nova's autonomous action planner.
@@ -905,6 +925,8 @@ Do NOT return source code as the final answer
 when the user requested an actual file.
 
 TOOL SELECTION:
+{disabled_capabilities}
+
 write_file     → create or save a file
 read_file      → read a file
 list_files     → list directory contents
@@ -1192,8 +1214,19 @@ For conversation:
         message,
         task_type,
         tool_history,
-        plan="No plan."
+        plan="No plan.",
+        allowed_tools=None
     ):
+
+        if allowed_tools is None:
+            tools_description = self.tools.get_descriptions()
+        else:
+            allowed = set(allowed_tools)
+            lines = []
+            for name, data in self.tools.tools.items():
+                if name in allowed:
+                    lines.append(f"- {name}: {data['description']}")
+            tools_description = "\\n".join(lines) or "No tools are currently enabled."
 
         return f"""
 You are Nova's action validator.
@@ -1221,7 +1254,9 @@ choose the next real tool.
 
 Available tools:
 
-{self.tools.get_descriptions()}
+{tools_description}
+
+Only the tools listed above are enabled for this request.
 
 IMPORTANT:
 
@@ -1485,7 +1520,8 @@ Generate the complete file now.
         conversation="",
         knowledge="",
         tool_history="",
-        plan="No plan."
+        plan="No plan.",
+        allowed_tools=None
     ):
 
         has_successful_tool = (
@@ -1500,7 +1536,8 @@ Generate the complete file now.
             conversation=conversation,
             knowledge=knowledge,
             tool_history=tool_history,
-            plan=plan
+            plan=plan,
+            allowed_tools=allowed_tools
         )
 
         try:
@@ -1558,9 +1595,12 @@ Generate the complete file now.
 
             if tool_decision:
 
-                self._remember_file_generation(
-                    tool_decision
-                )
+                if allowed_tools is not None and tool_decision.get("tool") not in set(allowed_tools):
+                    tool_decision = None
+                else:
+                    self._remember_file_generation(
+                        tool_decision
+                    )
 
                 return tool_decision
 
@@ -1581,11 +1621,13 @@ Generate the complete file now.
 
                 if validated_function_call:
 
-                    self._remember_file_generation(
-                        validated_function_call
-                    )
-
-                    return validated_function_call
+                    if allowed_tools is not None and validated_function_call.get("tool") not in set(allowed_tools):
+                        validated_function_call = None
+                    else:
+                        self._remember_file_generation(
+                            validated_function_call
+                        )
+                        return validated_function_call
 
             response_decision = (
                 self._validate_response_decision(
@@ -1602,7 +1644,8 @@ Generate the complete file now.
             message=message,
             task_type=task_type,
             tool_history=tool_history,
-            plan=plan
+            plan=plan,
+            allowed_tools=allowed_tools
         )
 
         try:
@@ -1631,11 +1674,13 @@ Generate the complete file now.
 
             if tool_decision:
 
-                self._remember_file_generation(
-                    tool_decision
-                )
-
-                return tool_decision
+                if allowed_tools is not None and tool_decision.get("tool") not in set(allowed_tools):
+                    tool_decision = None
+                else:
+                    self._remember_file_generation(
+                        tool_decision
+                    )
+                    return tool_decision
 
             function_call = (
                 self._extract_function_call(
