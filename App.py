@@ -815,9 +815,6 @@ class NovaWindow(QMainWindow):
                 )
 
     def _set_access(self, name, value):
-        if self.busy:
-            return
-
         kwargs = {"web": None, "git": None, "pc": None}
         kwargs[name] = value
         self.core.set_access(**kwargs)
@@ -935,10 +932,6 @@ class NovaWindow(QMainWindow):
         self.busy = True
         self.input.setEnabled(False)
         self.send_button.setEnabled(False)
-        self.web_button.setEnabled(False)
-        self.git_button.setEnabled(False)
-        self.pc_button.setEnabled(False)
-
         self.thread = QThread()
         self.worker = AgentWorker(self.core, message)
         self.worker.moveToThread(self.thread)
@@ -979,6 +972,7 @@ class NovaWindow(QMainWindow):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self._refresh_capability_styles()
         self._sync_capabilities()
         self.status_label.setText(status)
         self.live_badge.setText("IDLE")
