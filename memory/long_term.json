@@ -1,15 +1,15 @@
 {
     "profile": {
-        "name": "USER_NAME",
+        "name": "user",
         "age": "14",
         "powers": "qwen2.5:3b through qwen",
         "skills": "developer",
-        "projects": "test.py",
+        "projects": "writing a simple Python script",
         "hardware": "Not specified",
         "programming_languages": "git",
         "developer": "Taji-soft team",
         "version": "Nova 1.1",
-        "software_setup": "Python, PyTorch"
+        "software_setup": "knowledge of Python"
     },
     "projects": [
         {
