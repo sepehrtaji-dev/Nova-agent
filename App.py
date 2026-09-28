@@ -39,19 +39,20 @@ GREEN = "#5fe09b"
 def split_markdown_blocks(text):
     import re
 
-    lines = str(text or "").replace("\\r\\n", "\\n").replace("\\r", "\\n").split("\\n")
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = source.split("\n")
     blocks = []
     prose = []
     i = 0
 
     def flush_prose():
         if prose:
-            blocks.append(("prose", "\\n".join(prose), ""))
+            blocks.append(("prose", "\n".join(prose), ""))
             prose.clear()
 
     while i < len(lines):
         line = lines[i]
-        match = re.match(r"^\\s*(`{3}|~{3})([^\\n]*)$", line)
+        match = re.match(r"^\s*(`{3}|~{3})([^\n]*)$", line)
         if not match:
             prose.append(line)
             i += 1
@@ -64,13 +65,13 @@ def split_markdown_blocks(text):
         code_lines = []
 
         while i < len(lines):
-            if re.match(rf"^\\s*{re.escape(fence)}\\s*$", lines[i]):
+            if re.match(rf"^\s*{re.escape(fence)}\s*$", lines[i]):
                 i += 1
                 break
             code_lines.append(lines[i])
             i += 1
 
-        blocks.append(("code", "\\n".join(code_lines), language))
+        blocks.append(("code", "\n".join(code_lines), language))
 
     flush_prose()
     return blocks
@@ -81,15 +82,14 @@ def _render_markdown_text(text):
     import re
 
     escaped = html.escape(str(text or ""))
-    escaped = re.sub(r"^### (.+)$", r"<h3>\\1</h3>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^## (.+)$", r"<h2>\\1</h2>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^# (.+)$", r"<h1>\\1</h1>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^[-*] (.+)$", r"• \\1", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"\\*\\*(.+?)\\*\\*", r"<strong>\\1</strong>", escaped)
-    escaped = re.sub(r"`([^`\\n]+)`", r"<code>\\1</code>", escaped)
-    escaped = escaped.replace("\\n", "<br>")
+    escaped = re.sub(r"^### (.+)$", lambda m: "<h3>" + m.group(1) + "</h3>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^## (.+)$", lambda m: "<h2>" + m.group(1) + "</h2>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^# (.+)$", lambda m: "<h1>" + m.group(1) + "</h1>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^[-*] (.+)$", lambda m: "• " + m.group(1), escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"\*\*(.+?)\*\*", lambda m: "<strong>" + m.group(1) + "</strong>", escaped)
+    escaped = re.sub(r"`([^`\n]+)`", lambda m: "<code>" + m.group(1) + "</code>", escaped)
+    escaped = escaped.replace("\n", "<br>")
     return escaped
-
 
 class CodeBlock(QFrame):
     def __init__(self, code, language="", parent=None):
