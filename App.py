@@ -306,13 +306,14 @@ class NovaWindow(QMainWindow):
         self.current_turn_status = None
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(1120, 720)
+        self.setMinimumSize(980, 640)
         self.resize(1400, 860)
 
         self._build_ui()
         self._apply_style()
         self._sync_capabilities()
         self._welcome()
+        self._sync_responsive_layout()
 
     def _build_ui(self):
         root = QWidget()
@@ -357,11 +358,11 @@ class NovaWindow(QMainWindow):
         chat_layout.addWidget(self.chat_scroll, 1)
         chat_layout.addWidget(self._build_composer(), 0)
 
+        self.main_splitter = splitter
         splitter.addWidget(chat)
         splitter.addWidget(self._build_activity_panel())
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
-        splitter.setSizes([1060, 310])
 
         main_layout.addWidget(splitter, 1)
         root_layout.addWidget(main, 1)
@@ -369,7 +370,7 @@ class NovaWindow(QMainWindow):
     def _build_sidebar(self):
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(260)
+        self.sidebar = sidebar
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(14, 16, 14, 14)
@@ -436,7 +437,7 @@ class NovaWindow(QMainWindow):
     def _build_header(self):
         header = QFrame()
         header.setObjectName("header")
-        header.setFixedHeight(70)
+        self.header = header
 
         layout = QHBoxLayout(header)
         layout.setContentsMargins(22, 0, 18, 0)
@@ -467,8 +468,7 @@ class NovaWindow(QMainWindow):
     def _build_activity_panel(self):
         panel = QFrame()
         panel.setObjectName("activityPanel")
-        panel.setMinimumWidth(290)
-        panel.setMaximumWidth(330)
+        self.activity_panel = panel
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 18, 16, 16)
@@ -534,21 +534,21 @@ class NovaWindow(QMainWindow):
     def _build_composer(self):
         wrapper = QFrame()
         wrapper.setObjectName("composerArea")
+        self.composer_area = wrapper
 
         layout = QHBoxLayout(wrapper)
+        self.composer_layout = layout
         layout.setContentsMargins(34, 14, 34, 22)
         layout.setSpacing(10)
 
         self.input = QLineEdit()
         self.input.setObjectName("composer")
         self.input.setPlaceholderText("Message Nova...")
-        self.input.setFixedHeight(52)
         self.input.returnPressed.connect(self._send)
         layout.addWidget(self.input, 1)
 
         self.send_button = QPushButton("↑")
         self.send_button.setObjectName("sendButton")
-        self.send_button.setFixedSize(52, 52)
         self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.clicked.connect(self._send)
         layout.addWidget(self.send_button)
@@ -863,6 +863,72 @@ class NovaWindow(QMainWindow):
         }}
         """)
 
+    def _sync_responsive_layout(self):
+        width = max(980, self.width())
+        height = max(640, self.height())
+
+        sidebar_width = max(220, min(280, int(width * 0.19)))
+        activity_width = max(260, min(340, int(width * 0.225)))
+
+        if width < 1180:
+            activity_width = max(260, int(width * 0.24))
+        elif width > 1600:
+            activity_width = min(340, int(width * 0.21))
+
+        self.sidebar.setFixedWidth(sidebar_width)
+        self.activity_panel.setMinimumWidth(activity_width)
+        self.activity_panel.setMaximumWidth(activity_width)
+
+        available_main = max(1, width - sidebar_width)
+        chat_width = max(1, available_main - activity_width)
+        self.main_splitter.setSizes([chat_width, activity_width])
+
+        side_pad = max(12, min(20, int(sidebar_width * 0.06)))
+        self._set_layout_margins(
+            self.sidebar.layout(),
+            side_pad,
+            max(12, int(height * 0.018)),
+            side_pad,
+            max(12, int(height * 0.018)),
+        )
+
+        self.header.setFixedHeight(max(58, min(72, int(height * 0.082))))
+
+        chat_margin_x = max(24, min(64, int(chat_width * 0.055)))
+        self.chat_container_layout.setContentsMargins(
+            chat_margin_x,
+            max(20, min(34, int(height * 0.035))),
+            chat_margin_x,
+            max(18, min(28, int(height * 0.03))),
+        )
+
+        composer_x = max(20, min(44, int(chat_width * 0.045)))
+        self.composer_layout.setContentsMargins(
+            composer_x,
+            max(10, min(16, int(height * 0.018))),
+            composer_x,
+            max(16, min(24, int(height * 0.026))),
+        )
+
+        control_height = max(46, min(56, int(height * 0.065)))
+        self.input.setFixedHeight(control_height)
+        self.send_button.setFixedSize(control_height, control_height)
+
+        capability_height = max(48, min(58, int(height * 0.067)))
+        for button in (self.web_button, self.git_button, self.pc_button):
+            button.setFixedHeight(capability_height)
+
+        self._refresh_capability_styles()
+
+    @staticmethod
+    def _set_layout_margins(layout, left, top, right, bottom):
+        layout.setContentsMargins(left, top, right, bottom)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "main_splitter"):
+            self._sync_responsive_layout()
+
     def _sync_capabilities(self):
         access = self.core.get_access()
 
@@ -894,8 +960,6 @@ class NovaWindow(QMainWindow):
                         color: #e5e8ee;
                         font-size: 10px;
                         font-weight: 650;
-                        min-height: 54px;
-                        max-height: 54px;
                     }
                     QPushButton:hover {
                         background: #1c2028;
