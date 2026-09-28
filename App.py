@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QTextBrowser,
+    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -35,40 +36,124 @@ ACCENT_HOVER = "#9d91ff"
 GREEN = "#5fe09b"
 
 
-def render_markdown(text):
-    import html
+def split_markdown_blocks(text):
     import re
-    source = str(text or "")
-    output = []
-    code_pattern = re.compile(r"(?:^|\n)(?:```|~~~)([^\n]*)\n([\s\S]*?)\n(?:```|~~~)", re.MULTILINE)
-    cursor = 0
-    for match in code_pattern.finditer(source):
-        before = source[cursor:match.start()]
-        if before:
-            output.append(_render_markdown_text(before))
-        language = html.escape(match.group(1).strip())
-        code = html.escape(match.group(2))
-        lang_html = f'<div class="code-lang">{language}</div>' if language else ""
-        output.append(f'<div class="code-block">{lang_html}<pre>{code}</pre></div>')
-        cursor = match.end()
-    if cursor == 0:
-        output.append(_render_markdown_text(source))
-    elif cursor < len(source):
-        output.append(_render_markdown_text(source[cursor:]))
-    return "".join(output)
+
+    lines = str(text or "").replace("\\r\\n", "\\n").replace("\\r", "\\n").split("\\n")
+    blocks = []
+    prose = []
+    i = 0
+
+    def flush_prose():
+        if prose:
+            blocks.append(("prose", "\\n".join(prose), ""))
+            prose.clear()
+
+    while i < len(lines):
+        line = lines[i]
+        match = re.match(r"^\\s*(`{3}|~{3})([^\\n]*)$", line)
+        if not match:
+            prose.append(line)
+            i += 1
+            continue
+
+        flush_prose()
+        fence = match.group(1)
+        language = match.group(2).strip()
+        i += 1
+        code_lines = []
+
+        while i < len(lines):
+            if re.match(rf"^\\s*{re.escape(fence)}\\s*$", lines[i]):
+                i += 1
+                break
+            code_lines.append(lines[i])
+            i += 1
+
+        blocks.append(("code", "\\n".join(code_lines), language))
+
+    flush_prose()
+    return blocks
 
 
 def _render_markdown_text(text):
     import html
     import re
-    escaped = html.escape(text)
-    escaped = re.sub(r"^### (.+)$", r"<h3>\1</h3>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^## (.+)$", r"<h2>\1</h2>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^# (.+)$", r"<h1>\1</h1>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
-    escaped = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped)
-    escaped = escaped.replace("\n", "<br>")
+
+    escaped = html.escape(str(text or ""))
+    escaped = re.sub(r"^### (.+)$", r"<h3>\\1</h3>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^## (.+)$", r"<h2>\\1</h2>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^# (.+)$", r"<h1>\\1</h1>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^[-*] (.+)$", r"• \\1", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"\\*\\*(.+?)\\*\\*", r"<strong>\\1</strong>", escaped)
+    escaped = re.sub(r"`([^`\\n]+)`", r"<code>\\1</code>", escaped)
+    escaped = escaped.replace("\\n", "<br>")
     return escaped
+
+
+class CodeBlock(QFrame):
+    def __init__(self, code, language="", parent=None):
+        super().__init__(parent)
+        self.setObjectName("codeBlock")
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        if language:
+            language_label = QLabel(language)
+            language_label.setObjectName("codeLanguage")
+            language_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            outer.addWidget(language_label)
+
+        self.editor = QPlainTextEdit()
+        self.editor.setObjectName("codeEditor")
+        self.editor.setReadOnly(True)
+        self.editor.setPlainText(code)
+        self.editor.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.editor.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+
+        font = QFont("Cascadia Mono")
+        if font.family() != "Cascadia Mono":
+            font = QFont("Consolas")
+        font.setPointSize(10)
+        self.editor.setFont(font)
+
+        line_count = max(1, code.count("\\n") + 1)
+        line_height = max(18, font.pointSize() + 9)
+        editor_height = min(480, max(54, line_count * line_height + 22))
+        self.editor.setFixedHeight(editor_height)
+        outer.addWidget(self.editor)
+
+
+def add_markdown_content(layout, text):
+    for kind, value, language in split_markdown_blocks(text):
+        if kind == "code":
+            layout.addWidget(CodeBlock(value, language))
+            continue
+        if not value.strip():
+            continue
+        body = QTextBrowser()
+        body.setOpenExternalLinks(True)
+        body.setFrameShape(QFrame.NoFrame)
+        body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        body.setHtml(_render_markdown_text(value))
+        body.document().setDocumentMargin(0)
+        body.document().setDefaultStyleSheet("""
+            body { font-family: "Segoe UI"; font-size: 13px; color: #f5f7fa; }
+            h1, h2, h3 { color: #f5f7fa; margin: 8px 0 5px 0; }
+            h1 { font-size: 18px; }
+            h2 { font-size: 16px; }
+            h3 { font-size: 14px; }
+            strong { color: #ffffff; }
+            code { background: #171b22; color: #d7d2ff; padding: 2px 4px; }
+            a { color: #a99fff; }
+        """)
+        layout.addWidget(body)
 
 def make_avatar(letter="N", size=34):
     pixmap = QPixmap(size, size)
@@ -121,62 +206,13 @@ class MessageBubble(QFrame):
 
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(5)
+        content.setSpacing(8)
 
         name = QLabel("You" if role == "user" else "Nova")
         name.setObjectName("messageName")
         content.addWidget(name)
-
-        body = QTextBrowser()
-        body.setOpenExternalLinks(True)
-        body.setHtml(render_markdown(text if text else " "))
-        body.setFrameShape(QFrame.NoFrame)
-        body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        body.document().setDocumentMargin(0)
-        body.document().setDefaultStyleSheet("""
-            body {
-                font-family: "Segoe UI";
-                font-size: 13px;
-            }
-            .code-block {
-                background: #10131a;
-                border: 1px solid #292f3a;
-                border-radius: 10px;
-                margin: 10px 0;
-            }
-            .code-lang {
-                color: #858e9d;
-                background: #151922;
-                border-bottom: 1px solid #292f3a;
-                padding: 6px 10px;
-                font-size: 10px;
-                font-weight: 600;
-            }
-            pre {
-                background: transparent;
-                color: #e6e9ef;
-                padding: 12px;
-                margin: 0;
-                white-space: pre-wrap;
-            }
-            code {
-                background: #171b22;
-                color: #d7d2ff;
-                padding: 2px 4px;
-                border-radius: 4px;
-            }
-            a {
-                color: #a99fff;
-            }
-        """)
-        body.setMinimumHeight(28)
-        body.setObjectName("userMessage" if role == "user" else "novaMessage")
-
-        content.addWidget(body)
+        add_markdown_content(content, text if text else " ")
         layout.addLayout(content, 1)
-
 
 class ActivityItem(QFrame):
     def __init__(self, message, parent=None):
@@ -776,6 +812,30 @@ class NovaWindow(QMainWindow):
 
         #userMessage {{
             color: #d9dde4;
+        }}
+
+        #codeBlock {{
+            background: #10131a;
+            border: 1px solid #292f3a;
+            border-radius: 10px;
+        }}
+
+        #codeLanguage {{
+            background: #151922;
+            color: #858e9d;
+            border-bottom: 1px solid #292f3a;
+            padding: 6px 10px;
+            font-size: 10px;
+            font-weight: 650;
+        }}
+
+        #codeEditor {{
+            background: #10131a;
+            color: #e6e9ef;
+            border: none;
+            padding: 11px;
+            selection-background-color: #343047;
+            selection-color: #ffffff;
         }}
 
         QScrollBar:vertical {{
