@@ -822,7 +822,7 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
             for name, data in self.tools.tools.items():
                 if name in allowed:
                     lines.append(f"- {name}: {data['description']}")
-            tools_description = "\\n".join(lines) or "No tools are currently enabled."
+            tools_description = "\n".join(lines) or "No tools are currently enabled."
 
         tool_names = ", ".join(
             self._get_tool_names(allowed_tools)
@@ -833,7 +833,7 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
             disabled = [name for name in self.tools.tools if name not in set(allowed_tools)]
             if disabled:
                 disabled_capabilities = (
-                    "\\n\\nDISABLED TOOLS (NEVER SELECT THESE):\\n" +
+                    "\n\nDISABLED TOOLS (NEVER SELECT THESE):\n" +
                     ", ".join(disabled)
                 )
 
