@@ -607,6 +607,39 @@ One tool at a time.
 
 ---
 
+# ✦ Codex / Claude-Style Terminal UI
+
+Nova now has a redesigned Rich terminal interface focused on chat-first interaction and agent observability.
+
+The UI includes:
+
+- Persistent **You / Nova** chat blocks
+- A live **ACTIVITY** panel while Nova is working
+- A persistent **RUN TRACE** after each request
+- High-level model activity such as `PLAN`, `WEB`, `GIT`, `TERM`, `READ`, `WRITE`, `THINK`, and `DONE`
+- No private chain-of-thought is displayed
+- Qwen 2.5 3B model indicator
+- Capability controls for **Web Search**, **Git**, and **PC Use**
+- Session reset and screen controls
+- Permission state visible directly in the header
+
+### Capability controls
+
+```text
+/web            Toggle web-search access
+/git            Toggle Git / repository access
+/pc             Toggle terminal + filesystem access
+/permissions    Show current capability states
+/reset          Start a fresh Nova session
+```
+
+The permission controls are enforced by the agent core as well as the router. A disabled capability is removed from the model's available tool set and blocked again before execution.
+
+The UI reports **what Nova is doing**, not the model's hidden reasoning.
+
+
+---
+
 ## License
 This project is licensed under the MIT License.
 
