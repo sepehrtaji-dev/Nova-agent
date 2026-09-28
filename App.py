@@ -135,6 +135,37 @@ class ActivityItem(QFrame):
         layout.addLayout(text_layout, 1)
 
 
+class TurnStatus(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("turnStatus")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(9)
+
+        self.dot = QLabel("●")
+        self.dot.setObjectName("turnStatusDot")
+        layout.addWidget(self.dot, 0, Qt.AlignTop)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        self.title = QLabel("Nova")
+        self.title.setObjectName("turnStatusTitle")
+        text_layout.addWidget(self.title)
+
+        self.message = QLabel("Thinking…")
+        self.message.setObjectName("turnStatusMessage")
+        self.message.setWordWrap(True)
+        text_layout.addWidget(self.message)
+
+        layout.addLayout(text_layout, 1)
+
+    def update_status(self, message):
+        self.message.setText(message)
+
+
 class CapabilityButton(QPushButton):
     changed = Signal(bool)
 
@@ -165,6 +196,7 @@ class NovaWindow(QMainWindow):
         self.thread = None
         self.worker = None
         self.busy = False
+        self.current_turn_status = None
 
         self.setWindowTitle("Nova")
         self.setMinimumSize(1120, 720)
@@ -575,6 +607,28 @@ class NovaWindow(QMainWindow):
             font-weight: 700;
         }}
 
+        #turnStatus {{
+            background: #12151b;
+            border: 1px solid #262b34;
+            border-radius: 10px;
+        }}
+
+        #turnStatusDot {{
+            color: #8b7cff;
+            font-size: 9px;
+        }}
+
+        #turnStatusTitle {{
+            color: #8b7cff;
+            font-size: 10px;
+            font-weight: 700;
+        }}
+
+        #turnStatusMessage {{
+            color: #b8bec8;
+            font-size: 11px;
+        }}
+
         #activityItem {{
             background: #14171d;
             border: 1px solid #20242c;
@@ -766,6 +820,7 @@ class NovaWindow(QMainWindow):
                 widget.deleteLater()
 
         self.activity_layout.addStretch()
+        self.current_turn_status = None
         self._sync_capabilities()
         self._welcome()
         self.status_label.setText("Ready")
@@ -783,6 +838,21 @@ class NovaWindow(QMainWindow):
             self.chat_container_layout.addItem(stretch)
 
         self._scroll_chat()
+
+    def _add_turn_status(self, message):
+        stretch = self.chat_container_layout.takeAt(
+            self.chat_container_layout.count() - 1
+        )
+
+        status = TurnStatus()
+        status.update_status(message)
+        self.chat_container_layout.addWidget(status)
+
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+
+        self._scroll_chat()
+        return status
 
     def _add_activity(self, message):
         stretch = self.activity_layout.takeAt(
@@ -820,6 +890,7 @@ class NovaWindow(QMainWindow):
         self.input.clear()
         self._add_message("user", message)
         self._add_activity("Request received.")
+        self.current_turn_status = self._add_turn_status("Thinking…")
         self.status_label.setText("Working…")
         self.live_badge.setText("LIVE")
         self.live_badge.setStyleSheet(
@@ -859,6 +930,8 @@ class NovaWindow(QMainWindow):
     def _on_status(self, message):
         self.status_label.setText(message)
         self._add_activity(message)
+        if getattr(self, "current_turn_status", None):
+            self.current_turn_status.update_status(message)
 
     def _on_finished(self, response):
         self._add_message("nova", response)
@@ -874,6 +947,8 @@ class NovaWindow(QMainWindow):
         self._finish_request("Error")
 
     def _finish_request(self, status):
+        if getattr(self, "current_turn_status", None):
+            self.current_turn_status.update_status(status)
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
