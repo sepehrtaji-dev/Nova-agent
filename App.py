@@ -35,6 +35,41 @@ ACCENT_HOVER = "#9d91ff"
 GREEN = "#5fe09b"
 
 
+def render_markdown(text):
+    import html
+    import re
+    source = str(text or "")
+    output = []
+    code_pattern = re.compile(r"(?:^|\n)(?:```|~~~)([^\n]*)\n([\s\S]*?)\n(?:```|~~~)", re.MULTILINE)
+    cursor = 0
+    for match in code_pattern.finditer(source):
+        before = source[cursor:match.start()]
+        if before:
+            output.append(_render_markdown_text(before))
+        language = html.escape(match.group(1).strip())
+        code = html.escape(match.group(2))
+        lang_html = f'<div class="code-lang">{language}</div>' if language else ""
+        output.append(f'<div class="code-block">{lang_html}<pre>{code}</pre></div>')
+        cursor = match.end()
+    if cursor == 0:
+        output.append(_render_markdown_text(source))
+    elif cursor < len(source):
+        output.append(_render_markdown_text(source[cursor:]))
+    return "".join(output)
+
+
+def _render_markdown_text(text):
+    import html
+    import re
+    escaped = html.escape(text)
+    escaped = re.sub(r"^### (.+)$", r"<h3>\1</h3>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^## (.+)$", r"<h2>\1</h2>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"^# (.+)$", r"<h1>\1</h1>", escaped, flags=re.MULTILINE)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped)
+    escaped = escaped.replace("\n", "<br>")
+    return escaped
+
 def make_avatar(letter="N", size=34):
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
@@ -94,7 +129,7 @@ class MessageBubble(QFrame):
 
         body = QTextBrowser()
         body.setOpenExternalLinks(True)
-        body.setMarkdown(text if text else " ")
+        body.setHtml(render_markdown(text if text else " "))
         body.setFrameShape(QFrame.NoFrame)
         body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -105,13 +140,26 @@ class MessageBubble(QFrame):
                 font-family: "Segoe UI";
                 font-size: 13px;
             }
-            pre {
+            .code-block {
                 background: #10131a;
-                color: #e6e9ef;
                 border: 1px solid #292f3a;
                 border-radius: 10px;
+                margin: 10px 0;
+            }
+            .code-lang {
+                color: #858e9d;
+                background: #151922;
+                border-bottom: 1px solid #292f3a;
+                padding: 6px 10px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            pre {
+                background: transparent;
+                color: #e6e9ef;
                 padding: 12px;
-                margin: 8px 0;
+                margin: 0;
+                white-space: pre-wrap;
             }
             code {
                 background: #171b22;
