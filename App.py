@@ -100,6 +100,29 @@ class MessageBubble(QFrame):
         body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         body.document().setDocumentMargin(0)
+        body.document().setDefaultStyleSheet("""
+            body {
+                font-family: "Segoe UI";
+                font-size: 13px;
+            }
+            pre {
+                background: #10131a;
+                color: #e6e9ef;
+                border: 1px solid #292f3a;
+                border-radius: 10px;
+                padding: 12px;
+                margin: 8px 0;
+            }
+            code {
+                background: #171b22;
+                color: #d7d2ff;
+                padding: 2px 4px;
+                border-radius: 4px;
+            }
+            a {
+                color: #a99fff;
+            }
+        """)
         body.setMinimumHeight(28)
         body.setObjectName("userMessage" if role == "user" else "novaMessage")
 
@@ -185,7 +208,7 @@ class CapabilityButton(QPushButton):
 
     def _refresh(self):
         state = "ON" if self.isChecked() else "OFF"
-        self.setText(f"{self.title}    {state}\n{self.subtitle}")
+        self.setText(f"{self.title}  ·  {state}\n{self.subtitle}")
 
 
 class NovaWindow(QMainWindow):
@@ -413,6 +436,10 @@ class NovaWindow(QMainWindow):
         self.web_button.changed.connect(lambda v: self._set_access("web", v))
         self.git_button.changed.connect(lambda v: self._set_access("git", v))
         self.pc_button.changed.connect(lambda v: self._set_access("pc", v))
+
+        for button in (self.web_button, self.git_button, self.pc_button):
+            button.setAccessibleName(button.title)
+            button.setAccessibleDescription(button.subtitle)
 
         layout.addWidget(self.web_button, 0)
         layout.addWidget(self.git_button, 0)
@@ -754,13 +781,13 @@ class NovaWindow(QMainWindow):
                         text-align: left;
                         background: #171b21;
                         border: 1px solid #303641;
-                        border-radius: 9px;
-                        padding: 6px 10px;
-                        color: #dfe3ea;
+                        border-radius: 11px;
+                        padding: 7px 12px;
+                        color: #e5e8ee;
                         font-size: 10px;
                         font-weight: 650;
-                        min-height: 40px;
-                        max-height: 40px;
+                        min-height: 54px;
+                        max-height: 54px;
                     }
                     QPushButton:hover {
                         background: #1c2028;
@@ -775,9 +802,9 @@ class NovaWindow(QMainWindow):
                         text-align: left;
                         background: #111318;
                         border: 1px solid #20242b;
-                        border-radius: 9px;
-                        padding: 6px 10px;
-                        color: #6c7481;
+                        border-radius: 11px;
+                        padding: 7px 12px;
+                        color: #747d8b;
                         font-size: 10px;
                         font-weight: 650;
                     }
