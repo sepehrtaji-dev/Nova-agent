@@ -5,6 +5,7 @@ import threading
 import time
 from collections import deque
 
+from rich import box
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
@@ -40,6 +41,14 @@ TOOL_NAMES = {
     "write_file": ("WRITE", "bright_green"),
     "create_directory": ("MKDIR", "bright_magenta"),
     "list_files": ("LIST", "bright_white"),
+    "git": ("GIT", "bright_magenta"),
+    "generate_image": ("IMAGE", "bright_blue"),
+}
+
+ACCESS_META = {
+    "web": ("WEB SEARCH", "Web access"),
+    "git": ("GIT", "Repository operations"),
+    "pc": ("PC USE", "Terminal + files"),
 }
 
 
@@ -48,93 +57,152 @@ def clear_screen():
 
 
 def terminal_width():
-    return max(70, min(console.width, 120))
+    return max(78, min(console.width, 132))
 
 
-def render_header():
-    width = terminal_width()
+def access_pill(name: str, enabled: bool) -> Text:
+    label = ACCESS_META[name][0]
+    text = Text()
 
-    title = Text()
-    title.append("✦ ", style="bright_cyan")
-    title.append("NOVA", style="bold white")
-    title.append("  ", style="white")
-    title.append("LOCAL AI AGENT", style="dim")
-    title.append(" " * max(1, width - 48))
-    title.append("QWEN 2.5", style="dim")
+    if enabled:
+        text.append("● ", style="bright_green")
+        text.append(label, style="bold bright_green")
+    else:
+        text.append("○ ", style="dim")
+        text.append(label, style="dim")
+
+    return text
+
+
+def render_header(core: NovaCore):
+    access = core.get_access()
+
+    header = Table(
+        box=None,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+    header.add_column("brand", ratio=1, no_wrap=True)
+    header.add_column("mode", justify="center", no_wrap=True)
+    header.add_column("model", justify="right", no_wrap=True)
+
+    brand = Text()
+    brand.append("✦ ", style="bright_cyan")
+    brand.append("NOVA", style="bold white")
+    brand.append("  ", style="white")
+    brand.append("LOCAL AI AGENT", style="dim")
+
+    header.add_row(
+        brand,
+        Text("CHAT / AGENT", style="dim"),
+        Text("QWEN 2.5 · 3B", style="dim"),
+    )
 
     console.print(
         Panel(
-            title,
+            header,
             border_style="bright_cyan",
-            padding=(0, 1),
+            padding=(0, 0),
             expand=True,
         )
     )
 
-    meta = Text()
-    meta.append("  ● ", style="bright_green")
-    meta.append("LOCAL", style="bold green")
-    meta.append("   ")
-    meta.append("● ", style="bright_green")
-    meta.append("TOOLS ENABLED", style="bold green")
-    meta.append("   ")
-    meta.append("● ", style="bright_green")
-    meta.append("PRIVATE", style="bold green")
+    permissions = Table(
+        box=None,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+    permissions.add_column("web", ratio=1, no_wrap=True)
+    permissions.add_column("git", ratio=1, justify="center", no_wrap=True)
+    permissions.add_column("pc", ratio=1, justify="right", no_wrap=True)
 
-    console.print(meta)
+    permissions.add_row(
+        access_pill("web", access["web"]),
+        access_pill("git", access["git"]),
+        access_pill("pc", access["pc"]),
+    )
+
+    console.print(permissions)
+
+    hint = Text()
+    hint.append("  /web", style="bright_blue")
+    hint.append(" toggle   ", style="dim")
+    hint.append("/git", style="bright_magenta")
+    hint.append(" toggle   ", style="dim")
+    hint.append("/pc", style="bright_green")
+    hint.append(" toggle   ", style="dim")
+    hint.append("/help", style="white")
+
+    console.print(hint)
     console.print()
 
 
-def render_user(message: str):
-    console.print()
-
-    label = Text()
-    label.append("You", style="bold white")
-
-    console.print(label)
-    console.print(
-        Text("─" * min(terminal_width(), 80), style="dim")
+def render_welcome():
+    content = Text()
+    content.append("Nova is ready.\n", style="bold white")
+    content.append(
+        "Ask naturally. Nova can plan tasks, use enabled tools, "
+        "inspect real results, re-plan, and finish the work.\n\n",
+        style="dim",
+    )
+    content.append(
+        "Model activity is shown at a high level; private reasoning is never displayed.",
+        style="dim italic",
     )
 
     console.print(
         Panel(
-            message,
+            content,
+            title="[bold bright_cyan]SESSION[/bold bright_cyan]",
             border_style="grey30",
+            padding=(1, 2),
+            expand=True,
+        )
+    )
+
+
+def render_user(message: str):
+    console.print()
+    label = Text()
+    label.append("YOU", style="bold white")
+    label.append("  ·  MESSAGE", style="dim")
+
+    console.print(label)
+    console.print(
+        Panel(
+            message,
+            border_style="grey37",
             padding=(0, 1),
-            expand=False,
+            expand=True,
         )
     )
 
 
 def render_nova(message: str, elapsed: float | None = None):
     console.print()
-
     label = Text()
-    label.append("Nova", style="bold bright_cyan")
+    label.append("NOVA", style="bold bright_cyan")
 
     if elapsed is not None:
-        label.append(
-            f"  ·  {elapsed:.2f}s",
-            style="dim",
-        )
+        label.append(f"  ·  {elapsed:.2f}s", style="dim")
 
     console.print(label)
 
-    console.print(
-        Text("─" * min(terminal_width(), 80), style="dim")
-    )
-
     try:
-        console.print(
-            Panel(
-                Markdown(message),
-                border_style="bright_cyan",
-                padding=(0, 1),
-                expand=False,
-            )
-        )
+        body = Markdown(message)
     except Exception:
-        console.print(message)
+        body = Text(str(message))
+
+    console.print(
+        Panel(
+            body,
+            border_style="bright_cyan",
+            padding=(0, 1),
+            expand=True,
+        )
+    )
 
 
 def classify_status(message: str):
@@ -145,70 +213,35 @@ def classify_status(message: str):
         if tool_name in lower:
             return label, color, "tool"
 
-    if any(
-        word in lower
-        for word in (
-            "error",
-            "failed",
-            "failure",
-            "exception",
-        )
-    ):
+    if any(word in lower for word in (
+        "error", "failed", "failure", "exception", "blocked"
+    )):
         return "ERROR", "bright_red", "error"
 
-    if any(
-        word in lower
-        for word in (
-            "success",
-            "completed",
-            "complete",
-            "done",
-            "finished",
-        )
-    ):
+    if any(word in lower for word in (
+        "success", "completed", "complete", "done", "finished"
+    )):
         return "DONE", "bright_green", "success"
 
-    if any(
-        word in lower
-        for word in (
-            "plan",
-            "planning",
-            "replan",
-            "deciding",
-        )
-    ):
+    if any(word in lower for word in (
+        "plan", "planning", "replan", "deciding", "understanding"
+    )):
         return "PLAN", "bright_magenta", "plan"
 
-    if any(
-        word in lower
-        for word in (
-            "think",
-            "thinking",
-            "reason",
-            "processing",
-        )
-    ):
+    if any(word in lower for word in (
+        "think", "thinking", "reason", "processing", "preparing"
+    )):
         return "THINK", "bright_cyan", "think"
 
-    if any(
-        word in lower
-        for word in (
-            "search",
-            "web",
-            "internet",
-        )
-    ):
+    if any(word in lower for word in (
+        "search", "web", "internet"
+    )):
         return "WEB", "bright_blue", "tool"
 
     return "NOVA", "bright_cyan", "info"
 
 
-def build_activity_panel(
-    events,
-    current_status,
-    elapsed,
-    event_count,
-):
+def build_activity_panel(events, current_status, elapsed, event_count):
     table = Table(
         show_header=False,
         box=None,
@@ -216,109 +249,94 @@ def build_activity_panel(
         padding=(0, 1),
     )
 
-    table.add_column(
-        "Time",
-        style="dim",
-        width=9,
-        no_wrap=True,
-    )
+    table.add_column("time", width=9, no_wrap=True, style="dim")
+    table.add_column("type", width=9, no_wrap=True)
+    table.add_column("activity", ratio=1, overflow="ellipsis")
 
-    table.add_column(
-        "Type",
-        width=9,
-        no_wrap=True,
-    )
+    visible = list(events)[-12:]
 
-    table.add_column(
-        "Activity",
-        ratio=1,
-    )
-
-    for event in list(events)[-10:]:
-        timestamp = event["time"]
-        label = event["label"]
-        color = event["color"]
-        message = event["message"]
-
+    for event in visible:
         table.add_row(
-            timestamp,
-            Text(label, style=f"bold {color}"),
-            Text(message, style="white"),
+            event["time"],
+            Text(event["label"], style=f"bold {event['color']}"),
+            Text(event["message"], style="white", overflow="ellipsis"),
         )
 
-    if not events:
+    if not visible:
         table.add_row(
-            "--:--",
+            "--:--:--",
             Text("IDLE", style="dim"),
-            Text(
-                "Waiting for Nova...",
-                style="dim",
-            ),
+            Text("Waiting for Nova...", style="dim"),
         )
 
-    status_line = Text()
-    status_line.append(
-        "● ",
-        style="bright_cyan",
-    )
-    status_line.append(
-        current_status,
-        style="bold white",
-    )
+    status = Text()
+    status.append("● ", style="bright_cyan")
+    status.append(current_status, style="bold white")
 
     footer = Text()
-    footer.append(
-        f"  Events: {event_count}",
-        style="dim",
-    )
-    footer.append(
-        f"   ·   Elapsed: {elapsed:.1f}s",
-        style="dim",
-    )
-
-    content = Group(
-        status_line,
-        Text(""),
-        table,
-        Text(""),
-        footer,
-    )
+    footer.append(f"Events {event_count}", style="dim")
+    footer.append("  ·  ", style="dim")
+    footer.append(f"{elapsed:.1f}s", style="dim")
 
     return Panel(
-        content,
-        title="[bold bright_cyan]ACTIVITY[/bold bright_cyan]",
+        Group(status, Text(""), table, Text(""), footer),
+        title="[bold bright_cyan]LIVE ACTIVITY[/bold bright_cyan]",
         border_style="bright_cyan",
         padding=(0, 1),
         expand=True,
     )
 
 
-def run_agent(
-    core: NovaCore,
-    message: str,
-    result: dict,
-    state: dict,
-):
-    def on_status(status_message: str):
-        if not isinstance(status_message, str):
-            status_message = str(status_message)
+def render_trace(events, elapsed):
+    if not events:
+        return
 
-        status_message = status_message.strip()
+    table = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+    table.add_column("time", width=9, no_wrap=True, style="dim")
+    table.add_column("type", width=9, no_wrap=True)
+    table.add_column("event", ratio=1)
+
+    for event in list(events)[-16:]:
+        table.add_row(
+            event["time"],
+            Text(event["label"], style=f"bold {event['color']}"),
+            Text(event["message"], style="white"),
+        )
+
+    title = Text()
+    title.append("RUN TRACE", style="bold bright_cyan")
+    title.append(f"  ·  {elapsed:.2f}s", style="dim")
+
+    console.print(
+        Panel(
+            table,
+            title=title,
+            border_style="grey30",
+            padding=(0, 1),
+            expand=True,
+        )
+    )
+
+
+def run_agent(core: NovaCore, message: str, result: dict, state: dict):
+    def on_status(status_message: str):
+        status_message = str(status_message).strip()
 
         if not status_message:
             return
 
         label, color, kind = classify_status(status_message)
-
         state["current"] = status_message
 
-        last = state["last_status"]
-
-        if status_message == last:
+        if status_message == state["last_status"]:
             return
 
         state["last_status"] = status_message
-
         state["events"].append(
             {
                 "time": time.strftime("%H:%M:%S"),
@@ -328,7 +346,6 @@ def run_agent(
                 "message": status_message,
             }
         )
-
         state["event_count"] += 1
 
     core.status_callback = on_status
@@ -339,31 +356,21 @@ def run_agent(
         result["error"] = exc
 
 
-def ask(
-    core: NovaCore,
-    message: str,
-):
+def ask(core: NovaCore, message: str):
     result = {}
-
     state = {
         "current": "Thinking...",
         "last_status": "",
-        "events": deque(maxlen=40),
+        "events": deque(maxlen=50),
         "event_count": 0,
         "started": time.perf_counter(),
     }
 
     thread = threading.Thread(
         target=run_agent,
-        args=(
-            core,
-            message,
-            result,
-            state,
-        ),
+        args=(core, message, result, state),
         daemon=True,
     )
-
     thread.start()
 
     with Live(
@@ -372,41 +379,29 @@ def ask(
         transient=True,
     ) as live:
         while thread.is_alive():
-            elapsed = (
-                time.perf_counter()
-                - state["started"]
+            elapsed = time.perf_counter() - state["started"]
+            live.update(
+                build_activity_panel(
+                    state["events"],
+                    state["current"],
+                    elapsed,
+                    state["event_count"],
+                )
             )
-
-            activity = build_activity_panel(
-                state["events"],
-                state["current"],
-                elapsed,
-                state["event_count"],
-            )
-
-            live.update(activity)
-
             time.sleep(0.08)
 
-        elapsed = (
-            time.perf_counter()
-            - state["started"]
-        )
+        elapsed = time.perf_counter() - state["started"]
 
         if "error" in result:
-            error_message = str(result["error"])
-
-            error_label, error_color, _ = classify_status(
-                error_message
-            )
-
+            error = str(result["error"])
+            label, color, kind = classify_status(error)
             state["events"].append(
                 {
                     "time": time.strftime("%H:%M:%S"),
-                    "label": error_label,
-                    "color": error_color,
+                    "label": label,
+                    "color": color,
                     "kind": "error",
-                    "message": error_message,
+                    "message": error,
                 }
             )
 
@@ -415,12 +410,10 @@ def ask(
                     state["events"],
                     "Request failed",
                     elapsed,
-                    state["event_count"],
+                    state["event_count"] + 1,
                 )
             )
-
             time.sleep(0.25)
-
             raise result["error"]
 
         live.update(
@@ -431,96 +424,114 @@ def ask(
                 state["event_count"],
             )
         )
-
-        time.sleep(0.25)
+        time.sleep(0.2)
 
     return (
-        result.get(
-            "response",
-            "I couldn't generate a response.",
-        ),
+        result.get("response", "I couldn't generate a response."),
         elapsed,
+        list(state["events"]),
+    )
+
+
+def toggle_access(core: NovaCore, name: str):
+    access = core.get_access()
+    new_value = not access[name]
+
+    core.set_access(**{name: new_value})
+
+    label = ACCESS_META[name][0]
+    if new_value:
+        console.print(
+            f"[bright_green]● {label} enabled[/bright_green]"
+        )
+    else:
+        console.print(
+            f"[dim]○ {label} disabled[/dim]"
+        )
+
+
+def render_permissions(core: NovaCore):
+    access = core.get_access()
+
+    table = Table(
+        title="Capability Controls",
+        box=box.ROUNDED,
+        border_style="bright_cyan",
+        expand=False,
+        padding=(0, 1),
+    )
+    table.add_column("Capability", style="bold white")
+    table.add_column("State", justify="center")
+    table.add_column("Controls", style="dim")
+
+    for key in ("web", "git", "pc"):
+        label, description = ACCESS_META[key]
+        enabled = access[key]
+
+        state = (
+            Text("● ON", style="bold bright_green")
+            if enabled
+            else Text("○ OFF", style="dim")
+        )
+
+        table.add_row(
+            label,
+            state,
+            description,
+        )
+
+    console.print(table)
+    console.print(
+        "[dim]Use /web, /git, or /pc to toggle a capability.[/dim]"
     )
 
 
 def render_help():
-    console.print()
-
     table = Table(
-        title="Nova Commands",
+        title="Nova Controls",
+        box=box.ROUNDED,
         border_style="bright_cyan",
         expand=False,
+        padding=(0, 1),
     )
+    table.add_column("Command", style="bright_cyan")
+    table.add_column("Action", style="white")
 
-    table.add_column(
-        "Command",
-        style="bright_cyan",
-    )
+    rows = [
+        ("/web", "Toggle public web-search access"),
+        ("/git", "Toggle Git / repository access"),
+        ("/pc", "Toggle terminal + filesystem access"),
+        ("/permissions", "Show current capability states"),
+        ("/clear", "Clear the screen, keep the session"),
+        ("/reset", "Start a fresh Nova session"),
+        ("/help", "Show this menu"),
+        ("/exit", "Exit Nova"),
+    ]
 
-    table.add_column(
-        "Action",
-        style="white",
-    )
-
-    table.add_row(
-        "/clear",
-        "Clear the terminal",
-    )
-
-    table.add_row(
-        "/reset",
-        "Reset the terminal view",
-    )
-
-    table.add_row(
-        "/help",
-        "Show available commands",
-    )
-
-    table.add_row(
-        "/exit",
-        "Exit Nova",
-    )
-
-    table.add_row(
-        "quit",
-        "Exit Nova",
-    )
+    for command, action in rows:
+        table.add_row(command, action)
 
     console.print(table)
 
 
-def main():
-    clear_screen()
-    render_header()
-
-    console.print(
-        Panel(
-            Text.from_markup(
-                "[bold white]Nova is ready.[/bold white]\n"
-                "[dim]Ask anything. Nova can plan, search the web, "
-                "use terminal tools and work with files.[/dim]"
-            ),
-            border_style="grey30",
-            padding=(0, 1),
-            expand=True,
-        )
-    )
-
+def start_session():
     core = NovaCore()
+    clear_screen()
+    render_header(core)
+    render_welcome()
+    return core
+
+
+def main():
+    core = start_session()
 
     while True:
         try:
             console.print()
-
             message = Prompt.ask(
                 "[bold bright_cyan]›[/bold bright_cyan]"
             ).strip()
-
-        except (
-            KeyboardInterrupt,
-            EOFError,
-        ):
+        except (KeyboardInterrupt, EOFError):
             break
 
         if not message:
@@ -528,46 +539,42 @@ def main():
 
         command = message.lower()
 
-        if command in {
-            "exit",
-            "quit",
-            "/exit",
-        }:
+        if command in {"exit", "quit", "/exit"}:
             break
 
-        if command in {
-            "/clear",
-            "/reset",
-        }:
-            clear_screen()
-            render_header()
+        if command in {"/web", "/git", "/pc"}:
+            toggle_access(core, command[1:])
+            render_header(core)
+            continue
+
+        if command == "/permissions":
+            render_permissions(core)
             continue
 
         if command == "/help":
             render_help()
             continue
 
+        if command == "/clear":
+            clear_screen()
+            render_header(core)
+            continue
+
+        if command == "/reset":
+            core = start_session()
+            continue
+
         render_user(message)
 
         try:
-            response, elapsed = ask(
-                core,
-                message,
-            )
-
-            render_nova(
-                response,
-                elapsed,
-            )
-
+            response, elapsed, events = ask(core, message)
+            render_nova(response, elapsed)
+            render_trace(events, elapsed)
         except KeyboardInterrupt:
             console.print(
                 "\n[warning]Request interrupted.[/warning]"
             )
-
         except Exception as exc:
-            console.print()
-
             console.print(
                 Panel(
                     Text.from_markup(
@@ -576,12 +583,11 @@ def main():
                     ),
                     border_style="red",
                     padding=(0, 1),
-                    expand=False,
+                    expand=True,
                 )
             )
 
     console.print()
-
     console.print(
         Panel(
             "[dim]Nova session ended.[/dim]",

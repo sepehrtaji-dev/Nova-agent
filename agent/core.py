@@ -29,6 +29,44 @@ class NovaCore:
         self.planner = Planner(self.brain)
 
         self.max_steps = 12
+        self.access = {
+            "web": True,
+            "git": True,
+            "pc": True,
+        }
+
+    def set_access(self, web=None, git=None, pc=None):
+        """Update UI-controlled capability permissions for future actions."""
+        if web is not None:
+            self.access["web"] = bool(web)
+        if git is not None:
+            self.access["git"] = bool(git)
+        if pc is not None:
+            self.access["pc"] = bool(pc)
+
+    def get_access(self):
+        return dict(self.access)
+
+    def _allowed_tools(self):
+        allowed = []
+
+        if self.access.get("web", True):
+            allowed.append("web_search")
+
+        if self.access.get("git", True):
+            allowed.append("git")
+
+        if self.access.get("pc", True):
+            allowed.extend([
+                "terminal",
+                "list_files",
+                "read_file",
+                "write_file",
+                "create_directory",
+                "generate_image",
+            ])
+
+        return allowed
 
     def _status(self, message):
         if self.status_callback:
@@ -1106,7 +1144,8 @@ a real tool result proves it.
                 conversation=conversation,
                 knowledge=knowledge_context,
                 tool_history=history,
-                plan=self.planner.get_plan_summary(plan)
+                plan=self.planner.get_plan_summary(plan),
+                allowed_tools=self._allowed_tools()
             )
 
             if not isinstance(
@@ -1207,6 +1246,24 @@ No computer operation was performed.
             tool_input = decision.get(
                 "input"
             )
+
+            allowed_tools = set(self._allowed_tools())
+
+            if tool_name not in allowed_tools:
+                tool_history.append(
+                    f"""
+Tool: {tool_name}
+
+This capability is disabled in Nova's current
+permission controls. The tool was NOT executed.
+
+Enabled tools: {", ".join(sorted(allowed_tools)) or "none"}
+"""
+                )
+                self._status(
+                    f"Blocked {tool_name} — permission disabled..."
+                )
+                continue
 
             if not isinstance(
                 tool_name,
