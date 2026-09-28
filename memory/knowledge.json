@@ -241,5 +241,23 @@
     "learned_at": "2026-09-27T11:18:37.011986",
     "last_verified": "2026-09-27T11:18:37.011986",
     "expires_at": "2026-10-04T11:18:37.011986"
+  },
+  {
+    "topic": "iPhone",
+    "fact": "Regular iOS updates keep your iPhone feeling new for years to come.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.apple.com%2Fiphone%2F&rut=abf98fc3bad8ac72d45315a88c1308a4464db10e3804e4a96bf43bf1c0de0404",
+    "confidence": 0.9,
+    "learned_at": "2026-09-28T17:08:51.928744",
+    "last_verified": "2026-09-28T17:08:51.928744",
+    "expires_at": "2026-10-05T17:08:51.928744"
+  },
+  {
+    "topic": "Apple silicon",
+    "fact": "The vapor-cooled A20 Pro chip is the most powerful and efficient chip ever in an iPhone.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.apple.com%2Fiphone%2F&rut=abf98fc3bad8ac72d45315a88c1308a4464db10e3804e4a96bf43bf1c0de0404",
+    "confidence": 0.9,
+    "learned_at": "2026-09-28T17:08:51.930767",
+    "last_verified": "2026-09-28T17:08:51.930767",
+    "expires_at": "2026-10-05T17:08:51.930767"
   }
 ]
