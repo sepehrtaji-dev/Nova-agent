@@ -1,1 +1,3 @@
 datasets
+pyautogui
+pillow
