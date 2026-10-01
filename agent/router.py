@@ -927,13 +927,21 @@ when the user requested an actual file.
 TOOL SELECTION:
 {disabled_capabilities}
 
-write_file     → create or save a file
-read_file      → read a file
-list_files     → list directory contents
-create_directory → make a folder
-terminal       → run a shell command
-web_search     → search the web
-git            → any git operation
+write_file       → create or save a file (location: projects/desktop/system)
+read_file        → read a file (location: projects/desktop/system)
+edit_file        → edit an existing file by replacing text (old→new)
+delete_file      → delete a file from disk
+list_files       → list directory contents (location: projects/desktop/system)
+create_directory → make a folder (location: projects/desktop/system)
+terminal         → run a shell command
+web_search       → search the web
+git              → any git operation
+
+SYSTEM LOCATION:
+When the user refers to a path outside projects/ or Desktop,
+use location="system" with an absolute path.
+Example: {{"path": "/home/user/notes.txt", "location": "system"}}
+Example: {{"path": "C:/Users/user/Documents/file.py", "location": "system"}}
 
 YOUR ONLY JOB: Execute the CURRENT STEP from the plan.
 Look at the plan. Find the first step that is still "pending".
@@ -1281,6 +1289,32 @@ For write_file:
   "action": "tool",
   "task_type": "computer",
   "tool": "write_file",
+  "input": {{
+    "path": "filename",
+    "location": "projects"
+  }}
+}}
+
+For edit_file (modify existing file):
+
+{{
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "edit_file",
+  "input": {{
+    "path": "filename",
+    "location": "projects",
+    "old": "text to replace",
+    "new": "replacement text"
+  }}
+}}
+
+For delete_file:
+
+{{
+  "action": "tool",
+  "task_type": "computer",
+  "tool": "delete_file",
   "input": {{
     "path": "filename",
     "location": "projects"
