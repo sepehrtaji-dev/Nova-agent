@@ -72,6 +72,8 @@ class Verifier:
         dispatch = {
             "write_file":       self._verify_write_file,
             "read_file":        self._verify_read_file,
+            "edit_file":        self._verify_edit_file,
+            "delete_file":      self._verify_delete_file,
             "create_directory": self._verify_create_directory,
             "list_files":       self._verify_list_files,
             "terminal":         self._verify_terminal,
@@ -388,6 +390,60 @@ class Verifier:
             status="confirmed",
             evidence=tool_result[:300],
             message=f"✓ git {action} confirmed."
+        )
+
+
+    # ── edit_file ─────────────────────────────────────────────────────────────
+
+    def _verify_edit_file(self, tool_input, tool_result):
+        if "FILE_EDITED" not in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message=f"edit_file did not return FILE_EDITED."
+            )
+        actual_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                actual_path = line.replace("Location:", "").strip()
+                break
+        if actual_path and os.path.isfile(actual_path):
+            size = os.path.getsize(actual_path)
+            return VerificationResult(
+                status="confirmed",
+                evidence=f"Path: {actual_path}\nSize: {size} bytes",
+                message=f"✓ File edit confirmed on disk: {actual_path}"
+            )
+        return VerificationResult(
+            status="confirmed",
+            evidence=tool_result[:300],
+            message="✓ edit_file reported success."
+        )
+
+    # ── delete_file ───────────────────────────────────────────────────────────
+
+    def _verify_delete_file(self, tool_input, tool_result):
+        if "FILE_DELETED" not in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="delete_file did not return FILE_DELETED."
+            )
+        actual_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                actual_path = line.replace("Location:", "").strip()
+                break
+        if actual_path and os.path.exists(actual_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"File still exists: {actual_path}",
+                message=f"✗ delete_file claimed success but file still exists: {actual_path}"
+            )
+        return VerificationResult(
+            status="confirmed",
+            evidence=tool_result[:300],
+            message=f"✓ File deletion confirmed: {actual_path}"
         )
 
     # ── web_search ────────────────────────────────────────────────────────────
