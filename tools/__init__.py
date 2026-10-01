@@ -36,13 +36,36 @@ def load_tools():
 
     registry.register(
         "write_file",
-        "Create or overwrite a file on disk. Requires path, content, and location.",
+        (
+            "Create or overwrite a file on disk. "
+            "location: 'projects' (default), 'desktop', or 'system' (absolute path). "
+            "For system: path must be absolute e.g. /home/user/file.py"
+        ),
         filesystem.write_file
     )
 
     registry.register(
+        "edit_file",
+        (
+            "Edit an existing file by replacing a specific string. "
+            "Input: {path, location, old, new, replace_all}. "
+            "Use this to modify existing files instead of rewriting them."
+        ),
+        filesystem.edit_file
+    )
+
+    registry.register(
+        "delete_file",
+        "Delete a file from disk. Input: {path, location}.",
+        filesystem.delete_file
+    )
+
+    registry.register(
         "create_directory",
-        "Create a new directory in the projects folder or desktop",
+        (
+            "Create a directory. "
+            "location: 'projects', 'desktop', or 'system' (absolute path)."
+        ),
         filesystem.create_directory
     )
 
