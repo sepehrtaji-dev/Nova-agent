@@ -79,6 +79,7 @@ class Verifier:
             "terminal":         self._verify_terminal,
             "git":              self._verify_git,
             "web_search":       self._verify_web_search,
+            "desktop":          self._verify_desktop,
         }
 
         fn = dispatch.get(tool_name)
@@ -444,6 +445,58 @@ class Verifier:
             status="confirmed",
             evidence=tool_result[:300],
             message=f"✓ File deletion confirmed: {actual_path}"
+        )
+
+
+    # ── desktop ───────────────────────────────────────────────────────────────
+
+    def _verify_desktop(self, tool_input, tool_result):
+        """
+        Verify desktop action by checking STATUS: SUCCESS
+        and whether a screenshot was saved.
+        """
+        action = tool_input.get("action", "")
+
+        if "DESKTOP ERROR" in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message=f"desktop {action} failed: {tool_result[:100]}"
+            )
+
+        if "STATUS: SUCCESS" not in tool_result:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message=f"desktop {action} has no STATUS marker."
+            )
+
+        # If a screenshot was saved, confirm it exists on disk
+        screenshot_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Screenshot:"):
+                screenshot_path = line.replace("Screenshot:", "").strip()
+                break
+
+        if screenshot_path:
+            if os.path.isfile(screenshot_path):
+                size = os.path.getsize(screenshot_path)
+                return VerificationResult(
+                    status="confirmed",
+                    evidence=f"Screenshot: {screenshot_path} ({size:,} bytes)",
+                    message=f"✓ desktop {action} confirmed. Screenshot saved."
+                )
+            else:
+                return VerificationResult(
+                    status="unverifiable",
+                    evidence=f"Screenshot path not found: {screenshot_path}",
+                    message=f"desktop {action} reported success but screenshot missing."
+                )
+
+        return VerificationResult(
+            status="confirmed",
+            evidence=tool_result[:300],
+            message=f"✓ desktop {action} confirmed."
         )
 
     # ── web_search ────────────────────────────────────────────────────────────
