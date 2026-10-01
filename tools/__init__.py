@@ -4,6 +4,7 @@ from tools.terminal import TerminalTool
 from tools.filesystem import FileSystemTool
 from tools.web import WebSearchTool
 from tools.git import GitTool
+from tools.desktop import DesktopTool
 from tools.image_gen import ImageGenTool
 
 
