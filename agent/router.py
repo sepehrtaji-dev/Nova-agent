@@ -936,6 +936,7 @@ create_directory → make a folder (location: projects/desktop/system)
 terminal         → run a shell command
 web_search       → search the web
 git              → any git operation
+desktop          → real OS control: open apps, click, type, screenshot, key presses
 
 SYSTEM LOCATION:
 When the user refers to a path outside projects/ or Desktop,
@@ -956,6 +957,22 @@ Examples:
 - git push_with_token: {{"action":"push_with_token","path":"folder","token":"ghp_xxx","url":"https://github.com/user/repo.git","branch":"main"}}
 - git clone:         {{"action":"clone","url":"https://github.com/..."}}
 - git status:        {{"action":"status","path":"folder"}}
+
+For desktop tool:
+- screenshot:        {{"action":"screenshot"}}
+- open app:          {{"action":"open_app","app":"firefox"}}
+- click:             {{"action":"click","x":100,"y":200}}
+- type text:         {{"action":"type","text":"hello world"}}
+- press key:         {{"action":"key","key":"ctrl+c"}}
+- close app:         {{"action":"close_app","title":"Firefox"}}
+- list windows:      {{"action":"get_windows"}}
+
+Use desktop when the user wants Nova to:
+- open or close an application
+- click something on screen
+- type into a focused window
+- take a screenshot
+- control the mouse or keyboard
 
 IMPORTANT:
 
