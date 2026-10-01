@@ -8,6 +8,7 @@ from memory.short_term import ShortTermMemory
 from memory.knowledge import KnowledgeMemory
 from agent.router import ToolRouter
 from agent.planner import Planner
+from agent.verifier import Verifier
 from tools import load_tools
 
 
@@ -27,6 +28,7 @@ class NovaCore:
             self.tools
         )
         self.planner = Planner(self.brain)
+        self.verifier = Verifier(self.tools)
 
         self.max_steps = 12
         self.access = {
@@ -1557,52 +1559,41 @@ Nova must choose another useful action.
             )
 
             try:
-
                 result = self.tools.execute(
                     tool_name,
                     tool_input
                 )
-
             except Exception as exc:
-
                 result = (
                     "TOOL_EXECUTION_EXCEPTION\n"
                     f"{type(exc).__name__}: {exc}"
                 )
 
-            if not isinstance(
-                result,
-                str
-            ):
+            if not isinstance(result, str):
                 result = str(result)
 
-            succeeded = self._tool_succeeded(
+            # ── Real verification ─────────────────────────────────────────
+            self._status(f"Verifying {tool_name} result...")
+            verification = self.verifier.verify(
                 tool_name,
+                tool_input,
                 result
             )
+            succeeded = verification.confirmed()
 
             self._status(
-                "Processing tool result..."
+                f"{'✓ Confirmed' if succeeded else '✗ Failed'}: {verification.message}"
             )
 
             tool_history.append(
-                f"""
-Step: {step + 1}
-
-Tool: {tool_name}
-
-Input:
-
-{tool_input}
-
-Result:
-
-{result}
-
-Tool success:
-
-{succeeded}
-"""
+                f"Step: {step + 1}\n"
+                f"Tool: {tool_name}\n"
+                f"Input:\n{tool_input}\n"
+                f"Result:\n{result}\n"
+                f"Verification: {verification.status.upper()}\n"
+                f"Evidence: {verification.evidence[:300]}\n"
+                f"Message: {verification.message}\n"
+                f"Tool success: {succeeded}"
             )
 
             current_step = self.planner.get_next_step(
@@ -1687,115 +1678,7 @@ Tool success:
                     result
                 )
 
-            if tool_name == "write_file":
-
-                data = (
-                    self._parse_tool_input(
-                        tool_input
-                    )
-                )
-
-                if isinstance(
-                    data,
-                    dict
-                ):
-
-                    path = data.get(
-                        "path"
-                    )
-
-                    location = data.get(
-                        "location",
-                        "projects"
-                    )
-
-                    if (
-                        isinstance(
-                            path,
-                            str
-                        )
-                        and path.strip()
-                    ):
-
-                        verify_input = json.dumps(
-                            {
-                                "path": path,
-                                "location": location
-                            },
-                            ensure_ascii=False
-                        )
-
-                        verify_key = (
-                            "read_file",
-                            verify_input,
-                            workspace_revision
-                        )
-
-                        if verify_key not in used_tools:
-
-                            used_tools.add(
-                                verify_key
-                            )
-
-                            self._status(
-                                "Verifying created file..."
-                            )
-
-                            verify_result = (
-                                self.tools.execute(
-                                    "read_file",
-                                    verify_input
-                                )
-                            )
-
-                            if not isinstance(
-                                verify_result,
-                                str
-                            ):
-                                verify_result = str(
-                                    verify_result
-                                )
-
-                            verify_success = (
-                                self._tool_succeeded(
-                                    "read_file",
-                                    verify_result
-                                )
-                            )
-
-                            tool_history.append(
-                                f"""
-Step: {step + 1}
-
-Tool: read_file
-
-Purpose: Verify write_file result
-
-Input:
-
-{verify_input}
-
-Result:
-
-{verify_result}
-
-Tool success:
-
-{verify_success}
-"""
-                            )
-
-                            if not verify_success:
-
-                                last_tool_error = (
-                                    "write_file succeeded, "
-                                    "but the created file "
-                                    "could not be verified."
-                                )
-
-                                self._status(
-                                    "File verification failed..."
-                                )
+            # Verification is now handled by Verifier above
 
         if task_type == "computer" and self.planner.is_complete(plan):
             completed = True
