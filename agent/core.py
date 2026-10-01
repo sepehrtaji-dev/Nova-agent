@@ -64,7 +64,10 @@ class NovaCore:
                 "list_files",
                 "read_file",
                 "write_file",
+                "edit_file",
+                "delete_file",
                 "create_directory",
+                "desktop",
                 "generate_image",
             ])
 
