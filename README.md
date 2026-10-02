@@ -640,6 +640,26 @@ The UI reports **what Nova is doing**, not the model's hidden reasoning.
 
 ---
 
+
+---
+
+# ✦ AI Assistance
+
+Taji-Soft team uses AI tools to accelerate development speed, improve code quality, and explore new ideas faster.
+
+We believe AI assistance is a natural part of modern software development — it helps us iterate quickly, catch issues early, and focus on architecture and design rather than repetitive implementation.
+
+### AI models used in this project
+
+| Model | Provider | Used for |
+|---|---|---|
+| **Claude Sonnet 4.6** | Anthropic | Architecture design, code generation, debugging, documentation |
+| **GPT 5.6 Luna** | OpenAI | Code review, alternative implementations, research |
+| **GLM 5.2** | Zhipu AI | Experimentation, multilingual support, alternative perspectives |
+
+> All AI-generated code is reviewed, tested, and adapted by the Taji-Soft team before being committed to the project.
+
+---
 ## License
 This project is licensed under the MIT License.
 
