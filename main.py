@@ -35,20 +35,23 @@ console = Console(theme=theme)
 
 
 TOOL_NAMES = {
-    "web_search": ("WEB", "bright_blue"),
-    "terminal": ("TERM", "bright_yellow"),
-    "read_file": ("READ", "bright_cyan"),
-    "write_file": ("WRITE", "bright_green"),
-    "create_directory": ("MKDIR", "bright_magenta"),
-    "list_files": ("LIST", "bright_white"),
-    "git": ("GIT", "bright_magenta"),
-    "generate_image": ("IMAGE", "bright_blue"),
+    "web_search":       ("WEB",     "bright_blue"),
+    "terminal":         ("TERM",    "bright_yellow"),
+    "read_file":        ("READ",    "bright_cyan"),
+    "write_file":       ("WRITE",   "bright_green"),
+    "edit_file":        ("EDIT",    "bright_green"),
+    "delete_file":      ("DELETE",  "bright_red"),
+    "create_directory": ("MKDIR",   "bright_magenta"),
+    "list_files":       ("LIST",    "bright_white"),
+    "git":              ("GIT",     "bright_magenta"),
+    "desktop":          ("DESKTOP", "bright_yellow"),
+    "generate_image":   ("IMAGE",   "bright_blue"),
 }
 
 ACCESS_META = {
-    "web": ("WEB SEARCH", "Web access"),
-    "git": ("GIT", "Repository operations"),
-    "pc": ("PC USE", "Terminal + files"),
+    "web": ("WEB SEARCH", "Web search access"),
+    "git": ("GIT",        "Repository operations"),
+    "pc":  ("PC USE",     "Terminal · Files · Desktop OS control"),
 }
 
 
@@ -206,36 +209,52 @@ def render_nova(message: str, elapsed: float | None = None):
 
 
 def classify_status(message: str):
-    text = str(message).strip()
+    text  = str(message).strip()
     lower = text.lower()
 
+    # Verification results — check first (most specific)
+    if text.startswith("✓"):
+        return "✓ OK",  "bright_green",  "confirm"
+    if text.startswith("✗"):
+        return "✗ FAIL", "bright_red",   "error"
+
+    # Tool usage
     for tool_name, (label, color) in TOOL_NAMES.items():
         if tool_name in lower:
             return label, color, "tool"
 
-    if any(word in lower for word in (
-        "error", "failed", "failure", "exception", "blocked"
+    # Errors
+    if any(w in lower for w in (
+        "error", "failed", "failure", "exception", "blocked",
+        "invalid", "rejected", "denied"
     )):
         return "ERROR", "bright_red", "error"
 
-    if any(word in lower for word in (
+    # Verification words
+    if any(w in lower for w in ("verif", "confirm", "checking")):
+        return "CHECK", "bright_cyan", "verify"
+
+    # Success
+    if any(w in lower for w in (
         "success", "completed", "complete", "done", "finished"
     )):
         return "DONE", "bright_green", "success"
 
-    if any(word in lower for word in (
+    # Planning
+    if any(w in lower for w in (
         "plan", "planning", "replan", "deciding", "understanding"
     )):
         return "PLAN", "bright_magenta", "plan"
 
-    if any(word in lower for word in (
-        "think", "thinking", "reason", "processing", "preparing"
+    # Thinking
+    if any(w in lower for w in (
+        "think", "thinking", "reason", "processing", "preparing",
+        "generating", "generating content"
     )):
         return "THINK", "bright_cyan", "think"
 
-    if any(word in lower for word in (
-        "search", "web", "internet"
-    )):
+    # Web
+    if any(w in lower for w in ("search", "web", "internet")):
         return "WEB", "bright_blue", "tool"
 
     return "NOVA", "bright_cyan", "info"
@@ -256,10 +275,24 @@ def build_activity_panel(events, current_status, elapsed, event_count):
     visible = list(events)[-12:]
 
     for event in visible:
+        kind = event.get("kind", "info")
+
+        # Dim context rows, highlight verify/error
+        if kind == "confirm":
+            msg_style = "bright_green"
+        elif kind == "error":
+            msg_style = "bright_red"
+        elif kind == "tool":
+            msg_style = "white"
+        elif kind == "verify":
+            msg_style = "bright_cyan"
+        else:
+            msg_style = "dim"
+
         table.add_row(
             event["time"],
             Text(event["label"], style=f"bold {event['color']}"),
-            Text(event["message"], style="white", overflow="ellipsis"),
+            Text(event["message"], style=msg_style, overflow="ellipsis"),
         )
 
     if not visible:
@@ -291,21 +324,34 @@ def render_trace(events, elapsed):
     if not events:
         return
 
+    # ── Full run trace ────────────────────────────────────────────────────────
     table = Table(
         box=box.SIMPLE,
         show_header=False,
         expand=True,
         padding=(0, 1),
     )
-    table.add_column("time", width=9, no_wrap=True, style="dim")
-    table.add_column("type", width=9, no_wrap=True)
+    table.add_column("time", width=9,  no_wrap=True, style="dim")
+    table.add_column("type", width=9,  no_wrap=True)
     table.add_column("event", ratio=1)
 
-    for event in list(events)[-16:]:
+    for event in list(events)[-20:]:
+        kind = event.get("kind", "info")
+        if kind == "confirm":
+            msg_style = "bright_green"
+        elif kind == "error":
+            msg_style = "bright_red"
+        elif kind == "tool":
+            msg_style = "white"
+        elif kind == "verify":
+            msg_style = "bright_cyan"
+        else:
+            msg_style = "dim"
+
         table.add_row(
             event["time"],
             Text(event["label"], style=f"bold {event['color']}"),
-            Text(event["message"], style="white"),
+            Text(event["message"], style=msg_style),
         )
 
     title = Text()
@@ -317,6 +363,44 @@ def render_trace(events, elapsed):
             table,
             title=title,
             border_style="grey30",
+            padding=(0, 1),
+            expand=True,
+        )
+    )
+
+    # ── Verification summary ──────────────────────────────────────────────────
+    confirmed = [e for e in events if e.get("kind") == "confirm"]
+    failed    = [e for e in events if e.get("kind") == "error"
+                 and e.get("label") in ("✗ FAIL", "ERROR")]
+
+    if not confirmed and not failed:
+        return
+
+    vtable = Table(
+        box=None,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+    vtable.add_column("icon",    width=4,  no_wrap=True)
+    vtable.add_column("message", ratio=1)
+
+    for e in confirmed:
+        vtable.add_row(
+            Text("✓", style="bold bright_green"),
+            Text(e["message"], style="bright_green"),
+        )
+    for e in failed:
+        vtable.add_row(
+            Text("✗", style="bold bright_red"),
+            Text(e["message"], style="bright_red"),
+        )
+
+    console.print(
+        Panel(
+            vtable,
+            title="[bold bright_green]VERIFICATION SUMMARY[/bold bright_green]",
+            border_style="bright_green",
             padding=(0, 1),
             expand=True,
         )
@@ -498,14 +582,14 @@ def render_help():
     table.add_column("Action", style="white")
 
     rows = [
-        ("/web", "Toggle public web-search access"),
-        ("/git", "Toggle Git / repository access"),
-        ("/pc", "Toggle terminal + filesystem access"),
+        ("/web",         "Toggle web search access"),
+        ("/git",         "Toggle Git / repository access"),
+        ("/pc",          "Toggle terminal, files, desktop OS control"),
         ("/permissions", "Show current capability states"),
-        ("/clear", "Clear the screen, keep the session"),
-        ("/reset", "Start a fresh Nova session"),
-        ("/help", "Show this menu"),
-        ("/exit", "Exit Nova"),
+        ("/clear",       "Clear the screen, keep the session"),
+        ("/reset",       "Start a fresh Nova session"),
+        ("/help",        "Show this menu"),
+        ("/exit",        "Exit Nova"),
     ]
 
     for command, action in rows:
