@@ -693,6 +693,86 @@ class ToolRouter:
         # Unknown tool — allow through, let the tool handle validation
         return True
 
+    # Desktop intent — force desktop tool before model decides
+    _desktop_intent = re.compile(
+        r"\b(?:"
+        r"screenshot|take\s+a\s+screenshot|capture\s+screen"
+        r"|open\s+app|launch\s+app|open\s+\w+"
+        r"|close\s+app|close\s+\w+"
+        r"|click\s+(?:on\s+)?(?:the\s+)?"
+        r"|move\s+(?:the\s+)?mouse"
+        r"|type\s+(?:into|in|on)"
+        r"|press\s+(?:key|ctrl|alt|enter|escape)"
+        r"|scroll\s+(?:up|down)"
+        r"|list\s+(?:open\s+)?windows"
+        r"|focus\s+window"
+        r"|control\s+(?:the\s+)?(?:mouse|keyboard|screen)"
+        r")\b",
+        re.IGNORECASE
+    )
+
+    def _has_desktop_intent(self, message):
+        return bool(self._desktop_intent.search(message))
+
+    def _force_desktop_decision(self, message):
+        """Build a desktop tool decision directly from message intent."""
+        msg = message.lower()
+
+        # Screenshot
+        if any(w in msg for w in ["screenshot", "capture screen", "take a screenshot"]):
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({"action": "screenshot"})
+            }
+
+        # Open app
+        import re as _re
+        open_match = _re.search(
+            r"open\s+(?:the\s+|app\s+)?["\']?([\w\s]+?)["\']?(?:\s+app)?$",
+            msg, _re.IGNORECASE
+        )
+        if open_match:
+            app = open_match.group(1).strip()
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({"action": "open_app", "app": app})
+            }
+
+        # List windows
+        if "list" in msg and "window" in msg:
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({"action": "get_windows"})
+            }
+
+        # Close app
+        close_match = _re.search(
+            r"close\s+(?:the\s+)?["\']?([\w\s]+?)["\']?(?:\s+app)?$",
+            msg, _re.IGNORECASE
+        )
+        if close_match:
+            title = close_match.group(1).strip()
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({"action": "close_app", "title": title})
+            }
+
+        # Default: screenshot
+        return {
+            "action": "tool",
+            "task_type": "computer",
+            "tool": "desktop",
+            "input": json.dumps({"action": "screenshot"})
+        }
+
     _search_intent_pattern = re.compile(
         r"""
         \b
@@ -1631,6 +1711,12 @@ Generate the complete file now.
                 return response_decision
 
         if task_type == "computer":
+
+            # Force desktop tool for OS control requests
+            if self._has_desktop_intent(message) and not has_successful_tool:
+                desktop_decision = self._force_desktop_decision(message)
+                if desktop_decision:
+                    return desktop_decision
 
             search_requested = (
                 self._has_search_intent(
