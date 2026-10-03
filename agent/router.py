@@ -682,6 +682,17 @@ class ToolRouter:
             prompt = tool_input.get("prompt")
             return isinstance(prompt, str) and bool(prompt.strip())
 
+        if tool_name == "desktop":
+            action = tool_input.get("action")
+            return isinstance(action, str) and bool(action.strip())
+
+        if tool_name in {"edit_file", "delete_file"}:
+            path = tool_input.get("path")
+            return isinstance(path, str) and bool(path.strip())
+
+        # Unknown tool — allow through, let the tool handle validation
+        return True
+
     _search_intent_pattern = re.compile(
         r"""
         \b

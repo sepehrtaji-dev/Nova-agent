@@ -320,6 +320,46 @@ def build_activity_panel(events, current_status, elapsed, event_count):
     )
 
 
+def render_verify_summary(events):
+    """Show only the verification summary — no run trace."""
+    confirmed = [e for e in events if e.get("kind") == "confirm"]
+    failed    = [e for e in events if e.get("kind") == "error"
+                 and e.get("label") in ("✗ FAIL", "ERROR")]
+
+    if not confirmed and not failed:
+        return
+
+    vtable = Table(
+        box=None,
+        show_header=False,
+        expand=True,
+        padding=(0, 1),
+    )
+    vtable.add_column("icon",    width=4,  no_wrap=True)
+    vtable.add_column("message", ratio=1)
+
+    for e in confirmed:
+        vtable.add_row(
+            Text("✓", style="bold bright_green"),
+            Text(e["message"], style="bright_green"),
+        )
+    for e in failed:
+        vtable.add_row(
+            Text("✗", style="bold bright_red"),
+            Text(e["message"], style="bright_red"),
+        )
+
+    console.print(
+        Panel(
+            vtable,
+            title="[bold bright_green]VERIFICATION[/bold bright_green]",
+            border_style="bright_green",
+            padding=(0, 1),
+            expand=True,
+        )
+    )
+
+
 def render_trace(events, elapsed):
     if not events:
         return
