@@ -33,11 +33,16 @@ import time
 def _import_pyautogui():
     try:
         import pyautogui
-        pyautogui.FAILSAFE  = True   # move mouse to corner to abort
-        pyautogui.PAUSE     = 0.3    # small pause between actions
-        return pyautogui
+        pyautogui.FAILSAFE = True
+        pyautogui.PAUSE    = 0.3
+        return pyautogui, None
     except ImportError:
-        return None
+        return None, (
+            "pyautogui is not installed.\n"
+            "Run this command to install it:\n"
+            "  pip install pyautogui pillow\n"
+            "Then restart Nova."
+        )
 
 
 def _import_pil():
@@ -74,9 +79,9 @@ class DesktopTool:
     # ── Screenshot helper ─────────────────────────────────────────────────────
 
     def _screenshot(self, label="action"):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return None, "pyautogui not installed."
+            return None, err
 
         ts   = int(time.time())
         path = os.path.join(
@@ -188,9 +193,9 @@ class DesktopTool:
         )
 
     def _action_click(self, data):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return "DESKTOP ERROR: pyautogui not installed. Run: pip install pyautogui"
+            return f"DESKTOP ERROR: {err}"
 
         x       = data.get("x")
         y       = data.get("y")
@@ -220,9 +225,9 @@ class DesktopTool:
         return result
 
     def _action_move(self, data):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return "DESKTOP ERROR: pyautogui not installed."
+            return f"DESKTOP ERROR: {err}"
 
         x        = data.get("x")
         y        = data.get("y")
@@ -239,9 +244,9 @@ class DesktopTool:
         )
 
     def _action_type(self, data):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return "DESKTOP ERROR: pyautogui not installed."
+            return f"DESKTOP ERROR: {err}"
 
         text     = data.get("text", "")
         interval = float(data.get("interval", 0.03))
@@ -257,9 +262,9 @@ class DesktopTool:
         )
 
     def _action_key(self, data):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return "DESKTOP ERROR: pyautogui not installed."
+            return f"DESKTOP ERROR: {err}"
 
         key = str(data.get("key", "")).strip()
 
@@ -279,9 +284,9 @@ class DesktopTool:
         )
 
     def _action_scroll(self, data):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return "DESKTOP ERROR: pyautogui not installed."
+            return f"DESKTOP ERROR: {err}"
 
         x      = data.get("x", None)
         y      = data.get("y", None)
@@ -506,9 +511,9 @@ class DesktopTool:
             return f"DESKTOP ERROR: {type(e).__name__}: {e}"
 
     def _action_find_on_screen(self, data):
-        pyautogui = _import_pyautogui()
+        pyautogui, err = _import_pyautogui()
         if not pyautogui:
-            return "DESKTOP ERROR: pyautogui not installed."
+            return f"DESKTOP ERROR: {err}"
 
         image = data.get("image", "").strip()
 
