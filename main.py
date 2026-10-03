@@ -693,7 +693,7 @@ def main():
         try:
             response, elapsed, events = ask(core, message)
             render_nova(response, elapsed)
-            render_trace(events, elapsed)
+            render_verify_summary(events)
         except KeyboardInterrupt:
             console.print(
                 "\n[warning]Request interrupted.[/warning]"
