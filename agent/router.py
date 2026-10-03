@@ -716,6 +716,7 @@ class ToolRouter:
 
     def _force_desktop_decision(self, message):
         """Build a desktop tool decision directly from message intent."""
+        import re as _re
         msg = message.lower()
 
         # Screenshot
@@ -725,21 +726,6 @@ class ToolRouter:
                 "task_type": "computer",
                 "tool": "desktop",
                 "input": json.dumps({"action": "screenshot"})
-            }
-
-        # Open app
-        import re as _re
-        open_match = _re.search(
-            r"open\s+(?:the\s+|app\s+)?["\']?([\w\s]+?)["\']?(?:\s+app)?$",
-            msg, _re.IGNORECASE
-        )
-        if open_match:
-            app = open_match.group(1).strip()
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": "desktop",
-                "input": json.dumps({"action": "open_app", "app": app})
             }
 
         # List windows
@@ -752,10 +738,8 @@ class ToolRouter:
             }
 
         # Close app
-        close_match = _re.search(
-            r"close\s+(?:the\s+)?["\']?([\w\s]+?)["\']?(?:\s+app)?$",
-            msg, _re.IGNORECASE
-        )
+        close_pat = r'close' + r'\s+' + r'(?:the\s+)?' + r'(\w[\w\s]*?)' + r'(?:\s+app)?\s*$'
+        close_match = _re.search(close_pat, msg)
         if close_match:
             title = close_match.group(1).strip()
             return {
@@ -765,6 +749,18 @@ class ToolRouter:
                 "input": json.dumps({"action": "close_app", "title": title})
             }
 
+        # Open app
+        open_pat = r'open' + r'\s+' + r'(?:the\s+|app\s+)?' + r'(\w[\w\s]*?)' + r'(?:\s+app)?\s*$'
+        open_match = _re.search(open_pat, msg)
+        if open_match:
+            app = open_match.group(1).strip()
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({"action": "open_app", "app": app})
+            }
+
         # Default: screenshot
         return {
             "action": "tool",
@@ -772,6 +768,7 @@ class ToolRouter:
             "tool": "desktop",
             "input": json.dumps({"action": "screenshot"})
         }
+
 
     _search_intent_pattern = re.compile(
         r"""
