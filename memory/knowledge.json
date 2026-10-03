@@ -259,5 +259,32 @@
     "learned_at": "2026-09-28T17:08:51.930767",
     "last_verified": "2026-09-28T17:08:51.930767",
     "expires_at": "2026-10-05T17:08:51.930767"
+  },
+  {
+    "topic": "Windows 12 Release Date",
+    "fact": "Microsoft has not announced its release date for Windows 12.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.technobezz.com%2Fnews%2Fwindows%2D12&rut=1dace8ef444ecda24d116a05fc54ba9a924d8361a11f51a2be73d42e991ee8ea",
+    "confidence": 0.9,
+    "learned_at": "2026-10-03T17:50:18.471540",
+    "last_verified": "2026-10-03T17:50:18.471540",
+    "expires_at": "2026-10-10T17:50:18.471540"
+  },
+  {
+    "topic": "Windows 12 Features",
+    "fact": "Windows 12 leaks reveal AI features, release date rumors, and major changes.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fthewincentral.com%2Fwindows%2D12%2Dexpected%2Dfeatures%2Drelease%2Ddate%2Dbiggest%2Dleaks%2D2026%2Dupdate%2F&rut=0639a9b6f3f49b246146fff5d96d1954223ccbc7ce38db1f5871252efad1caee",
+    "confidence": 0.9,
+    "learned_at": "2026-10-03T17:50:18.473865",
+    "last_verified": "2026-10-03T17:50:18.473865",
+    "expires_at": "2026-10-10T17:50:18.473865"
+  },
+  {
+    "topic": "Windows 12 Release Date",
+    "fact": "Windows 12 is not planned for 2026.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.technobezz.com%2Fnews%2Fwindows%2D12&rut=1dace8ef444ecda24d116a05fc54ba9a924d8361a11f51a2be73d42e991ee8ea",
+    "confidence": 0.9,
+    "learned_at": "2026-10-03T17:50:18.475330",
+    "last_verified": "2026-10-03T17:50:18.475330",
+    "expires_at": "2026-10-10T17:50:18.475330"
   }
 ]
