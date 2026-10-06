@@ -890,6 +890,41 @@ If nothing reliable can be extracted:
             f"Task type: {task_type}"
         )
 
+        # Conversation is a first-class path. It does not require a plan,
+        # tool execution, or verification because there is no computer action.
+        if task_type == "conversation":
+            self._status("Preparing conversational answer...")
+
+            conversation_prompt = (
+                "You are Nova, a helpful local AI assistant.\\n\\n"
+                f"User message: {message}\\n\\n"
+                f"Recent conversation: {self.short_memory.get()}\\n\\n"
+                f"Relevant knowledge: {self.knowledge.get_context(message)}\\n\\n"
+                "Respond naturally and directly. Do not mention tools, "
+                "verification, task classification, or internal processing. "
+                "For a greeting, simply greet the user and invite them to "
+                "say what they need. Keep the answer concise."
+            )
+
+            try:
+                response = self.brain.generate(
+                    conversation_prompt,
+                    system_prompt=(
+                        "You are Nova, a helpful local AI assistant. "
+                        "For normal conversation, answer naturally without "
+                        "inventing computer actions."
+                    )
+                )
+            except Exception as exc:
+                response = f"Hi! I'm Nova. What would you like to work on? ({type(exc).__name__})"
+
+            if not isinstance(response, str):
+                response = str(response)
+
+            self._status("Done")
+            self.short_memory.add("assistant", response)
+            return response
+
         plan = {
             "goal": message,
             "steps": []
