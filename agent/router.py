@@ -1388,14 +1388,14 @@ For web_search:
   }}
 }}
 
-For write_file:
+For write_file (ONLY path + location, NO content, NO code):
 
 {{
   "action": "tool",
   "task_type": "computer",
   "tool": "write_file",
   "input": {{
-    "path": "filename",
+    "path": "filename.py",
     "location": "projects"
   }}
 }}
