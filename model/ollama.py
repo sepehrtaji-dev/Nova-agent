@@ -26,7 +26,8 @@ class OllamaBrain:
             "options": {
                 "temperature": 0.1,
                 "num_ctx": 4096,
-                "num_predict": 512,
+                "num_predict": 1024,
+                "repeat_penalty": 1.3,
             }
         }
 
