@@ -1270,6 +1270,91 @@ Generate the complete file now.
 
             self._last_file_generation = None
 
+    def _validate_tool_decision(self, data, task_type):
+        if not isinstance(data, dict):
+            return None
+
+        action = str(data.get("action", "")).strip().lower()
+        if action not in {"tool", "use_tool", "execute"}:
+            return None
+
+        tool = data.get("tool")
+        if not isinstance(tool, str) or not tool.strip():
+            return None
+
+        tool = tool.strip()
+
+        if not self.tools.exists(tool):
+            return None
+
+        raw_input = data.get("input")
+
+        if isinstance(raw_input, dict):
+            tool_input_object = raw_input
+        elif isinstance(raw_input, str):
+            try:
+                tool_input_object = json.loads(raw_input)
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(tool_input_object, dict):
+                return None
+        else:
+            return None
+
+        if not self._validate_basic_tool_input(tool, tool_input_object):
+            return None
+
+        normalized_input = self._normalize_tool_input(tool_input_object)
+        if normalized_input is None:
+            return None
+
+        return {
+            "action": "tool",
+            "task_type": task_type,
+            "tool": tool,
+            "input": normalized_input
+        }
+
+    def _validate_response_decision(self, data, task_type, has_successful_tool):
+        if not isinstance(data, dict):
+            return None
+
+        action = str(data.get("action", "")).strip().lower()
+        if action not in {"respond", "response", "answer"}:
+            return None
+
+        if task_type == "conversation":
+            return {"action": "respond", "task_type": "conversation"}
+
+        goal_complete = data.get("goal_complete") is True
+        if not goal_complete:
+            return None
+
+        if not has_successful_tool:
+            return None
+
+        return {
+            "action": "respond",
+            "task_type": "computer",
+            "goal_complete": True
+        }
+
+    def _normalize_tool_input(self, tool_input):
+        if isinstance(tool_input, dict):
+            return json.dumps(tool_input, ensure_ascii=False)
+        if isinstance(tool_input, str):
+            stripped = tool_input.strip()
+            if not stripped:
+                return None
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    return json.dumps(parsed, ensure_ascii=False)
+            except json.JSONDecodeError:
+                pass
+            return stripped
+        return None
+
     def decide(
         self,
         message,
