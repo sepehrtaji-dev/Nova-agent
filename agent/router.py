@@ -891,436 +891,54 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
         plan="No plan.",
         allowed_tools=None
     ):
-
-        has_tool_result = bool(
-            tool_history.strip()
-        )
-
-        has_successful_tool = (
-            self._has_successful_tool(
-                tool_history
-            )
-        )
-
         if allowed_tools is None:
-            tools_description = self.tools.get_descriptions()
+            tool_names = ", ".join(self._get_tool_names())
         else:
-            allowed = set(allowed_tools)
-            lines = []
-            for name, data in self.tools.tools.items():
-                if name in allowed:
-                    lines.append(f"- {name}: {data['description']}")
-            tools_description = "\n".join(lines) or "No tools are currently enabled."
+            tool_names = ", ".join(
+                n for n in self._get_tool_names()
+                if n in set(allowed_tools)
+            )
 
-        tool_names = ", ".join(
-            self._get_tool_names(allowed_tools)
-        )
+        # Truncate tool_history to last 500 chars to keep prompt short
+        if tool_history and len(tool_history) > 500:
+            tool_history = "..." + tool_history[-500:]
 
-        disabled_capabilities = ""
-        if allowed_tools is not None:
-            disabled = [name for name in self.tools.tools if name not in set(allowed_tools)]
-            if disabled:
-                disabled_capabilities = (
-                    "\n\nDISABLED TOOLS (NEVER SELECT THESE):\n" +
-                    ", ".join(disabled)
-                )
+        # Truncate plan to last 400 chars
+        if plan and len(plan) > 400:
+            plan = plan[-400:]
 
-        return f"""
-You are Nova's autonomous action planner.
+        return f"""You are Nova. Choose the next tool to run.
 
-Your ONLY job is to choose the NEXT REAL ACTION.
+TOOLS: {tool_names}
 
-You are NOT the final answer generator.
-
-TERMINAL INTERACTIVE PROGRAM RULE
-
-If a terminal command launches an interactive program
-that expects input, do not leave it waiting for a human.
-
-Prefer providing test input in the terminal input field,
-for example:
-{{"command":"python calc.py","input":"2+3\n"}}
-
-Or use a non-interactive command that tests the program.
-Never assume a command succeeded merely because it started.
-
-AVAILABLE TOOLS:
-
-{tools_description}
-
-TOOL NAMES:
-
-{tool_names}
-
-TASK TYPE:
-
-{task_type}
-
-The task classifier already determined
-the task type.
-
-Do not change it.
-
-REALITY RULE:
-
-Only actual tool results prove that an
-operation happened.
-
-Never invent:
-
-- files
-- paths
-- commands
-- terminal output
-- execution results
-- compilation results
-- file contents
-- successful operations
-- web search results
-
-CURRENT PLAN:
-
+PLAN:
 {plan}
 
-The plan describes the goal and ordered work.
-Use it to choose the next real tool action.
-Do not assume a plan step is complete unless
-the tool history contains real evidence.
-
-CURRENT STATE:
-
-Has a tool been used?
-
-{has_tool_result}
-
-Has a successful tool result been observed?
-
-{has_successful_tool}
-
 TOOL HISTORY:
+{tool_history if tool_history else "None"}
 
-{tool_history}
+USER REQUEST: {message}
 
-COMPUTER TASK:
+RULES:
+- Look at the plan. Find the first pending step. Run that tool.
+- For write_file: ONLY return path and location. Never include content or code.
+- For terminal: return the command to run.
+- For git: return action and required fields.
+- Keep response under 80 tokens.
 
-If task_type is computer and the user's
-request is incomplete, choose a real tool.
+Return ONE JSON only:
+{{"action":"tool","task_type":"computer","tool":"TOOL_NAME","input":{{"key":"value"}}}}
 
-Do NOT answer with instructions instead
-of performing the requested operation.
+Or if task is fully done:
+{{"action":"respond","task_type":"computer","goal_complete":true}}
 
-Do NOT return source code as the final answer
-when the user requested an actual file.
-
-TOOL SELECTION:
-{disabled_capabilities}
-
-write_file       → create or save a file (location: projects/desktop/system)
-read_file        → read a file (location: projects/desktop/system)
-edit_file        → edit an existing file by replacing text (old→new)
-delete_file      → delete a file from disk
-list_files       → list directory contents (location: projects/desktop/system)
-create_directory → make a folder (location: projects/desktop/system)
-terminal         → run a shell command
-web_search       → search the web
-git              → any git operation
-desktop          → real OS control: open apps, click, type, screenshot, key presses
-
-SYSTEM LOCATION:
-When the user refers to a path outside projects/ or Desktop,
-use location="system" with an absolute path.
-Example: {{"path": "/home/user/notes.txt", "location": "system"}}
-Example: {{"path": "C:/Users/user/Documents/file.py", "location": "system"}}
-
-YOUR ONLY JOB: Execute the CURRENT STEP from the plan.
-Look at the plan. Find the first step that is still "pending".
-Execute ONLY that step. Nothing more.
-
-For git tool, the input must have an "action" field.
 Examples:
-- git init:          {{"action":"init","path":"folder"}}
-- git create_repo:   {{"action":"create_repo","name":"repo","token":"ghp_xxx","private":false}}
-- git add:           {{"action":"add","path":"folder"}}
-- git commit:        {{"action":"commit","path":"folder","message":"Initial commit"}}
-- git push_with_token: {{"action":"push_with_token","path":"folder","token":"ghp_xxx","url":"https://github.com/user/repo.git","branch":"main"}}
-- git clone:         {{"action":"clone","url":"https://github.com/..."}}
-- git status:        {{"action":"status","path":"folder"}}
+write_file: {{"action":"tool","task_type":"computer","tool":"write_file","input":{{"path":"nn.py","location":"projects"}}}}
+terminal:   {{"action":"tool","task_type":"computer","tool":"terminal","input":{{"command":"python nn.py","location":"projects"}}}}
+web_search: {{"action":"tool","task_type":"computer","tool":"web_search","input":{{"query":"pytorch tutorial"}}}}
+git:        {{"action":"tool","task_type":"computer","tool":"git","input":{{"action":"init","path":"myproject"}}}}
+screenshot: {{"action":"tool","task_type":"computer","tool":"desktop","input":{{"action":"screenshot"}}}}"""
 
-For desktop tool:
-- screenshot:        {{"action":"screenshot"}}
-- open app:          {{"action":"open_app","app":"firefox"}}
-- click:             {{"action":"click","x":100,"y":200}}
-- type text:         {{"action":"type","text":"hello world"}}
-- press key:         {{"action":"key","key":"ctrl+c"}}
-- close app:         {{"action":"close_app","title":"Firefox"}}
-- list windows:      {{"action":"get_windows"}}
-
-Use desktop when the user wants Nova to:
-- open or close an application
-- click something on screen
-- type into a focused window
-- take a screenshot
-- control the mouse or keyboard
-
-IMPORTANT:
-
-If the user explicitly asks to search the web,
-you MUST select:
-
-web_search
-
-Do not answer from memory.
-
-Do not say you cannot access the web.
-
-Do not generate a fake search result.
-
-WEB SEARCH INPUT:
-
-{{
-  "query": "search query"
-}}
-
-IMPORTANT WRITE_FILE RULE:
-
-When selecting write_file, DO NOT generate
-the file content yet.
-
-Only decide:
-
-- which file
-- which location
-
-The actual file content will be generated
-in a separate generation step.
-
-Therefore write_file input MUST contain:
-
-{{
-  "path": "filename",
-  "location": "projects"
-}}
-
-Do NOT put "content" in this decision.
-
-COMPLETION:
-
-Return "respond" ONLY if the user's requested
-operation is already completely finished and
-verified by a real tool result.
-
-If more work is required, return "tool".
-
-USER REQUEST:
-
-{message}
-
-CONVERSATION:
-
-{conversation}
-
-KNOWLEDGE:
-
-{knowledge}
-
-Return ONLY valid JSON.
-
-For an unfinished computer task:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "TOOL_NAME",
-  "input": {{
-    "key": "value"
-  }}
-}}
-
-For a completed computer task:
-
-{{
-  "action": "respond",
-  "task_type": "computer",
-  "goal_complete": true
-}}
-
-For conversation:
-
-{{
-  "action": "respond",
-  "task_type": "conversation"
-}}
-"""
-
-    def _validate_tool_decision(
-        self,
-        data,
-        task_type
-    ):
-
-        if not isinstance(
-            data,
-            dict
-        ):
-            return None
-
-        action = self._normalize_action(
-            data.get("action")
-        )
-
-        if action != "tool":
-            return None
-
-        tool = data.get("tool")
-
-        if not isinstance(
-            tool,
-            str
-        ):
-            return None
-
-        tool = tool.strip()
-
-        if not tool:
-            return None
-
-        if not self.tools.exists(
-            tool
-        ):
-            return None
-
-        raw_input = data.get(
-            "input"
-        )
-
-        if isinstance(
-            raw_input,
-            dict
-        ):
-
-            tool_input_object = raw_input
-
-        elif isinstance(
-            raw_input,
-            str
-        ):
-
-            try:
-
-                tool_input_object = json.loads(
-                    raw_input
-                )
-
-            except json.JSONDecodeError:
-
-                if tool == "web_search":
-
-                    tool_input_object = {
-                        "query": raw_input
-                    }
-
-                else:
-
-                    return None
-
-            if not isinstance(
-                tool_input_object,
-                dict
-            ):
-                return None
-
-        else:
-
-            return None
-
-        if tool == "web_search":
-
-            normalized_web_input = (
-                self._normalize_web_search_input(
-                    tool_input_object
-                )
-            )
-
-            if normalized_web_input is None:
-                return None
-
-            tool_input_object = json.loads(
-                normalized_web_input
-            )
-
-        if not self._validate_basic_tool_input(
-            tool,
-            tool_input_object
-        ):
-            return None
-
-        normalized_input = (
-            self._normalize_tool_input(
-                tool_input_object
-            )
-        )
-
-        if normalized_input is None:
-            return None
-
-        return {
-            "action": "tool",
-            "task_type": task_type,
-            "tool": tool,
-            "input": normalized_input
-        }
-
-    def _validate_response_decision(
-        self,
-        data,
-        task_type,
-        has_successful_tool
-    ):
-
-        if not isinstance(
-            data,
-            dict
-        ):
-            return None
-
-        action = self._normalize_action(
-            data.get("action")
-        )
-
-        if action != "respond":
-            return None
-
-        returned_task_type = (
-            self._normalize_task_type(
-                data.get("task_type")
-            )
-        )
-
-        if returned_task_type != task_type:
-            return None
-
-        if task_type == "conversation":
-
-            return {
-                "action": "respond",
-                "task_type": "conversation"
-            }
-
-        goal_complete = (
-            data.get("goal_complete") is True
-        )
-
-        if not goal_complete:
-            return None
-
-        if not has_successful_tool:
-            return None
-
-        return {
-            "action": "respond",
-            "task_type": "computer",
-            "goal_complete": True
-        }
 
     def _build_repair_prompt(
         self,
