@@ -9,7 +9,8 @@
         "programming_languages": "git",
         "developer": "Taji-soft team",
         "version": "Nova 1.1",
-        "software_setup": "user has knowledge of C programming"
+        "software_setup": "user has knowledge of C programming",
+        "user_projects_directory_location": "/path/to/user/projects/folder/"
     },
     "projects": [
         {
@@ -64,6 +65,9 @@
         },
         {
             "create_github_repo": "test-nova"
+        },
+        {
+            "pytorch_neural_network_script_path": "./projects/pytorch_simple_nn.py"
         }
     ],
     "skills": [
