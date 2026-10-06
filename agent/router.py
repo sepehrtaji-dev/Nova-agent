@@ -800,7 +800,28 @@ class ToolRouter:
             )
         )
 
+    def _is_obviously_conversational(self, message):
+        """Fast-path greetings and casual chat so they never enter tool execution."""
+        if not isinstance(message, str):
+            return False
+
+        text = re.sub(r"\\s+", " ", message.strip().lower())
+        if not text:
+            return False
+
+        casual = {
+            "hi", "hello", "hey", "hey nova", "hi nova", "hello nova",
+            "yo", "sup", "what's up", "whats up", "how are you",
+            "how are you?", "good morning", "good afternoon", "good evening",
+            "good night", "thanks", "thank you", "thx", "bye", "goodbye"
+        }
+
+        return text in casual
+
     def classify_task(self, message, conversation=""):
+
+        if self._is_obviously_conversational(message):
+            return "conversation"
 
         prompt = f"""You are a task classifier for Nova, a local AI agent.
 
