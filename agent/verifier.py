@@ -60,12 +60,15 @@ class Verifier:
         Dispatch to the correct verifier.
         Returns a VerificationResult.
         """
-        try:
-            tool_input = json.loads(tool_input_str)
-            if not isinstance(tool_input, dict):
+        if isinstance(tool_input_str, dict):
+            tool_input = tool_input_str
+        else:
+            try:
+                tool_input = json.loads(tool_input_str)
+                if not isinstance(tool_input, dict):
+                    tool_input = {}
+            except (json.JSONDecodeError, TypeError):
                 tool_input = {}
-        except (json.JSONDecodeError, TypeError):
-            tool_input = {}
 
         tool_result = str(tool_result) if tool_result is not None else ""
 
@@ -416,9 +419,9 @@ class Verifier:
                 message=f"✓ File edit confirmed on disk: {actual_path}"
             )
         return VerificationResult(
-            status="confirmed",
+            status="failed",
             evidence=tool_result[:300],
-            message="✓ edit_file reported success."
+            message="edit_file reported success but the target file could not be confirmed on disk."
         )
 
     # ── delete_file ───────────────────────────────────────────────────────────

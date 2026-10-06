@@ -206,13 +206,14 @@ class NovaCore:
 
         return False
 
-    def _success_line_matches(self, text):
+    def _verified_success_line_matches(self, text):
         if not isinstance(text, str):
             return False
 
         return re.search(
-            r"Tool success:\s*True",
-            text.replace("\\n", "\n")
+            r"Verification:\s*CONFIRMED",
+            text.replace("\\n", "\n"),
+            flags=re.IGNORECASE
         ) is not None
 
     def _has_successful_tool(self, tool_history):
@@ -242,22 +243,14 @@ class NovaCore:
                         return True
 
                 elif isinstance(entry, str):
-                    if self._success_line_matches(
+                    if self._verified_success_line_matches(
                         entry
                     ):
                         return True
 
         text = str(tool_history)
 
-        return (
-            self._success_line_matches(text)
-            or
-            "FILE_CREATED" in text
-            or
-            "DIRECTORY_CREATED" in text
-            or
-            "STATUS: SUCCESS" in text
-        )
+        return self._verified_success_line_matches(text)
 
     def _has_successful_web_search(
         self,
@@ -299,7 +292,7 @@ class NovaCore:
                         "Tool: web_search"
                         in entry
                         and
-                        self._success_line_matches(
+                        self._verified_success_line_matches(
                             entry
                         )
                     ):
@@ -310,7 +303,7 @@ class NovaCore:
         return (
             "Tool: web_search" in text
             and
-            self._success_line_matches(text)
+            self._verified_success_line_matches(text)
         )
 
     def _parse_tool_input(self, tool_input):
@@ -1445,7 +1438,8 @@ Nova must choose another useful action.
             if not succeeded:
 
                 last_tool_error = (
-                    f"{tool_name}: {result}"
+                    f"{tool_name}: {verification.message}\n"
+                    f"Evidence: {verification.evidence[:500]}"
                 )
 
                 self._status(
