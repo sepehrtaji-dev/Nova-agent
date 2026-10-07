@@ -18,5 +18,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Compile all Python sources
+        run: python -m compileall -q agent tools memory model training main.py App.py
+
+      - name: Install lightweight runtime dependency
+        run: python -m pip install --disable-pip-version-check ollama
+
       - name: Run agent logic tests
-        run: python -m unittest tests/test_agent_routing.py tests/test_verifier.py
+        run: python -m unittest tests/test_agent_routing.py tests/test_verifier.py tests/test_core.py
