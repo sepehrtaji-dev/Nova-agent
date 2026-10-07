@@ -147,6 +147,10 @@ class Planner:
                 "steps": []
             }
 
+        deterministic_plan = self._deterministic_single_file_plan(goal)
+        if deterministic_plan is not None:
+            return deterministic_plan
+
         prompt = f"""You are Nova's task planner.
 
 Create a concrete step-by-step plan. Each step must map to exactly ONE tool call.
