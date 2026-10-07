@@ -1443,88 +1443,72 @@ Nova must choose another useful action.
                 f"Tool success: {succeeded}"
             )
 
-            current_step = self.planner.get_next_step(
-                plan
-            )
-
+            current_step = self.planner.get_next_step(plan)
             current_step_id = (
                 current_step.get("id")
                 if isinstance(current_step, dict)
                 else None
             )
 
-            if current_step_id is not None and succeeded:
-                self.planner.update_step(
-                    plan,
-                    current_step_id,
-                    result,
-                    status="completed"
-                )
+            if succeeded:
+                if current_step_id is not None:
+                    self.planner.update_step(
+                        plan,
+                        current_step_id,
+                        result,
+                        status="completed"
+                    )
 
+                # A verified success is authoritative. Never ask the LLM to
+                # re-plan a successful step, because it can accidentally reopen
+                # completed work or erase the progress we just verified.
+                workspace_revision += 1
+
+                if tool_name == "web_search":
+                    web_search_used = True
+                    self._status("Learning from search...")
+
+                    search_data = self._parse_tool_input(tool_input)
+                    query = ""
+                    if isinstance(search_data, dict):
+                        query = (
+                            search_data.get("query")
+                            or search_data.get("search")
+                            or search_data.get("q")
+                            or search_data.get("text")
+                            or ""
+                        )
+                    self._learn_from_search(query, result)
+
+                last_tool_error = None
+
+                if self.planner.is_complete(plan):
+                    completed = True
+                    self._status("Task plan completed.")
+                    break
+
+                continue
+
+            # Failed/unverifiable actions are the only point where adaptive
+            # replanning is useful. The real failure result is sent to the
+            # planner so it can add or change corrective work.
             plan = self.planner.replan(
                 plan=plan,
                 goal=message,
                 tool_name=tool_name,
                 tool_input=tool_input,
                 result=result,
-                success=succeeded
+                success=False
             )
 
-            if not succeeded:
+            last_tool_error = (
+                f"{tool_name}: {verification.message}\n"
+                f"Evidence: {verification.evidence[:500]}"
+            )
 
-                last_tool_error = (
-                    f"{tool_name}: {verification.message}\n"
-                    f"Evidence: {verification.evidence[:500]}"
-                )
+            self._status("Tool reported an error...")
 
-                self._status(
-                    "Tool reported an error..."
-                )
-
-                continue
-
-            last_tool_error = None
-
-            if tool_name in {
-                "write_file",
-                "create_directory"
-            }:
-
-                workspace_revision += 1
-
-            if tool_name == "web_search":
-
-                web_search_used = True
-
-                self._status(
-                    "Learning from search..."
-                )
-
-                search_data = (
-                    self._parse_tool_input(
-                        tool_input
-                    )
-                )
-
-                query = ""
-
-                if isinstance(
-                    search_data,
-                    dict
-                ):
-
-                    query = (
-                        search_data.get("query")
-                        or search_data.get("search")
-                        or search_data.get("q")
-                        or search_data.get("text")
-                        or ""
-                    )
-
-                self._learn_from_search(
-                    query,
-                    result
-                )
+            continue
 
             # Verification is now handled by Verifier above
 
