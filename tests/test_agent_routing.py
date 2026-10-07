@@ -95,6 +95,20 @@ class RouterTests(unittest.TestCase):
     def test_explicit_search_is_computer(self):
         self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
 
+    def test_plan_preserves_filename_case(self):
+        plan = (
+            "Goal: create file\n"
+            "1. [pending] Create the Python file MyModel.py in projects"
+        )
+        decision = self.router.decide(
+            message="create a Python file called MyModel.py in the projects folder",
+            task_type="computer",
+            plan=plan,
+            allowed_tools=["write_file"],
+        )
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["path"], "MyModel.py")
+
     def test_failed_git_history_is_not_success(self):
         history = (
             "Tool: git\n"
