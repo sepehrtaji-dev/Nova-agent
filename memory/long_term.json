@@ -13,7 +13,8 @@
         "user_projects_directory_location": "/path/to/user/projects/folder/",
         "programmingLanguages": [
             "Python"
-        ]
+        ],
+        "programming_languages_cpp_scripts_writing": true
     },
     "projects": [
         {
