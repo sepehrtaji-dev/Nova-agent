@@ -688,7 +688,12 @@ class ToolRouter:
 
         if tool_name in {"edit_file", "delete_file"}:
             path = tool_input.get("path")
-            return isinstance(path, str) and bool(path.strip())
+            location = tool_input.get("location", "projects")
+            return (
+                isinstance(path, str)
+                and bool(path.strip())
+                and location in {"projects", "desktop"}
+            )
 
         # Unknown tool — allow through, let the tool handle validation
         return True
