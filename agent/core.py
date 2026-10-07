@@ -1578,42 +1578,35 @@ Nova must choose another useful action.
             and not completed
         ):
 
-            if successful_web_search:
-                completed = True
+            # A partial tool success is not overall task completion. The
+            # planner is the source of truth for multi-step computer work.
+            self._status("Preparing final answer...")
 
-            elif self._has_successful_tool(tool_history):
-                # Tools ran successfully — build final answer from results
-                # even if the router loop didn't explicitly mark complete
-                completed = True
-
+            if last_tool_error:
+                response = (
+                    "I couldn't complete the "
+                    "requested computer operation.\n\n"
+                    f"Last tool result:\n"
+                    f"{last_tool_error}"
+                )
+            elif tool_history:
+                response = (
+                    "I couldn't verify full completion "
+                    "of the requested computer operation. "
+                    "Some tool actions ran, but the plan "
+                    "was not fully completed."
+                )
             else:
-                self._status("Preparing final answer...")
+                response = (
+                    "I couldn't perform the "
+                    "requested computer operation "
+                    "because no tool operation "
+                    "was successfully completed."
+                )
 
-                if last_tool_error:
-                    response = (
-                        "I couldn't complete the "
-                        "requested computer operation.\n\n"
-                        f"Last tool result:\n"
-                        f"{last_tool_error}"
-                    )
-                elif tool_history:
-                    response = (
-                        "I couldn't verify completion "
-                        "of the requested computer "
-                        "operation. No successful "
-                        "completion was confirmed."
-                    )
-                else:
-                    response = (
-                        "I couldn't perform the "
-                        "requested computer operation "
-                        "because no real tool operation "
-                        "was successfully completed."
-                    )
-
-                self._status("Done")
-                self.short_memory.add("assistant", response)
-                return response
+            self._status("Done")
+            self.short_memory.add("assistant", response)
+            return response
 
         if (
             web_search_used
