@@ -1431,14 +1431,13 @@ Generate the complete file now.
         if not pending:
             return None
 
-        # Never repeat a successfully executed write in the same workspace.
-        if "tool: write_file" in history.lower() and "verification: confirmed" in history.lower():
-            return None
-
         write_intent = (
             "write_file" in pending
             or ("write" in pending and "file" in pending)
             or ("create" in pending and "file" in pending)
+            or ("save" in pending and "file" in pending)
+            or ("generate" in pending and "file" in pending)
+            or ("make" in pending and "file" in pending)
         )
         if write_intent and "write_file" in allowed:
             path = None
