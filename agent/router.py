@@ -860,7 +860,12 @@ class ToolRouter:
             r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
             r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
             r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+        ]
+
+        return any(
+            re.search(pattern, text, re.IGNORECASE)
+            for pattern in patterns
+        )
 
     def classify_task(self, message, conversation=""):
 
