@@ -57,6 +57,30 @@ class RouterTests(unittest.TestCase):
         self.assertIn("test_model.py", plan["steps"][0]["description"])
         self.assertEqual(self.brain.calls, 0)
 
+    def test_cplusplus_script_request_is_computer(self):
+        result = self.router.classify_task(
+            "write a c++ script printing hello"
+        )
+        self.assertEqual(result, "computer")
+        self.assertEqual(self.brain.calls, 0)
+
+    def test_cplusplus_script_gets_cpp_filename(self):
+        planner = Planner(self.brain)
+        plan = planner.create_plan(
+            "write a c++ script printing hello"
+        )
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertIn("hello.cpp", plan["steps"][0]["description"])
+
+        decision = self.router.decide(
+            message="write a c++ script printing hello",
+            task_type="computer",
+            plan=planner.get_plan_summary(plan),
+            allowed_tools=["write_file"],
+        )
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["path"], "hello.cpp")
+        self.assertEqual(payload["location"], "projects")
     def test_explicit_file_request_is_computer_without_llm_classification(self):
         result = self.router.classify_task(
             "create a Python file called test_model.py in the projects folder"
