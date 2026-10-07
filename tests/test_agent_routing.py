@@ -88,6 +88,13 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["path"], "second.py")
 
+    def test_open_python_file_is_not_forced_to_desktop(self):
+        self.assertFalse(self.router._has_desktop_intent("open test_model.py"))
+        self.assertTrue(self.router._has_explicit_computer_intent("open test_model.py"))
+
+    def test_explicit_search_is_computer(self):
+        self.assertTrue(self.router._has_explicit_computer_intent("search Python 3.14 release notes"))
+
     def test_failed_git_history_is_not_success(self):
         history = (
             "Tool: git\n"
