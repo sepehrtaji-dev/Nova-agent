@@ -1505,7 +1505,7 @@ Generate the complete file now.
         for tool_name, aliases in simple_tools:
             if tool_name not in allowed:
                 continue
-            if not any(alias in pending for alias in aliases):
+            if not any(alias in pending_lower for alias in aliases):
                 continue
 
             if tool_name == "read_file":
