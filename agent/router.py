@@ -1441,19 +1441,21 @@ Generate the complete file now.
         pending = ""
         for line in plan.splitlines():
             if "[pending]" in line.lower():
-                pending = line.lower()
+                pending = line.strip()
                 break
 
         if not pending:
             return None
 
+        pending_lower = pending.lower()
+
         write_intent = (
-            "write_file" in pending
-            or ("write" in pending and "file" in pending)
-            or ("create" in pending and "file" in pending)
-            or ("save" in pending and "file" in pending)
-            or ("generate" in pending and "file" in pending)
-            or ("make" in pending and "file" in pending)
+            "write_file" in pending_lower
+            or ("write" in pending_lower and "file" in pending_lower)
+            or ("create" in pending_lower and "file" in pending_lower)
+            or ("save" in pending_lower and "file" in pending_lower)
+            or ("generate" in pending_lower and "file" in pending_lower)
+            or ("make" in pending_lower and "file" in pending_lower)
         )
         if write_intent and "write_file" in allowed:
             path = None
