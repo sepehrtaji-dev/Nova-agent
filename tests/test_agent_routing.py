@@ -2,6 +2,7 @@ import json
 import unittest
 
 from agent.router import ToolRouter
+from agent.planner import Planner
 
 
 class FakeBrain:
@@ -42,6 +43,19 @@ class RouterTests(unittest.TestCase):
         self.brain = FakeBrain()
         self.tools = FakeTools()
         self.router = ToolRouter(self.brain, self.tools)
+
+    def test_single_file_creation_gets_one_deterministic_write_step(self):
+        planner = Planner(self.brain)
+        plan = planner.create_plan(
+            "create a Python file called test_model.py in the projects folder"
+        )
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertEqual(plan["steps"][0]["id"], 1)
+        self.assertEqual(plan["steps"][0]["status"], "pending")
+        self.assertIn("write_file", plan["steps"][0]["description"])
+        self.assertIn("test_model.py", plan["steps"][0]["description"])
+        self.assertEqual(self.brain.calls, 0)
 
     def test_explicit_file_request_is_computer_without_llm_classification(self):
         result = self.router.classify_task(
