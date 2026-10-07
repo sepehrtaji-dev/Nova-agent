@@ -1026,6 +1026,7 @@ If nothing reliable can be extracted:
         completed = False
         last_tool_error = None
         web_search_used = False
+        direct_read_response = None
 
         for step in range(
             self.max_steps
@@ -1554,6 +1555,20 @@ Nova must choose another useful action.
                         status="completed"
                     )
 
+                if tool_name == "read_file":
+                    read_data = self._parse_tool_input(tool_input)
+                    read_path = ""
+                    read_location = "projects"
+                    if isinstance(read_data, dict):
+                        read_path = str(read_data.get("path", "")).strip()
+                        read_location = str(read_data.get("location", "projects")).strip()
+
+                    direct_read_response = (
+                        f"File: {read_path}\n"
+                        f"Location: {read_location}\n\n"
+                        f"{result}"
+                    )
+
                 # A verified success is authoritative. Never ask the LLM to
                 # re-plan a successful step, because it can accidentally reopen
                 # completed work or erase the progress we just verified.
@@ -1670,6 +1685,11 @@ Nova must choose another useful action.
             self._status("Done")
             self.short_memory.add("assistant", response)
             return response
+
+        if direct_read_response is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_read_response)
+            return direct_read_response
 
         if (
             web_search_used
