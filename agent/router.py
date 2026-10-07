@@ -1376,6 +1376,70 @@ Generate the complete file now.
             return stripped
         return None
 
+    def _deterministic_plan_decision(self, message, task_type, plan, tool_history, allowed_tools=None):
+        """Return a tool decision for an unambiguous pending plan step.
+
+        Tool selection for concrete computer actions must not depend entirely on
+        a second LLM decision. The planner already produced the next action;
+        use it deterministically and let the LLM generate only the file content.
+        """
+        if task_type != "computer" or not isinstance(plan, str):
+            return None
+
+        allowed = set(allowed_tools or self.tools.tools.keys())
+        if not allowed:
+            return None
+
+        history = str(tool_history or "")
+        pending = ""
+        for line in plan.splitlines():
+            if "[pending]" in line.lower():
+                pending = line.lower()
+                break
+
+        if not pending:
+            return None
+
+        # Never repeat a successfully executed write in the same workspace.
+        if "tool: write_file" in history.lower() and "verification: confirmed" in history.lower():
+            return None
+
+        write_intent = (
+            "write_file" in pending
+            or ("write" in pending and "file" in pending)
+            or ("create" in pending and "file" in pending)
+        )
+        if write_intent and "write_file" in allowed:
+            path = None
+            # Prefer an explicit filename from the planner.
+            match = re.search(r"[\\/\\w.-]+\\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)", pending, re.IGNORECASE)
+            if match:
+                path = match.group(0).replace("\\\\", "/").lstrip("./")
+                if "/" in path:
+                    path = path.split("/")[-1]
+
+            # Otherwise derive a stable filename from the user's request.
+            if not path:
+                text = str(message or "").lower()
+                if any(x in text for x in ("deep learning", "deeplearning", "neural network", "pytorch", "tensorflow")):
+                    path = "deep_learning_model.py"
+                elif "model" in text:
+                    path = "model.py"
+                else:
+                    path = "generated_code.py"
+
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "write_file",
+                "input": json.dumps({
+                    "path": path,
+                    "location": "projects"
+                }, ensure_ascii=False)
+            }
+
+        return None
+
     def decide(
         self,
         message,
@@ -1392,6 +1456,18 @@ Generate the complete file now.
                 tool_history
             )
         )
+
+        # Deterministic execution for an explicit pending plan step.
+        deterministic = self._deterministic_plan_decision(
+            message=message,
+            task_type=task_type,
+            plan=plan,
+            tool_history=tool_history,
+            allowed_tools=allowed_tools
+        )
+        if deterministic:
+            self._remember_file_generation(deterministic)
+            return deterministic
 
         prompt = self._build_decision_prompt(
             message=message,
