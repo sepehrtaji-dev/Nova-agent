@@ -179,8 +179,9 @@ class CoreTests(unittest.TestCase):
     def test_placeholder_detection_rejects_incomplete_code(self):
         core = NovaCore.__new__(NovaCore)
 
-        self.assertTrue(core._contains_placeholder("print('todo')"))
+        self.assertTrue(core._contains_placeholder("# TODO: implement this"))
         self.assertTrue(core._contains_placeholder("..."))
+        self.assertFalse(core._contains_placeholder('print("todo")'))
         self.assertFalse(core._contains_placeholder("print('hello')"))
 
 
