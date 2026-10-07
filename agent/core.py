@@ -174,28 +174,20 @@ class NovaCore:
 
         if tool_name == "read_file":
             return (
-                not result.startswith(
-                    "Filesystem error:"
-                )
-                and not result.startswith(
-                    "File does not exist"
-                )
-                and not result.startswith(
-                    "Path is not a file"
-                )
+                not result.startswith("Filesystem error:")
+                and not result.startswith("Permission denied:")
+                and not result.startswith("File does not exist")
+                and not result.startswith("Path is not a file")
+                and bool(result.strip())
             )
 
         if tool_name == "list_files":
             return (
-                not result.startswith(
-                    "Filesystem error:"
-                )
-                and not result.startswith(
-                    "Path does not exist:"
-                )
-                and not result.startswith(
-                    "Not a directory:"
-                )
+                not result.startswith("Filesystem error:")
+                and not result.startswith("Permission denied:")
+                and not result.startswith("Path does not exist:")
+                and not result.startswith("Not a directory:")
+                and bool(result.strip())
             )
 
         if tool_name == "git":
