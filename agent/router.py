@@ -713,8 +713,8 @@ class ToolRouter:
     _desktop_intent = re.compile(
         r"\b(?:"
         r"screenshot|take\s+a\s+screenshot|capture\s+screen"
-        r"|open\s+app|launch\s+app|open\s+\w+"
-        r"|close\s+app|close\s+\w+"
+        r"|open\s+(?:app|application)\b|launch\s+(?:app|application)\b"
+        r"|close\s+(?:app|application)\b"
         r"|click\s+(?:on\s+)?(?:the\s+)?"
         r"|move\s+(?:the\s+)?mouse"
         r"|type\s+(?:into|in|on)"
@@ -1483,6 +1483,91 @@ Generate the complete file now.
                     "location": "projects"
                 }, ensure_ascii=False)
             }
+
+        filename = None
+        filename_match = re.search(
+            r"[A-Za-z0-9_.-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
+            f"{pending} {message or ''}",
+            re.IGNORECASE,
+        )
+        if filename_match:
+            filename = filename_match.group(0)
+
+        simple_tools = (
+            ("read_file", ("read file", "open file", "inspect file", "check file")),
+            ("list_files", ("list files", "list directory", "list folder", "show files")),
+            ("create_directory", ("create directory", "create folder", "make directory", "make folder")),
+        )
+
+        for tool_name, aliases in simple_tools:
+            if tool_name not in allowed:
+                continue
+            if not any(alias in pending for alias in aliases):
+                continue
+
+            if tool_name == "read_file":
+                if not filename:
+                    return None
+                payload = {"path": filename, "location": "projects"}
+            elif tool_name == "list_files":
+                payload = {"path": ".", "location": "projects"}
+            else:
+                folder_match = re.search(
+                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
+                    f"{pending} {message or ''}",
+                    re.IGNORECASE,
+                )
+                if not folder_match:
+                    return None
+                payload = {
+                    "path": folder_match.group(1),
+                    "location": "projects",
+                }
+
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": tool_name,
+                "input": json.dumps(payload, ensure_ascii=False),
+            }
+
+        if "web_search" in allowed and any(
+            alias in pending
+            for alias in ("web search", "search the web", "search the internet", "look up")
+        ):
+            query = re.sub(
+                r"^\s*(?:go and )?(?:search|look up)(?: the web| the internet| online)?\s*(?:for|about)?\s*",
+                "",
+                str(message or "").strip(),
+                flags=re.IGNORECASE,
+            ).strip()
+            if query:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "web_search",
+                    "input": json.dumps({"query": query}, ensure_ascii=False),
+                }
+
+        if "terminal" in allowed and any(
+            alias in pending
+            for alias in ("run command", "run terminal", "execute command", "run script", "execute script")
+        ):
+            match = re.search(
+                r'(?:run|execute)\s+(?:the\s+)?(?:command|script)?\s*["\'](.+?)["\']',
+                str(message or "").strip(),
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "terminal",
+                    "input": json.dumps(
+                        {"command": match.group(1).strip(), "location": "projects"},
+                        ensure_ascii=False,
+                    ),
+                }
 
         return None
 
