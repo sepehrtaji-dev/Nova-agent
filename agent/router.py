@@ -336,17 +336,17 @@ class ToolRouter:
         if not tool_history:
             return False
 
-        markers = [
+        success_markers = [
             "STATUS: SUCCESS",
             "FILE_CREATED",
             "DIRECTORY_CREATED",
-            "Tool: web_search",
-            "Tool: git",
+            "Verification: CONFIRMED",
+            "Tool success: True",
         ]
 
         return any(
-            marker in tool_history
-            for marker in markers
+            marker.lower() in tool_history.lower()
+            for marker in success_markers
         )
 
     def _get_tool_names(self, allowed_tools=None):
@@ -363,34 +363,45 @@ class ToolRouter:
         return names
 
     def _contains_placeholder(self, value):
-
+        """Return True only for obvious incomplete-code placeholders."""
         if not isinstance(value, str):
             return False
 
         text = value.strip().lower()
+        if not text:
+            return False
 
-        placeholders = [
-            "...",
-            "…",
+        strong_phrases = (
             "<code>",
             "</code>",
             "<code here>",
             "code here",
             "insert code here",
             "your code here",
-            "actual code",
-            "actual python code",
-            "actual python calculator code",
             "write code here",
             "put code here",
-            "todo",
-            "tbd"
-        ]
-
-        return any(
-            marker in text
-            for marker in placeholders
+            "the rest of the code",
+            "rest of the code",
         )
+
+        if any(phrase in text for phrase in strong_phrases):
+            return True
+
+        # A bare ellipsis / unicode ellipsis on its own line is a placeholder;
+        # normal occurrences inside real Python expressions or prose are fine.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped in {"...", "…"}:
+                return True
+
+            # Common unfinished implementation comments.
+            if re.match(r"^#\s*(?:todo|tbd)\b", stripped):
+                return True
+
+            if re.match(r"^(?:todo|tbd)\s*:\s*(?:implement|finish|complete|add)", stripped):
+                return True
+
+        return False
 
     def _normalize_tool_input(self, tool_input):
 
@@ -688,7 +699,12 @@ class ToolRouter:
 
         if tool_name in {"edit_file", "delete_file"}:
             path = tool_input.get("path")
-            return isinstance(path, str) and bool(path.strip())
+            location = tool_input.get("location", "projects")
+            return (
+                isinstance(path, str)
+                and bool(path.strip())
+                and location in {"projects", "desktop"}
+            )
 
         # Unknown tool — allow through, let the tool handle validation
         return True
@@ -697,8 +713,8 @@ class ToolRouter:
     _desktop_intent = re.compile(
         r"\b(?:"
         r"screenshot|take\s+a\s+screenshot|capture\s+screen"
-        r"|open\s+app|launch\s+app|open\s+\w+"
-        r"|close\s+app|close\s+\w+"
+        r"|open\s+(?:app|application)\b|launch\s+(?:app|application)\b"
+        r"|close\s+(?:app|application)\b"
         r"|click\s+(?:on\s+)?(?:the\s+)?"
         r"|move\s+(?:the\s+)?mouse"
         r"|type\s+(?:into|in|on)"
@@ -818,10 +834,41 @@ class ToolRouter:
 
         return text in casual
 
+    def _has_explicit_computer_intent(self, message):
+        """Detect direct requests that require real computer/tool actions."""
+        if not isinstance(message, str):
+            return False
+
+        text = re.sub(r"\s+", " ", message.strip().lower())
+        if not text:
+            return False
+
+        # Questions that start with how/what/why are usually conversational.
+        if re.match(r"^(?:how|what|why|can|could|would)\b", text):
+            return bool(re.search(
+                r"\b(?:for me|on my (?:pc|computer)|in (?:the )?(?:projects|desktop) folder|to (?:create|write|run|read|edit|delete|modify))\b",
+                text,
+            ))
+
+        patterns = [
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|update|delete|remove|read|open|list)\b[^\n]{0,100}\b(?:file|folder|directory|document|projects?|desktop)\b",
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
+            r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
+            r"\b(?:terminal|powershell|cmd|shell)\b",
+            r"\b(?:git|github)\b[^\n]{0,100}\b(?:clone|commit|push|pull|checkout|branch|status|init|add|create repo|repository)\b",
+            r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
+            r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
+            r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
+        ]
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
     def classify_task(self, message, conversation=""):
 
         if self._is_obviously_conversational(message):
             return "conversation"
+
+        if self._has_explicit_computer_intent(message):
+            return "computer"
 
         prompt = f"""You are a task classifier for Nova, a local AI agent.
 
@@ -924,9 +971,9 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
         if tool_history and len(tool_history) > 500:
             tool_history = "..." + tool_history[-500:]
 
-        # Truncate plan to last 400 chars
-        if plan and len(plan) > 400:
-            plan = plan[-400:]
+        # Keep the beginning of the plan because it contains the first pending step.
+        if plan and len(plan) > 1200:
+            plan = plan[:1200]
 
         return f"""You are Nova. Choose the next tool to run.
 
@@ -1394,20 +1441,21 @@ Generate the complete file now.
         pending = ""
         for line in plan.splitlines():
             if "[pending]" in line.lower():
-                pending = line.lower()
+                pending = line.strip()
                 break
 
         if not pending:
             return None
 
-        # Never repeat a successfully executed write in the same workspace.
-        if "tool: write_file" in history.lower() and "verification: confirmed" in history.lower():
-            return None
+        pending_lower = pending.lower()
 
         write_intent = (
-            "write_file" in pending
-            or ("write" in pending and "file" in pending)
-            or ("create" in pending and "file" in pending)
+            "write_file" in pending_lower
+            or ("write" in pending_lower and "file" in pending_lower)
+            or ("create" in pending_lower and "file" in pending_lower)
+            or ("save" in pending_lower and "file" in pending_lower)
+            or ("generate" in pending_lower and "file" in pending_lower)
+            or ("make" in pending_lower and "file" in pending_lower)
         )
         if write_intent and "write_file" in allowed:
             path = None
@@ -1437,6 +1485,91 @@ Generate the complete file now.
                     "location": "projects"
                 }, ensure_ascii=False)
             }
+
+        filename = None
+        filename_match = re.search(
+            r"[A-Za-z0-9_.-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
+            f"{pending} {message or ''}",
+            re.IGNORECASE,
+        )
+        if filename_match:
+            filename = filename_match.group(0)
+
+        simple_tools = (
+            ("read_file", ("read file", "open file", "inspect file", "check file")),
+            ("list_files", ("list files", "list directory", "list folder", "show files")),
+            ("create_directory", ("create directory", "create folder", "make directory", "make folder")),
+        )
+
+        for tool_name, aliases in simple_tools:
+            if tool_name not in allowed:
+                continue
+            if not any(alias in pending for alias in aliases):
+                continue
+
+            if tool_name == "read_file":
+                if not filename:
+                    return None
+                payload = {"path": filename, "location": "projects"}
+            elif tool_name == "list_files":
+                payload = {"path": ".", "location": "projects"}
+            else:
+                folder_match = re.search(
+                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
+                    f"{pending} {message or ''}",
+                    re.IGNORECASE,
+                )
+                if not folder_match:
+                    return None
+                payload = {
+                    "path": folder_match.group(1),
+                    "location": "projects",
+                }
+
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": tool_name,
+                "input": json.dumps(payload, ensure_ascii=False),
+            }
+
+        if "web_search" in allowed and any(
+            alias in pending
+            for alias in ("web search", "search the web", "search the internet", "look up")
+        ):
+            query = re.sub(
+                r"^\s*(?:go and )?(?:search|look up)(?: the web| the internet| online)?\s*(?:for|about)?\s*",
+                "",
+                str(message or "").strip(),
+                flags=re.IGNORECASE,
+            ).strip()
+            if query:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "web_search",
+                    "input": json.dumps({"query": query}, ensure_ascii=False),
+                }
+
+        if "terminal" in allowed and any(
+            alias in pending
+            for alias in ("run command", "run terminal", "execute command", "run script", "execute script")
+        ):
+            match = re.search(
+                r'(?:run|execute)\s+(?:the\s+)?(?:command|script)?\s*["\'](.+?)["\']',
+                str(message or "").strip(),
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "terminal",
+                    "input": json.dumps(
+                        {"command": match.group(1).strip(), "location": "projects"},
+                        ensure_ascii=False,
+                    ),
+                }
 
         return None
 
@@ -1643,12 +1776,16 @@ Generate the complete file now.
                 )
 
                 if validated_function_call:
-
-                    self._remember_file_generation(
-                        validated_function_call
-                    )
-
-                    return validated_function_call
+                    if (
+                        allowed_tools is not None
+                        and validated_function_call.get("tool") not in set(allowed_tools)
+                    ):
+                        validated_function_call = None
+                    else:
+                        self._remember_file_generation(
+                            validated_function_call
+                        )
+                        return validated_function_call
 
             response_decision = (
                 self._validate_response_decision(

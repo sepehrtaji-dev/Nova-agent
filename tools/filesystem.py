@@ -73,14 +73,23 @@ class FileSystemTool:
                 "Use 'projects', 'desktop', or 'system'."
             )
 
-        # Relative path — join with root and security check
+        # Relative path — resolve real paths too, so symlinks cannot escape
+        # the selected workspace root.
+        root = os.path.realpath(root)
         full_path = os.path.abspath(os.path.join(root, path))
+        candidate_real = os.path.realpath(full_path)
+        parent_real = os.path.realpath(os.path.dirname(full_path))
 
         try:
-            common = os.path.commonpath([root, full_path])
-            if common != root:
+            if os.path.commonpath([root, parent_real]) != root:
                 raise ValueError(
                     f"Path escapes workspace root. "
+                    f"Root: {root}  Path: {full_path}"
+                )
+
+            if os.path.exists(full_path) and os.path.commonpath([root, candidate_real]) != root:
+                raise ValueError(
+                    f"Path escapes workspace root through a symlink. "
                     f"Root: {root}  Path: {full_path}"
                 )
         except ValueError:
@@ -96,7 +105,8 @@ class FileSystemTool:
         norm = full_path.replace("\\", "/")
 
         for blocked in self._BLOCKED_PREFIXES:
-            if norm.startswith(blocked):
+            blocked = blocked.rstrip("/")
+            if norm == blocked or norm.startswith(blocked + "/"):
                 raise PermissionError(
                     f"Access denied: {full_path!r} is a protected system path."
                 )

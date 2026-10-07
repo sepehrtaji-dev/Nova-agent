@@ -97,10 +97,10 @@ def load_model():
     print("Loading checkpoint...")
 
     checkpoint = torch.load(
-    CHECKPOINT,
-    map_location=DEVICE,
-    weights_only=False,
-                        )
+        CHECKPOINT,
+        map_location=DEVICE,
+        weights_only=True,
+    )
 
     if "model_state_dict" in checkpoint:
         state_dict = checkpoint["model_state_dict"]

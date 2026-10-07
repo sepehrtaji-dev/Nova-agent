@@ -117,7 +117,7 @@ Available tools:
 - create_directory: make a folder
 - terminal: run a shell command
 - web_search: search the web
-- git: git operations (init, clone, add, commit, push, pull, status, log, create_repo, push_with_token)
+- git: git operations (init, clone, add, commit, push, pull, status, log, create_repo)
 
 USER GOAL: {goal}
 
@@ -133,7 +133,7 @@ Rules:
   4. write_file (the actual files)
   5. git add
   6. git commit
-  7. git push_with_token
+  7. git push
 - Do not skip steps. Do not combine steps.
 - Return JSON only.
 

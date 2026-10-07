@@ -36,8 +36,26 @@ class GitTool:
         if os.path.isabs(path):
             return os.path.abspath(path)
 
-        # Relative to projects/
-        full = os.path.abspath(os.path.join(self.projects_path, path))
+        # Relative paths stay inside Nova's projects workspace.
+        root = os.path.realpath(self.projects_path)
+        full = os.path.abspath(os.path.join(root, path))
+
+        try:
+            # Validate the destination itself and its nearest existing parent
+            # so a symlink cannot redirect Git outside the workspace.
+            parent_real = os.path.realpath(os.path.dirname(full))
+            candidate_real = os.path.realpath(full)
+            if os.path.commonpath([root, parent_real]) != root:
+                raise ValueError(
+                    f"Git path escapes projects workspace: {path!r}"
+                )
+            if os.path.exists(full) and os.path.commonpath([root, candidate_real]) != root:
+                raise ValueError(
+                    f"Git path escapes projects workspace through a symlink: {path!r}"
+                )
+        except ValueError as exc:
+            raise ValueError(str(exc))
+
         return full
 
     def _run_git(self, args, cwd):
@@ -80,6 +98,8 @@ class GitTool:
                 "Git is not installed or not in PATH.\n"
                 "Install git: https://git-scm.com/downloads"
             )
+        except ValueError as e:
+            return f"STATUS: ERROR\n{e}"
         except Exception as e:
             return f"STATUS: ERROR\nGit error: {type(e).__name__}: {e}"
 

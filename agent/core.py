@@ -174,28 +174,20 @@ class NovaCore:
 
         if tool_name == "read_file":
             return (
-                not result.startswith(
-                    "Filesystem error:"
-                )
-                and not result.startswith(
-                    "File does not exist."
-                )
-                and not result.startswith(
-                    "Path is not a file."
-                )
+                not result.startswith("Filesystem error:")
+                and not result.startswith("Permission denied:")
+                and not result.startswith("File does not exist")
+                and not result.startswith("Path is not a file")
+                and bool(result.strip())
             )
 
         if tool_name == "list_files":
             return (
-                not result.startswith(
-                    "Filesystem error:"
-                )
-                and not result.startswith(
-                    "Path does not exist:"
-                )
-                and not result.startswith(
-                    "Not a directory:"
-                )
+                not result.startswith("Filesystem error:")
+                and not result.startswith("Permission denied:")
+                and not result.startswith("Path does not exist:")
+                and not result.startswith("Not a directory:")
+                and bool(result.strip())
             )
 
         if tool_name == "git":
@@ -325,33 +317,45 @@ class NovaCore:
         return None
 
     def _contains_placeholder(self, value):
+        """Return True only for obvious incomplete-code placeholders."""
         if not isinstance(value, str):
             return False
 
-        text = value.lower()
+        text = value.strip().lower()
+        if not text:
+            return False
 
-        bad_patterns = [
-            "...",
-            "…",
+        strong_phrases = (
             "<code>",
             "</code>",
             "<code here>",
             "code here",
             "insert code here",
             "your code here",
-            "actual code",
-            "actual python code",
-            "actual python calculator code",
             "write code here",
             "put code here",
-            "todo",
-            "tbd"
-        ]
-
-        return any(
-            pattern in text
-            for pattern in bad_patterns
+            "the rest of the code",
+            "rest of the code",
         )
+
+        if any(phrase in text for phrase in strong_phrases):
+            return True
+
+        # A bare ellipsis / unicode ellipsis on its own line is a placeholder;
+        # normal occurrences inside real Python expressions or prose are fine.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped in {"...", "…"}:
+                return True
+
+            # Common unfinished implementation comments.
+            if re.match(r"^#\s*(?:todo|tbd)\b", stripped):
+                return True
+
+            if re.match(r"^(?:todo|tbd)\s*:\s*(?:implement|finish|complete|add)", stripped):
+                return True
+
+        return False
 
     def _validate_tool_request(
         self,
@@ -496,20 +500,26 @@ class NovaCore:
                     "read_file path is empty."
                 )
 
+            location = data.get("location", "projects")
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False, (
+                    "Invalid read_file location."
+                )
+
         elif tool_name == "list_files":
 
-            path = data.get(
-                "path",
-                "."
-            )
+            path = data.get("path", ".")
+            location = data.get("location", "projects")
 
-            if not isinstance(
-                path,
-                str
-            ):
-                return False, (
-                    "list_files path is invalid."
-                )
+            if not isinstance(path, str):
+                return False, "list_files path is invalid."
+
+            if location not in {"projects", "desktop"}:
+                return False, "Invalid list_files location."
 
         elif tool_name == "terminal":
 
@@ -582,6 +592,28 @@ class NovaCore:
 
             if action.strip().lower() not in valid_actions:
                 return False, f"Unknown git action: {action}"
+
+        elif tool_name == "edit_file":
+
+            path = data.get("path")
+            location = data.get("location", "projects")
+
+            if not isinstance(path, str) or not path.strip():
+                return False, "edit_file requires a path."
+
+            if location not in {"projects", "desktop"}:
+                return False, "Invalid edit_file location."
+
+        elif tool_name == "delete_file":
+
+            path = data.get("path")
+            location = data.get("location", "projects")
+
+            if not isinstance(path, str) or not path.strip():
+                return False, "delete_file requires a path."
+
+            if location not in {"projects", "desktop"}:
+                return False, "Invalid delete_file location."
 
         elif tool_name == "generate_image":
 
@@ -1443,88 +1475,72 @@ Nova must choose another useful action.
                 f"Tool success: {succeeded}"
             )
 
-            current_step = self.planner.get_next_step(
-                plan
-            )
-
+            current_step = self.planner.get_next_step(plan)
             current_step_id = (
                 current_step.get("id")
                 if isinstance(current_step, dict)
                 else None
             )
 
-            if current_step_id is not None and succeeded:
-                self.planner.update_step(
-                    plan,
-                    current_step_id,
-                    result,
-                    status="completed"
-                )
+            if succeeded:
+                if current_step_id is not None:
+                    self.planner.update_step(
+                        plan,
+                        current_step_id,
+                        result,
+                        status="completed"
+                    )
 
+                # A verified success is authoritative. Never ask the LLM to
+                # re-plan a successful step, because it can accidentally reopen
+                # completed work or erase the progress we just verified.
+                workspace_revision += 1
+
+                if tool_name == "web_search":
+                    web_search_used = True
+                    self._status("Learning from search...")
+
+                    search_data = self._parse_tool_input(tool_input)
+                    query = ""
+                    if isinstance(search_data, dict):
+                        query = (
+                            search_data.get("query")
+                            or search_data.get("search")
+                            or search_data.get("q")
+                            or search_data.get("text")
+                            or ""
+                        )
+                    self._learn_from_search(query, result)
+
+                last_tool_error = None
+
+                if self.planner.is_complete(plan):
+                    completed = True
+                    self._status("Task plan completed.")
+                    break
+
+                continue
+
+            # Failed/unverifiable actions are the only point where adaptive
+            # replanning is useful. The real failure result is sent to the
+            # planner so it can add or change corrective work.
             plan = self.planner.replan(
                 plan=plan,
                 goal=message,
                 tool_name=tool_name,
                 tool_input=tool_input,
                 result=result,
-                success=succeeded
+                success=False
             )
 
-            if not succeeded:
+            last_tool_error = (
+                f"{tool_name}: {verification.message}\n"
+                f"Evidence: {verification.evidence[:500]}"
+            )
 
-                last_tool_error = (
-                    f"{tool_name}: {verification.message}\n"
-                    f"Evidence: {verification.evidence[:500]}"
-                )
+            self._status("Tool reported an error...")
 
-                self._status(
-                    "Tool reported an error..."
-                )
-
-                continue
-
-            last_tool_error = None
-
-            if tool_name in {
-                "write_file",
-                "create_directory"
-            }:
-
-                workspace_revision += 1
-
-            if tool_name == "web_search":
-
-                web_search_used = True
-
-                self._status(
-                    "Learning from search..."
-                )
-
-                search_data = (
-                    self._parse_tool_input(
-                        tool_input
-                    )
-                )
-
-                query = ""
-
-                if isinstance(
-                    search_data,
-                    dict
-                ):
-
-                    query = (
-                        search_data.get("query")
-                        or search_data.get("search")
-                        or search_data.get("q")
-                        or search_data.get("text")
-                        or ""
-                    )
-
-                self._learn_from_search(
-                    query,
-                    result
-                )
+            continue
 
             # Verification is now handled by Verifier above
 
@@ -1562,42 +1578,35 @@ Nova must choose another useful action.
             and not completed
         ):
 
-            if successful_web_search:
-                completed = True
+            # A partial tool success is not overall task completion. The
+            # planner is the source of truth for multi-step computer work.
+            self._status("Preparing final answer...")
 
-            elif self._has_successful_tool(tool_history):
-                # Tools ran successfully — build final answer from results
-                # even if the router loop didn't explicitly mark complete
-                completed = True
-
+            if last_tool_error:
+                response = (
+                    "I couldn't complete the "
+                    "requested computer operation.\n\n"
+                    f"Last tool result:\n"
+                    f"{last_tool_error}"
+                )
+            elif tool_history:
+                response = (
+                    "I couldn't verify full completion "
+                    "of the requested computer operation. "
+                    "Some tool actions ran, but the plan "
+                    "was not fully completed."
+                )
             else:
-                self._status("Preparing final answer...")
+                response = (
+                    "I couldn't perform the "
+                    "requested computer operation "
+                    "because no tool operation "
+                    "was successfully completed."
+                )
 
-                if last_tool_error:
-                    response = (
-                        "I couldn't complete the "
-                        "requested computer operation.\n\n"
-                        f"Last tool result:\n"
-                        f"{last_tool_error}"
-                    )
-                elif tool_history:
-                    response = (
-                        "I couldn't verify completion "
-                        "of the requested computer "
-                        "operation. No successful "
-                        "completion was confirmed."
-                    )
-                else:
-                    response = (
-                        "I couldn't perform the "
-                        "requested computer operation "
-                        "because no real tool operation "
-                        "was successfully completed."
-                    )
-
-                self._status("Done")
-                self.short_memory.add("assistant", response)
-                return response
+            self._status("Done")
+            self.short_memory.add("assistant", response)
+            return response
 
         if (
             web_search_used
