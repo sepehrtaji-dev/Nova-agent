@@ -500,6 +500,16 @@ class NovaCore:
                     "read_file path is empty."
                 )
 
+            location = data.get("location", "projects")
+
+            if location not in {
+                "projects",
+                "desktop"
+            }:
+                return False, (
+                    "Invalid read_file location."
+                )
+
         elif tool_name == "list_files":
 
             path = data.get("path", ".")
