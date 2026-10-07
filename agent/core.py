@@ -325,33 +325,45 @@ class NovaCore:
         return None
 
     def _contains_placeholder(self, value):
+        """Return True only for obvious incomplete-code placeholders."""
         if not isinstance(value, str):
             return False
 
-        text = value.lower()
+        text = value.strip().lower()
+        if not text:
+            return False
 
-        bad_patterns = [
-            "...",
-            "…",
+        strong_phrases = (
             "<code>",
             "</code>",
             "<code here>",
             "code here",
             "insert code here",
             "your code here",
-            "actual code",
-            "actual python code",
-            "actual python calculator code",
             "write code here",
             "put code here",
-            "todo",
-            "tbd"
-        ]
-
-        return any(
-            pattern in text
-            for pattern in bad_patterns
+            "the rest of the code",
+            "rest of the code",
         )
+
+        if any(phrase in text for phrase in strong_phrases):
+            return True
+
+        # A bare ellipsis / unicode ellipsis on its own line is a placeholder;
+        # normal occurrences inside real Python expressions or prose are fine.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped in {"...", "…"}:
+                return True
+
+            # Common unfinished implementation comments.
+            if re.match(r"^#\s*(?:todo|tbd)\b", stripped):
+                return True
+
+            if re.match(r"^(?:todo|tbd)\s*:\s*(?:implement|finish|complete|add)", stripped):
+                return True
+
+        return False
 
     def _validate_tool_request(
         self,
