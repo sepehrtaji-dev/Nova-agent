@@ -1494,14 +1494,7 @@ Generate the complete file now.
                 }, ensure_ascii=False)
             }
 
-        filename = None
-        filename_match = re.search(
-            r"[A-Za-z0-9_.-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
-            f"{pending} {message or ''}",
-            re.IGNORECASE,
-        )
-        if filename_match:
-            filename = filename_match.group(0)
+        filename = self._extract_filename(f"{pending} {message or ''}")
 
         simple_tools = (
             ("read_file", ("read file", "open file", "inspect file", "check file")),
