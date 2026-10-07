@@ -137,6 +137,24 @@ class FakeVerifier:
 
 
 class CoreTests(unittest.TestCase):
+    def test_capability_question_reports_real_read_access(self):
+        core = NovaCore.__new__(NovaCore)
+        core.access = {"web": True, "git": True, "pc": True}
+
+        self.assertEqual(
+            core._direct_capability_answer("can you read files? just say yes or no?"),
+            "Yes.",
+        )
+
+    def test_capability_question_reports_no_when_pc_access_is_disabled(self):
+        core = NovaCore.__new__(NovaCore)
+        core.access = {"web": True, "git": True, "pc": False}
+
+        self.assertEqual(
+            core._direct_capability_answer("can you read files"),
+            "No.",
+        )
+
     def test_verified_write_completes_without_replan(self):
         core = NovaCore.__new__(NovaCore)
         core.status_callback = None
