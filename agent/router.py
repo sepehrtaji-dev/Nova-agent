@@ -851,7 +851,7 @@ class ToolRouter:
             ))
 
         patterns = [
-            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|update|delete|remove|read|open|list)\b[^\n]{0,100}\b(?:file|folder|directory|document|projects?|desktop)\b",
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|update|delete|remove|read|open)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
             r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
             r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
             r"\b(?:terminal|powershell|cmd|shell)\b",
@@ -1423,6 +1423,17 @@ Generate the complete file now.
             return stripped
         return None
 
+    def _extract_filename(self, text):
+        """Extract a filename while preserving its original casing."""
+        if not isinstance(text, str):
+            return None
+        match = re.search(
+            r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
+            text,
+            re.IGNORECASE,
+        )
+        return match.group(1) if match else None
+
     def _deterministic_plan_decision(self, message, task_type, plan, tool_history, allowed_tools=None):
         """Return a tool decision for an unambiguous pending plan step.
 
@@ -1459,12 +1470,9 @@ Generate the complete file now.
         )
         if write_intent and "write_file" in allowed:
             path = None
-            # Prefer an explicit filename from the planner.
-            match = re.search(r"[\\/\\w.-]+\\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)", pending, re.IGNORECASE)
-            if match:
-                path = match.group(0).replace("\\\\", "/").lstrip("./")
-                if "/" in path:
-                    path = path.split("/")[-1]
+            # Prefer an explicit filename from the planner, preserving case.
+            path = self._extract_filename(pending) or self._extract_filename(str(message or ""))
+
 
             # Otherwise derive a stable filename from the user's request.
             if not path:
