@@ -168,6 +168,30 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(payload["path"], "test_model.py")
         self.assertEqual(payload["location"], "projects")
 
+    def test_partial_success_does_not_claim_full_completion(self):
+        core = NovaCore.__new__(NovaCore)
+        core.status_callback = None
+        core.brain = FakeBrain()
+        core.long_memory = FakeLongMemory()
+        core.short_memory = FakeMemory()
+        core.knowledge = FakeKnowledge()
+        core.extractor = FakeExtractor()
+        core.tools = FakeTools()
+        core.router = FakeRouter()
+        core.planner = FakePlanner()
+        core.verifier = FakeVerifier()
+        core.max_steps = 1
+        core.access = {"web": True, "git": True, "pc": True}
+        core.planner.is_complete = lambda plan: False
+
+        response = core.ask(
+            "create a Python file called test_model.py in the projects folder "
+            "with a simple PyTorch neural network"
+        )
+
+        self.assertIn("plan was not fully completed", response)
+        self.assertEqual(len(core.tools.calls), 1)
+
     def test_parse_tool_input_accepts_dict_and_json(self):
         core = NovaCore.__new__(NovaCore)
         payload = {"path": "x.py", "location": "projects"}
