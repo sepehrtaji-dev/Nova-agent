@@ -96,14 +96,14 @@ class Planner:
         if not isinstance(goal, str):
             return None
 
-        text = re.sub(r"\\s+", " ", goal.strip())
+        text = re.sub(r"\s+", " ", goal.strip())
         if not text:
             return None
 
         # This optimization is intentionally limited to one explicit file.
         # Multi-file requests still go through the language-model planner.
         filenames = re.findall(
-            r"(?<![\\w.-])([A-Za-z0-9_-]+\\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\\w.-])",
+            r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
             text,
             flags=re.IGNORECASE,
         )
@@ -111,13 +111,13 @@ class Planner:
             return None
 
         if not re.search(
-            r"\\b(?:create|make|write|save|generate)\\b[^.\\n]{0,120}\\bfile\\b",
+            r"\b(?:create|make|write|save|generate)\b[^.\n]{0,120}\bfile\b",
             text,
             flags=re.IGNORECASE,
         ):
             return None
 
-        location = "desktop" if re.search(r"\\bdesktop\\b", text, re.IGNORECASE) else "projects"
+        location = "desktop" if re.search(r"\bdesktop\b", text, re.IGNORECASE) else "projects"
         filename = filenames[0]
 
         return {
