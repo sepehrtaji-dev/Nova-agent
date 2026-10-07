@@ -526,6 +526,9 @@ class Verifier:
             if line.startswith("Screenshot:"):
                 screenshot_path = line.replace("Screenshot:", "").strip()
                 break
+            if line.startswith("Screenshot saved:"):
+                screenshot_path = line.replace("Screenshot saved:", "", 1).strip()
+                break
 
         if screenshot_path:
             if os.path.isfile(screenshot_path):
