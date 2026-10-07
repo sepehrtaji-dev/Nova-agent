@@ -16,6 +16,7 @@ def load_tools():
     web = WebSearchTool()
     git = GitTool()
     image_gen = ImageGenTool()
+    desktop = DesktopTool()
 
     registry.register(
         "terminal",
@@ -87,6 +88,14 @@ def load_tools():
             "create_repo creates a new GitHub repository (requires gh CLI)."
         ),
         git.run
+    )
+
+    registry.register(
+        "desktop",
+        (
+            "Control the desktop: screenshots, mouse, keyboard, apps, and windows."
+        ),
+        desktop.run
     )
 
     registry.register(
