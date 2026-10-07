@@ -82,6 +82,7 @@ class Verifier:
             "terminal":         self._verify_terminal,
             "git":              self._verify_git,
             "web_search":       self._verify_web_search,
+            "generate_image":   self._verify_generate_image,
             "desktop":          self._verify_desktop,
         }
 
@@ -450,6 +451,51 @@ class Verifier:
             message=f"✓ File deletion confirmed: {actual_path}"
         )
 
+
+    # ── generate_image ────────────────────────────────────────────────────────
+
+    def _verify_generate_image(self, tool_input, tool_result):
+        """Confirm image generation produced a real non-empty output file."""
+        if "IMAGE GENERATED" not in tool_result or "STATUS: SUCCESS" not in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message="generate_image did not report a successful generation.",
+            )
+
+        saved_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Saved to:"):
+                saved_path = line.replace("Saved to:", "", 1).strip()
+                break
+
+        if not saved_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="Image generation succeeded but no output path was reported.",
+            )
+
+        if not os.path.isfile(saved_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"os.path.isfile({saved_path!r}) = False",
+                message=f"Generated image was not found on disk: {saved_path}",
+            )
+
+        size = os.path.getsize(saved_path)
+        if size <= 0:
+            return VerificationResult(
+                status="failed",
+                evidence=f"File size = {size} bytes",
+                message=f"Generated image is empty: {saved_path}",
+            )
+
+        return VerificationResult(
+            status="confirmed",
+            evidence=f"Image: {saved_path} ({size:,} bytes)",
+            message=f"✓ Image confirmed on disk: {saved_path}",
+        )
 
     # ── desktop ───────────────────────────────────────────────────────────────
 
