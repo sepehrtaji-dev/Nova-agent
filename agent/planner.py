@@ -92,7 +92,7 @@ class Planner:
         return normalized
 
     def _deterministic_single_file_plan(self, goal):
-        """Build a minimal plan for an explicit single-file creation request."""
+        """Build a minimal plan for an explicit source-file/script request."""
         if not isinstance(goal, str):
             return None
 
@@ -100,25 +100,54 @@ class Planner:
         if not text:
             return None
 
-        # This optimization is intentionally limited to one explicit file.
-        # Multi-file requests still go through the language-model planner.
         filenames = re.findall(
             r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
             text,
             flags=re.IGNORECASE,
         )
-        if len(filenames) != 1:
-            return None
 
-        if not re.search(
-            r"\b(?:create|make|write|save|generate)\b[^.\n]{0,120}\bfile\b",
+        source_request = re.search(
+            r"\b(?:create|make|write|save|generate)\b[^.\n]{0,120}"
+            r"\b(?:file|script|program|source|code)\b",
             text,
             flags=re.IGNORECASE,
-        ):
+        )
+
+        if not source_request:
             return None
 
-        location = "desktop" if re.search(r"\bdesktop\b", text, re.IGNORECASE) else "projects"
-        filename = filenames[0]
+        if len(filenames) > 1:
+            return None
+
+        location = (
+            "desktop"
+            if re.search(r"\bdesktop\b", text, re.IGNORECASE)
+            else "projects"
+        )
+
+        if filenames:
+            filename = filenames[0]
+        else:
+            lowered = f" {text.lower()} "
+            language_defaults = (
+                ("c++", "hello.cpp"),
+                ("c plus plus", "hello.cpp"),
+                ("cpp", "hello.cpp"),
+                ("python", "script.py"),
+                ("javascript", "script.js"),
+                ("typescript", "script.ts"),
+                ("rust", "script.rs"),
+                ("java", "Main.java"),
+                ("golang", "script.go"),
+            )
+            filename = next(
+                (
+                    name
+                    for marker, name in language_defaults
+                    if marker in lowered
+                ),
+                "generated_code.txt",
+            )
 
         return {
             "goal": goal,

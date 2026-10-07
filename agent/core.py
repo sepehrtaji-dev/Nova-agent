@@ -1302,10 +1302,29 @@ The file was NOT written.
 
                     if not generated_content:
 
+                        generation_error = getattr(
+                            self.router,
+                            "_last_file_generation_error",
+                            None
+                        )
+
+                        if generation_error:
+                            last_tool_error = (
+                                "write_file content generation failed: "
+                                f"{generation_error}"
+                            )
+                        else:
+                            last_tool_error = (
+                                "write_file content generation returned "
+                                "empty content."
+                            )
+
                         tool_history.append(
-                            """
-File content generation returned empty
-content.
+                            f"""
+File content generation failed.
+
+Error:
+{last_tool_error}
 
 The file was NOT written.
 """
@@ -1315,17 +1334,27 @@ The file was NOT written.
                             "File generation failed..."
                         )
 
-                        continue
+                        # Do not loop on the same failed model-generation
+                        # request. OllamaBrain already performs one bounded
+                        # repeat-limit retry.
+                        break
 
                     if self._contains_placeholder(
                         generated_content
                     ):
 
+                        last_tool_error = (
+                            "Generated file content contained "
+                            "an incomplete placeholder."
+                        )
+
                         tool_history.append(
-                            """
+                            f"""
 Generated file content appears to contain
 a placeholder instead of a complete
 implementation.
+
+{last_tool_error}
 
 The file was NOT written.
 """
@@ -1335,7 +1364,7 @@ The file was NOT written.
                             "Generated content rejected..."
                         )
 
-                        continue
+                        break
 
                     file_data["content"] = (
                         generated_content
