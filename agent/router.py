@@ -336,17 +336,17 @@ class ToolRouter:
         if not tool_history:
             return False
 
-        markers = [
+        success_markers = [
             "STATUS: SUCCESS",
             "FILE_CREATED",
             "DIRECTORY_CREATED",
-            "Tool: web_search",
-            "Tool: git",
+            "Verification: CONFIRMED",
+            "Tool success: True",
         ]
 
         return any(
-            marker in tool_history
-            for marker in markers
+            marker.lower() in tool_history.lower()
+            for marker in success_markers
         )
 
     def _get_tool_names(self, allowed_tools=None):
@@ -840,7 +840,7 @@ class ToolRouter:
             r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
             r"\b(?:terminal|powershell|cmd|shell)\b",
             r"\b(?:git|github)\b[^\n]{0,100}\b(?:clone|commit|push|pull|checkout|branch|status|init|add|create repo|repository)\b",
-            r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
+            r"\b(?:search|look up|find|google)\b",
             r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
             r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
         ]
@@ -955,9 +955,9 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
         if tool_history and len(tool_history) > 500:
             tool_history = "..." + tool_history[-500:]
 
-        # Truncate plan to last 400 chars
-        if plan and len(plan) > 400:
-            plan = plan[-400:]
+        # Keep the beginning of the plan because it contains the first pending step.
+        if plan and len(plan) > 1200:
+            plan = plan[:1200]
 
         return f"""You are Nova. Choose the next tool to run.
 
@@ -1673,12 +1673,16 @@ Generate the complete file now.
                 )
 
                 if validated_function_call:
-
-                    self._remember_file_generation(
-                        validated_function_call
-                    )
-
-                    return validated_function_call
+                    if (
+                        allowed_tools is not None
+                        and validated_function_call.get("tool") not in set(allowed_tools)
+                    ):
+                        validated_function_call = None
+                    else:
+                        self._remember_file_generation(
+                            validated_function_call
+                        )
+                        return validated_function_call
 
             response_decision = (
                 self._validate_response_decision(
