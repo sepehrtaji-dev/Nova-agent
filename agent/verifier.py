@@ -168,37 +168,61 @@ class Verifier:
     # ── read_file ─────────────────────────────────────────────────────────────
 
     def _verify_read_file(self, tool_input, tool_result):
-        """
-        Check the result is non-empty and doesn't start with an error marker.
-        """
-        error_prefixes = [
+        """Verify a read by checking the requested file exists on disk."""
+        path = str(tool_input.get("path", "")).strip()
+        location = str(tool_input.get("location", "projects")).strip().lower()
+
+        error_prefixes = (
             "Filesystem error:",
+            "Permission denied:",
             "File does not exist",
             "Path is not a file",
-            "File is not a UTF-8",
-        ]
-
-        for prefix in error_prefixes:
-            if tool_result.startswith(prefix):
-                return VerificationResult(
-                    status="failed",
-                    evidence=tool_result[:300],
-                    message=f"read_file failed: {tool_result[:100]}"
-                )
-
-        if not tool_result.strip():
+            "File is not a readable text file:",
+        )
+        if any(tool_result.startswith(prefix) for prefix in error_prefixes):
             return VerificationResult(
                 status="failed",
-                evidence="(empty result)",
-                message="read_file returned empty content."
+                evidence=tool_result[:300],
+                message=f"read_file failed: {tool_result[:120]}",
             )
 
-        path = tool_input.get("path", "(unknown)")
+        roots = {
+            "projects": os.path.abspath(os.path.join(os.getcwd(), "projects")),
+            "desktop": os.path.abspath(os.path.join(os.path.expanduser("~"), "Desktop")),
+        }
+        root = roots.get(location)
+        if not root or not path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:200],
+                message="read_file could not resolve its requested location.",
+            )
+
+        actual_path = os.path.abspath(os.path.join(root, path))
+        try:
+            common = os.path.commonpath([root, actual_path])
+        except ValueError:
+            common = ""
+        if common != root:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Resolved path escapes workspace: {actual_path}",
+                message="read_file path escapes its allowed workspace.",
+            )
+
+        if not os.path.isfile(actual_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"os.path.isfile({actual_path!r}) = False",
+                message=f"File could not be confirmed on disk: {actual_path}",
+            )
+
         return VerificationResult(
             status="confirmed",
-            evidence=tool_result[:200],
-            message=f"✓ File read confirmed: {path} ({len(tool_result)} chars)"
+            evidence=f"Path: {actual_path}\nChars returned: {len(tool_result)}",
+            message=f"✓ File read confirmed: {actual_path}",
         )
+
 
     # ── create_directory ──────────────────────────────────────────────────────
 
@@ -243,34 +267,54 @@ class Verifier:
     # ── list_files ────────────────────────────────────────────────────────────
 
     def _verify_list_files(self, tool_input, tool_result):
-        """
-        Check result is not an error and contains at least one entry.
-        """
-        error_prefixes = [
-            "Filesystem error:",
-            "Path does not exist:",
-            "Not a directory:",
-        ]
+        """Verify the requested directory exists and is actually a directory."""
+        path = str(tool_input.get("path", ".")).strip() or "."
+        location = str(tool_input.get("location", "projects")).strip().lower()
 
-        for prefix in error_prefixes:
-            if tool_result.startswith(prefix):
-                return VerificationResult(
-                    status="failed",
-                    evidence=tool_result[:300],
-                    message=f"list_files failed: {tool_result[:100]}"
-                )
+        if tool_result.startswith(("Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:")):
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message=f"list_files failed: {tool_result[:120]}",
+            )
 
-        path = tool_input.get("path", ".")
-        entries = [
-            line for line in tool_result.splitlines()
-            if line.strip()
-        ]
+        roots = {
+            "projects": os.path.abspath(os.path.join(os.getcwd(), "projects")),
+            "desktop": os.path.abspath(os.path.join(os.path.expanduser("~"), "Desktop")),
+        }
+        root = roots.get(location)
+        if not root:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:200],
+                message="list_files could not resolve its location.",
+            )
+
+        actual_path = os.path.abspath(os.path.join(root, path))
+        try:
+            common = os.path.commonpath([root, actual_path])
+        except ValueError:
+            common = ""
+        if common != root:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Resolved path escapes workspace: {actual_path}",
+                message="list_files path escapes its allowed workspace.",
+            )
+
+        if not os.path.isdir(actual_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"os.path.isdir({actual_path!r}) = False",
+                message=f"Directory could not be confirmed on disk: {actual_path}",
+            )
 
         return VerificationResult(
             status="confirmed",
-            evidence=tool_result[:300],
-            message=f"✓ Listed {len(entries)} entries in '{path}'"
+            evidence=f"Directory: {actual_path}",
+            message=f"✓ Directory listing confirmed: {actual_path}",
         )
+
 
     # ── terminal ──────────────────────────────────────────────────────────────
 
