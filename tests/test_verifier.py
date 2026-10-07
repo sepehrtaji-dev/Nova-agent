@@ -59,6 +59,32 @@ class TestVerifier(unittest.TestCase):
 
         self.assertEqual(verification.status, "failed")
 
+    def test_generate_image_requires_real_output_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "generated.png")
+            result = (
+                "IMAGE GENERATED\n"
+                f"Saved to: {path}\n"
+                "STATUS: SUCCESS"
+            )
+
+            verification = self.verifier.verify(
+                "generate_image",
+                {"prompt": "test"},
+                result,
+            )
+            self.assertEqual(verification.status, "failed")
+
+            with open(path, "wb") as handle:
+                handle.write(b"PNG")
+
+            verification = self.verifier.verify(
+                "generate_image",
+                {"prompt": "test"},
+                result,
+            )
+            self.assertTrue(verification.confirmed())
+
     def test_unknown_tool_is_not_success(self):
         verification = self.verifier.verify(
             "unknown_tool",
