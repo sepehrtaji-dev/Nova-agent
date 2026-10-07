@@ -91,6 +91,47 @@ class Planner:
 
         return normalized
 
+    def _deterministic_single_file_plan(self, goal):
+        """Build a minimal plan for an explicit single-file creation request."""
+        if not isinstance(goal, str):
+            return None
+
+        text = re.sub(r"\s+", " ", goal.strip())
+        if not text:
+            return None
+
+        # This optimization is intentionally limited to one explicit file.
+        # Multi-file requests still go through the language-model planner.
+        filenames = re.findall(
+            r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if len(filenames) != 1:
+            return None
+
+        if not re.search(
+            r"\b(?:create|make|write|save|generate)\b[^.\n]{0,120}\bfile\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return None
+
+        location = "desktop" if re.search(r"\bdesktop\b", text, re.IGNORECASE) else "projects"
+        filename = filenames[0]
+
+        return {
+            "goal": goal,
+            "steps": [
+                {
+                    "id": 1,
+                    "description": f"write_file: create {filename} in {location}",
+                    "status": "pending",
+                    "result": None,
+                }
+            ],
+        }
+
     def create_plan(self, goal, context=""):
         if not isinstance(goal, str):
             return {
@@ -105,6 +146,10 @@ class Planner:
                 "goal": "",
                 "steps": []
             }
+
+        deterministic_plan = self._deterministic_single_file_plan(goal)
+        if deterministic_plan is not None:
+            return deterministic_plan
 
         prompt = f"""You are Nova's task planner.
 
