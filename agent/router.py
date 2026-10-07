@@ -851,15 +851,15 @@ class ToolRouter:
             ))
 
         patterns = [
-            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|update|delete|remove|read|open)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
-            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove|read|open)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
+            r"\b(?:create|make|write|save|generate)\b[^\n]{0,100}\b(?:file|script|program|source|source code|code)\b",
+            r"\b(?:write|create|make|generate)\b[^\n]{0,60}\b(?:python|c\+\+|cpp|javascript|typescript|rust|java|golang)\b",
             r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
             r"\b(?:terminal|powershell|cmd|shell)\b",
             r"\b(?:git|github)\b[^\n]{0,100}\b(?:clone|commit|push|pull|checkout|branch|status|init|add|create repo|repository)\b",
             r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
             r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
             r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
-        ]
         return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
     def classify_task(self, message, conversation=""):
@@ -1194,118 +1194,67 @@ Return JSON only.
         conversation="",
         tool_history=""
     ):
+        self._last_file_generation_error = None
 
-        prompt = f"""
-You are Nova's code generation engine.
+        extension = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        language = {
+            "cpp": "C++",
+            "c": "C",
+            "py": "Python",
+            "pyw": "Python",
+            "js": "JavaScript",
+            "ts": "TypeScript",
+            "tsx": "TypeScript",
+            "jsx": "JavaScript",
+            "java": "Java",
+            "rs": "Rust",
+            "go": "Go",
+        }.get(extension, "source")
 
-Generate the COMPLETE ACTUAL CONTENT of ONE FILE.
-
-The file will be written directly to disk.
-
-USER REQUEST:
-
-{user_request}
-
-TARGET FILE:
-
-{path}
-
-LOCATION:
-
-{location}
-
-CONVERSATION:
-
-{conversation}
-
-PREVIOUS TOOL RESULTS:
-
-{tool_history}
-
-RULES:
-
-1. Generate the complete file.
-
-2. Do not explain the code.
-
-3. Do not describe the code.
-
-4. Do not use placeholders.
-
-5. Do not use ellipsis.
-
-6. Do not write "code here".
-
-7. Do not write TODO instead of implementation.
-
-8. Do not wrap the file in Markdown fences.
-
-9. The output must be directly usable as
-the contents of the target file.
-
-10. Include imports, functions, classes,
-main logic, and required supporting code
-when they are necessary.
-
-11. Do not omit sections for brevity.
-
-12. Do not say "the rest of the code".
-
-13. Do not return JSON.
-
-14. Return ONLY the raw file content.
-
-Generate the complete file now.
-"""
+        prompt = (
+            f"Generate complete raw {language} source code for \"{path}\".\n\n"
+            f"User request: {user_request}\n\n"
+            "Output source code only. No Markdown fences, explanation, JSON, placeholders, TODOs, or ellipsis."
+        )
 
         try:
-
             raw = self.brain.generate(
                 prompt,
-                json_mode=False
+                system_prompt=(
+                    f"You are a code generator. Return only valid raw {language} source code."
+                ),
+                json_mode=False,
+                options={
+                    "temperature": 0.0,
+                    "num_predict": 256,
+                },
             )
-
-        except Exception:
-
+        except Exception as exc:
+            self._last_file_generation_error = f"{type(exc).__name__}: {exc}"
             return None
 
-        if not isinstance(
-            raw,
-            str
-        ):
+        if not isinstance(raw, str):
             raw = str(raw)
 
-        content = raw.strip()
+        generated = raw.strip()
 
-        if content.startswith(
-            "```"
-        ):
-
-            lines = content.splitlines()
-
+        if generated.startswith("```"):
+            lines = generated.splitlines()
             if lines:
                 lines = lines[1:]
-
-            if (
-                lines
-                and lines[-1].strip() == "```"
-            ):
+            if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
+            generated = "\n".join(lines).strip()
 
-            content = "\n".join(
-                lines
-            ).strip()
-
-        if self._contains_placeholder(
-            content
-        ):
+        if self._contains_placeholder(generated):
+            self._last_file_generation_error = "Generated code contained a placeholder."
             return None
 
-        if not content:
+        if not generated:
+            self._last_file_generation_error = "Code generation returned empty content."
             return None
 
-        return content
-
+        return generated
     def _remember_file_generation(
         self,
         tool_decision
@@ -1460,13 +1409,14 @@ Generate the complete file now.
 
         pending_lower = pending.lower()
 
+        write_words = ("file", "script", "program", "source", "code")
         write_intent = (
             "write_file" in pending_lower
-            or ("write" in pending_lower and "file" in pending_lower)
-            or ("create" in pending_lower and "file" in pending_lower)
-            or ("save" in pending_lower and "file" in pending_lower)
-            or ("generate" in pending_lower and "file" in pending_lower)
-            or ("make" in pending_lower and "file" in pending_lower)
+            or ("write" in pending_lower and any(word in pending_lower for word in write_words))
+            or ("create" in pending_lower and any(word in pending_lower for word in write_words))
+            or ("save" in pending_lower and any(word in pending_lower for word in write_words))
+            or ("generate" in pending_lower and any(word in pending_lower for word in write_words))
+            or ("make" in pending_lower and any(word in pending_lower for word in write_words))
         )
         if write_intent and "write_file" in allowed:
             path = None
@@ -1477,13 +1427,26 @@ Generate the complete file now.
             # Otherwise derive a stable filename from the user's request.
             if not path:
                 text = str(message or "").lower()
-                if any(x in text for x in ("deep learning", "deeplearning", "neural network", "pytorch", "tensorflow")):
+                if "c++" in text or "c plus plus" in text or "cpp" in text:
+                    path = "hello.cpp"
+                elif "python" in text:
+                    path = "script.py"
+                elif "javascript" in text:
+                    path = "script.js"
+                elif "typescript" in text:
+                    path = "script.ts"
+                elif "rust" in text:
+                    path = "script.rs"
+                elif "java" in text:
+                    path = "Main.java"
+                elif "golang" in text or re.search(r"\bgo\b", text):
+                    path = "script.go"
+                elif any(x in text for x in ("deep learning", "deeplearning", "neural network", "pytorch", "tensorflow")):
                     path = "deep_learning_model.py"
                 elif "model" in text:
                     path = "model.py"
                 else:
-                    path = "generated_code.py"
-
+                    path = "generated_code.txt"
             return {
                 "action": "tool",
                 "task_type": "computer",
