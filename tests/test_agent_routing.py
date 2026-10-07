@@ -88,6 +88,26 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(result, "computer")
         self.assertEqual(self.brain.calls, 0)
 
+    def test_explicit_file_read_gets_deterministic_read_step(self):
+        planner = Planner(self.brain)
+        plan = planner.create_plan(
+            "read hello.cpp in projects folder"
+        )
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertIn("read_file", plan["steps"][0]["description"])
+        self.assertIn("hello.cpp", plan["steps"][0]["description"])
+
+        decision = self.router.decide(
+            message="read hello.cpp in projects folder",
+            task_type="computer",
+            plan=planner.get_plan_summary(plan),
+            allowed_tools=["read_file"],
+        )
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["path"], "hello.cpp")
+        self.assertEqual(payload["location"], "projects")
+
     def test_plan_selects_write_file_deterministically(self):
         plan = (
             "Goal: create a model\n"
