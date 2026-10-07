@@ -161,6 +161,53 @@ class Planner:
             ],
         }
 
+    def _deterministic_single_file_read_plan(self, goal):
+        """Build a minimal plan for reading one explicit file."""
+        if not isinstance(goal, str):
+            return None
+
+        text = re.sub(r"\s+", " ", goal.strip())
+        if not text:
+            return None
+
+        filename_match = re.search(
+            r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if not filename_match:
+            return None
+
+        if not re.search(
+            r"\b(?:read|open|inspect|view|show|display|print)\b[^.\n]{0,100}"
+            r"\b(?:file|source|code|content)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            # Also accept the very common form: "read hello.cpp".
+            if not re.search(r"^\s*(?:read|open)\s+", text, re.IGNORECASE):
+                return None
+
+        filename = filename_match.group(1)
+        location = (
+            "desktop"
+            if re.search(r"\bdesktop\b", text, re.IGNORECASE)
+            else "projects"
+        )
+
+        return {
+            "goal": goal,
+            "steps": [
+                {
+                    "id": 1,
+                    "description": f"read_file: read {filename} in {location}",
+                    "status": "pending",
+                    "result": None,
+                }
+            ],
+        }
+
     def create_plan(self, goal, context=""):
         if not isinstance(goal, str):
             return {
@@ -177,6 +224,10 @@ class Planner:
             }
 
         deterministic_plan = self._deterministic_single_file_plan(goal)
+        if deterministic_plan is not None:
+            return deterministic_plan
+
+        deterministic_plan = self._deterministic_single_file_read_plan(goal)
         if deterministic_plan is not None:
             return deterministic_plan
 
