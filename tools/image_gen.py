@@ -1,9 +1,16 @@
 import os
 import json
-import torch
 from pathlib import Path
-from diffusers import StableDiffusionPipeline
-from PIL import Image
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
+try:
+    from diffusers import StableDiffusionPipeline
+except ImportError:
+    StableDiffusionPipeline = None
 
 
 class ImageGenTool:
@@ -20,11 +27,19 @@ class ImageGenTool:
         ))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.pipe = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = (
+            "cuda"
+            if torch is not None and torch.cuda.is_available()
+            else "cpu"
+        )
 
     def _load_pipeline(self):
         """Lazy load the Stable Diffusion pipeline."""
         if self.pipe is None:
+            if torch is None:
+                return False, "PyTorch is not installed."
+            if StableDiffusionPipeline is None:
+                return False, "diffusers is not installed."
             if not self.model_path.exists():
                 return False, f"Model not found at {self.model_path}"
 
