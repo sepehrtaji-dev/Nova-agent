@@ -14,7 +14,10 @@ class ImageGenTool:
 
     def __init__(self):
         self.model_path = Path(r"D:\AI_Models\SD15")
-        self.output_dir = Path(r"E:\nova-agent\projects\generated_images")
+        # Keep generated files inside the active Nova workspace on every machine.
+        self.output_dir = Path(os.path.abspath(
+            os.path.join(os.getcwd(), "projects", "generated_images")
+        ))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.pipe = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -94,6 +97,21 @@ class ImageGenTool:
         guidance = float(data.get("guidance_scale", 7.5))
         seed = data.get("seed")
         filename = data.get("filename", "").strip()
+
+        if width <= 0 or height <= 0 or width > 2048 or height > 2048:
+            return "IMAGE ERROR: width and height must be between 1 and 2048."
+        if width % 8 or height % 8:
+            return "IMAGE ERROR: width and height must be multiples of 8."
+        if steps < 1 or steps > 100:
+            return "IMAGE ERROR: num_inference_steps must be between 1 and 100."
+        if guidance < 0 or guidance > 30:
+            return "IMAGE ERROR: guidance_scale must be between 0 and 30."
+
+        # A filename is metadata, never a path. Prevent traversal outside output_dir.
+        if filename:
+            filename = Path(filename).name
+            if not filename:
+                return "IMAGE ERROR: invalid filename."
 
         # Load pipeline
         ok, error = self._load_pipeline()
