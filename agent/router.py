@@ -818,10 +818,41 @@ class ToolRouter:
 
         return text in casual
 
+    def _has_explicit_computer_intent(self, message):
+        """Detect direct requests that require real computer/tool actions."""
+        if not isinstance(message, str):
+            return False
+
+        text = re.sub(r"\s+", " ", message.strip().lower())
+        if not text:
+            return False
+
+        # Questions that start with how/what/why are usually conversational.
+        if re.match(r"^(?:how|what|why|can|could|would)\b", text):
+            return bool(re.search(
+                r"\b(?:for me|on my (?:pc|computer)|in (?:the )?(?:projects|desktop) folder|to (?:create|write|run|read|edit|delete|modify))\b",
+                text,
+            ))
+
+        patterns = [
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|update|delete|remove|read|open|list)\b[^\n]{0,100}\b(?:file|folder|directory|document|projects?|desktop)\b",
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
+            r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
+            r"\b(?:terminal|powershell|cmd|shell)\b",
+            r"\b(?:git|github)\b[^\n]{0,100}\b(?:clone|commit|push|pull|checkout|branch|status|init|add|create repo|repository)\b",
+            r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
+            r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
+            r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
+        ]
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
     def classify_task(self, message, conversation=""):
 
         if self._is_obviously_conversational(message):
             return "conversation"
+
+        if self._has_explicit_computer_intent(message):
+            return "computer"
 
         prompt = f"""You are a task classifier for Nova, a local AI agent.
 
