@@ -178,10 +178,10 @@ class NovaCore:
                     "Filesystem error:"
                 )
                 and not result.startswith(
-                    "File does not exist."
+                    "File does not exist"
                 )
                 and not result.startswith(
-                    "Path is not a file."
+                    "Path is not a file"
                 )
             )
 
@@ -498,18 +498,14 @@ class NovaCore:
 
         elif tool_name == "list_files":
 
-            path = data.get(
-                "path",
-                "."
-            )
+            path = data.get("path", ".")
+            location = data.get("location", "projects")
 
-            if not isinstance(
-                path,
-                str
-            ):
-                return False, (
-                    "list_files path is invalid."
-                )
+            if not isinstance(path, str):
+                return False, "list_files path is invalid."
+
+            if location not in {"projects", "desktop"}:
+                return False, "Invalid list_files location."
 
         elif tool_name == "terminal":
 
@@ -582,6 +578,28 @@ class NovaCore:
 
             if action.strip().lower() not in valid_actions:
                 return False, f"Unknown git action: {action}"
+
+        elif tool_name == "edit_file":
+
+            path = data.get("path")
+            location = data.get("location", "projects")
+
+            if not isinstance(path, str) or not path.strip():
+                return False, "edit_file requires a path."
+
+            if location not in {"projects", "desktop"}:
+                return False, "Invalid edit_file location."
+
+        elif tool_name == "delete_file":
+
+            path = data.get("path")
+            location = data.get("location", "projects")
+
+            if not isinstance(path, str) or not path.strip():
+                return False, "delete_file requires a path."
+
+            if location not in {"projects", "desktop"}:
+                return False, "Invalid delete_file location."
 
         elif tool_name == "generate_image":
 
