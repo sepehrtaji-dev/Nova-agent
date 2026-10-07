@@ -363,34 +363,45 @@ class ToolRouter:
         return names
 
     def _contains_placeholder(self, value):
-
+        """Return True only for obvious incomplete-code placeholders."""
         if not isinstance(value, str):
             return False
 
         text = value.strip().lower()
+        if not text:
+            return False
 
-        placeholders = [
-            "...",
-            "…",
+        strong_phrases = (
             "<code>",
             "</code>",
             "<code here>",
             "code here",
             "insert code here",
             "your code here",
-            "actual code",
-            "actual python code",
-            "actual python calculator code",
             "write code here",
             "put code here",
-            "todo",
-            "tbd"
-        ]
-
-        return any(
-            marker in text
-            for marker in placeholders
+            "the rest of the code",
+            "rest of the code",
         )
+
+        if any(phrase in text for phrase in strong_phrases):
+            return True
+
+        # A bare ellipsis / unicode ellipsis on its own line is a placeholder;
+        # normal occurrences inside real Python expressions or prose are fine.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped in {"...", "…"}:
+                return True
+
+            # Common unfinished implementation comments.
+            if re.match(r"^#\s*(?:todo|tbd)\b", stripped):
+                return True
+
+            if re.match(r"^(?:todo|tbd)\s*:\s*(?:implement|finish|complete|add)", stripped):
+                return True
+
+        return False
 
     def _normalize_tool_input(self, tool_input):
 
