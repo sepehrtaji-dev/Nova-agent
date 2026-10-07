@@ -286,5 +286,41 @@
     "learned_at": "2026-10-03T17:50:18.475330",
     "last_verified": "2026-10-03T17:50:18.475330",
     "expires_at": "2026-10-10T17:50:18.475330"
+  },
+  {
+    "topic": "PyTorch",
+    "fact": "Welcome to PyTorch Tutorials - Documentation for PyTorch tutorials is available.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.pytorch.org%2Ftutorials%2Findex.html&rut=b650dfe90e19799798b8a50c61235b6f658f424290d16ce0fb6b0b9796f45be4",
+    "confidence": 0.9,
+    "learned_at": "2026-10-07T13:35:29.608633",
+    "last_verified": "2026-10-07T13:35:29.608633",
+    "expires_at": "2026-10-14T13:35:29.608633"
+  },
+  {
+    "topic": "PyTorch Tutorial - GeeksforGeeks",
+    "fact": "It is a tutorial that covers PyTorch for deep learning.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.geeksforgeeks.org%2Fdeep%2Dlearning%2Fpytorch%2Dtutorial%2D2%2F&rut=5b1c2a9d492b2b33fc45608ae02306dd473d8bea1fc21af9c239bb182a8246b7",
+    "confidence": 0.9,
+    "learned_at": "2026-10-07T13:35:29.937299",
+    "last_verified": "2026-10-07T13:35:29.937299",
+    "expires_at": "2026-10-14T13:35:29.937299"
+  },
+  {
+    "topic": "PyTorch Tutorial - Online Tutorials Library",
+    "fact": "It is a tutorial based on the Latest PyTorch version.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.tutorialspoint.com%2Fpytorch%2Findex.htm&rut=c9dfb2b4debcaaaa3e6ce712951dc3dadbe0a9fbd99a9343e07b058f7a14c6be",
+    "confidence": 0.9,
+    "learned_at": "2026-10-07T13:35:29.938614",
+    "last_verified": "2026-10-07T13:35:29.938614",
+    "expires_at": "2026-10-14T13:35:29.938614"
+  },
+  {
+    "topic": "Learn the Basics — PyTorch Tutorials",
+    "fact": "This tutorial introduces a complete ML workflow using FashionMNIST dataset.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.pytorch.org%2Ftutorials%2Fbeginner%2Fbasics.html&rut=70e3c8d9f23785d8c483a81d0fe51c25181c6386378a00550a98db8362dbd277",
+    "confidence": 0.9,
+    "learned_at": "2026-10-07T13:35:29.940113",
+    "last_verified": "2026-10-07T13:35:29.940113",
+    "expires_at": "2026-10-14T13:35:29.940113"
   }
 ]

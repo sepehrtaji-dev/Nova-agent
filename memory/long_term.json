@@ -10,7 +10,10 @@
         "developer": "Taji-soft team",
         "version": "Nova 1.1",
         "software_setup": "user has knowledge of C programming",
-        "user_projects_directory_location": "/path/to/user/projects/folder/"
+        "user_projects_directory_location": "/path/to/user/projects/folder/",
+        "programmingLanguages": [
+            "Python"
+        ]
     },
     "projects": [
         {
@@ -68,6 +71,9 @@
         },
         {
             "pytorch_neural_network_script_path": "./projects/pytorch_simple_nn.py"
+        },
+        {
+            "simple_neural_network_with_pytorch": true
         }
     ],
     "skills": [
