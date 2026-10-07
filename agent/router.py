@@ -1465,9 +1465,9 @@ Return JSON only.
         filename = self._extract_filename(f"{pending} {message or ''}")
 
         simple_tools = (
-            ("read_file", ("read file", "open file", "inspect file", "check file")),
-            ("list_files", ("list files", "list directory", "list folder", "show files")),
-            ("create_directory", ("create directory", "create folder", "make directory", "make folder")),
+            ("read_file", ("read_file", "read file", "open file", "inspect file", "check file", "view file", "show file")),
+            ("list_files", ("list_files", "list files", "list directory", "list folder", "show files")),
+            ("create_directory", ("create_directory", "create directory", "create folder", "make directory", "make folder")),
         )
 
         for tool_name, aliases in simple_tools:
@@ -1479,7 +1479,12 @@ Return JSON only.
             if tool_name == "read_file":
                 if not filename:
                     return None
-                payload = {"path": filename, "location": "projects"}
+                location = (
+                    "desktop"
+                    if re.search(r"\bdesktop\b", f"{pending} {message or ''}", re.IGNORECASE)
+                    else "projects"
+                )
+                payload = {"path": filename, "location": location}
             elif tool_name == "list_files":
                 payload = {"path": ".", "location": "projects"}
             else:

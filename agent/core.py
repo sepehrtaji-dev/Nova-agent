@@ -797,6 +797,34 @@ If nothing reliable can be extracted:
         )
 
 
+    def _direct_capability_answer(self, message):
+        """Answer simple capability questions without asking the LLM to guess."""
+        if not isinstance(message, str):
+            return None
+
+        text = re.sub(r"\s+", " ", message.strip().lower())
+        if not text:
+            return None
+
+        if not re.search(r"\bcan you\b|\bdo you\b", text):
+            return None
+
+        if re.search(r"\b(?:read|open|inspect|view)\s+files?\b", text):
+            return (
+                "Yes."
+                if "read_file" in self._allowed_tools()
+                else "No."
+            )
+
+        if re.search(r"\b(?:run|execute)\b.*\b(?:commands?|cmd|terminal|powershell|shell)\b", text):
+            return (
+                "Yes."
+                if "terminal" in self._allowed_tools()
+                else "No."
+            )
+
+        return None
+
     def ask(self, message):
 
         self._status(
@@ -810,6 +838,12 @@ If nothing reliable can be extracted:
             message = str(message)
 
         message = message.strip()
+
+        direct_capability_answer = self._direct_capability_answer(message)
+        if direct_capability_answer is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_capability_answer)
+            return direct_capability_answer
 
         if not message:
             return "Please enter a message."
