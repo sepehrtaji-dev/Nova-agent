@@ -1642,6 +1642,19 @@ Return JSON only.
 
         pending_lower = pending.lower()
 
+        pending_action = re.search(
+            r":\s*(.+)$",
+            pending,
+            flags=re.IGNORECASE,
+        )
+        action_text = (
+            pending_action.group(1).strip()
+            if pending_action
+            else pending
+        )
+        action_lower = action_text.lower()
+        combined = f"{pending} {message or ''}".strip()
+
         planned_tool = self._pending_planned_tool(pending)
         if planned_tool is not None and planned_tool not in allowed:
             return None
