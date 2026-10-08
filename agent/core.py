@@ -1085,6 +1085,20 @@ If nothing reliable can be extracted:
         if not text:
             return None
 
+        capability_request = bool(re.search(
+            r"\b(?:what can you do|what are your capabilities|what tools do you have|what can i ask you to do|what can you help me with)\b",
+            text,
+        ))
+
+        if capability_request:
+            tool_labels = []
+            for name in self._allowed_tools():
+                label = str(name).replace("_", " ").strip()
+                if label and label not in tool_labels:
+                    tool_labels.append(label)
+            if tool_labels:
+                return "I can work with " + ", ".join(tool_labels) + "."
+            return "My available capabilities are currently disabled."
         if not re.search(r"\bcan you\b|\bdo you\b", text):
             return None
 
