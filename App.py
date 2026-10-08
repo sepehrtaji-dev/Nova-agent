@@ -565,10 +565,17 @@ class NovaWindow(QMainWindow):
         return wrapper
 
     def _welcome(self):
+        model_name = str(
+            getattr(
+                getattr(self.core, "brain", None),
+                "model",
+                "the configured local model",
+            )
+        ).strip()
         self._add_message(
             "nova",
             "## Welcome to Nova\n\n"
-            "I'm your local AI agent powered by **Qwen 2.5 3B** through Ollama.\n\n"
+            f"I'm your local AI agent running through Ollama with **{model_name}**.\n\n"
             "I can reason about tasks, use enabled tools, inspect real results, "
             "and continue until the task is complete."
         )
