@@ -21,19 +21,22 @@ def load_tools():
     registry.register(
         "terminal",
         "Execute safe terminal/shell commands on the user's PC",
-        terminal.run
+        terminal.run,
+        capability="pc"
     )
 
     registry.register(
         "list_files",
         "List files and directories in the projects folder or desktop",
-        filesystem.list_files
+        filesystem.list_files,
+        capability="pc"
     )
 
     registry.register(
         "read_file",
         "Read the contents of a text file from the projects folder or desktop",
-        filesystem.read_file
+        filesystem.read_file,
+        capability="pc"
     )
 
     registry.register(
@@ -43,7 +46,8 @@ def load_tools():
             "location: 'projects' (default), 'desktop', or 'system' (absolute path). "
             "For system: path must be absolute e.g. /home/user/file.py"
         ),
-        filesystem.write_file
+        filesystem.write_file,
+        capability="pc"
     )
 
     registry.register(
@@ -53,13 +57,15 @@ def load_tools():
             "Input: {path, location, old, new, replace_all}. "
             "Use this to modify existing files instead of rewriting them."
         ),
-        filesystem.edit_file
+        filesystem.edit_file,
+        capability="pc"
     )
 
     registry.register(
         "delete_file",
         "Delete a file from disk. Input: {path, location}.",
-        filesystem.delete_file
+        filesystem.delete_file,
+        capability="pc"
     )
 
     registry.register(
@@ -68,13 +74,15 @@ def load_tools():
             "Create a directory. "
             "location: 'projects', 'desktop', or 'system' (absolute path)."
         ),
-        filesystem.create_directory
+        filesystem.create_directory,
+        capability="pc"
     )
 
     registry.register(
         "web_search",
         "Search the public web for current information",
-        web.run
+        web.run,
+        capability="web"
     )
 
     registry.register(
@@ -87,7 +95,8 @@ def load_tools():
             "name, visibility, description}. "
             "create_repo creates a new GitHub repository (requires gh CLI)."
         ),
-        git.run
+        git.run,
+        capability="git"
     )
 
     registry.register(
@@ -95,7 +104,8 @@ def load_tools():
         (
             "Control the desktop and GUI. Actions: screenshot, click, move, type, key, scroll, open_app, close_app, get_windows, focus_window. Input uses an action field plus the fields required by that action."
         ),
-        desktop.run
+        desktop.run,
+        capability="pc"
     )
 
     registry.register(
@@ -105,7 +115,8 @@ def load_tools():
             "Input: {prompt, negative_prompt, width, height, num_inference_steps, "
             "guidance_scale, seed, filename}. Output saved to projects/generated_images/."
         ),
-        image_gen.run
+        image_gen.run,
+        capability="pc"
     )
 
     return registry
