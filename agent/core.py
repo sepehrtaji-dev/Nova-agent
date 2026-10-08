@@ -1057,8 +1057,15 @@ If nothing reliable can be extracted:
 
         try:
 
-            extracted = self.extractor.extract(
-                message
+            should_extract = True
+            checker = getattr(self.extractor, "should_extract", None)
+            if callable(checker):
+                should_extract = bool(checker(message))
+
+            extracted = (
+                self.extractor.extract(message)
+                if should_extract
+                else {"memories": []}
             )
 
             if isinstance(
