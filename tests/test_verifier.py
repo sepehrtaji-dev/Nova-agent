@@ -85,6 +85,60 @@ class TestVerifier(unittest.TestCase):
             )
             self.assertTrue(verification.confirmed())
 
+    def test_terminal_requires_zero_exit_code(self):
+        result = "Exit code: 1\nSTDERR:\nboom\nSTATUS: SUCCESS"
+        verification = self.verifier.verify(
+            "terminal",
+            {"command": "false"},
+            result,
+        )
+        self.assertEqual(verification.status, "failed")
+
+    def test_terminal_without_exit_code_is_unverifiable(self):
+        result = "STATUS: SUCCESS\nSTDOUT:\nok"
+        verification = self.verifier.verify(
+            "terminal",
+            {"command": "echo ok"},
+            result,
+        )
+        self.assertEqual(verification.status, "unverifiable")
+
+    def test_delete_requires_reported_path(self):
+        verification = self.verifier.verify(
+            "delete_file",
+            {"path": "x.txt", "location": "projects"},
+            "FILE_DELETED",
+        )
+        self.assertEqual(verification.status, "unverifiable")
+
+    def test_edit_file_checks_replacement_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "note.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("new value")
+
+            result = f"FILE_EDITED\nLocation: {path}\nReplacements: 1"
+            verification = self.verifier.verify(
+                "edit_file",
+                {"old": "old value", "new": "new value"},
+                result,
+            )
+            self.assertTrue(verification.confirmed())
+
+    def test_write_file_verifies_exact_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "note.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("actual")
+
+            result = f"FILE_CREATED\nLocation: {path}\nBytes: 6"
+            verification = self.verifier.verify(
+                "write_file",
+                {"path": "note.txt", "location": "projects", "content": "expected"},
+                result,
+            )
+            self.assertEqual(verification.status, "failed")
+
     def test_unknown_tool_is_not_success(self):
         verification = self.verifier.verify(
             "unknown_tool",
