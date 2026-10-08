@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from datetime import datetime, timedelta
 
 
@@ -36,17 +37,30 @@ class KnowledgeMemory:
 
     def _save(self):
 
-        with open(
-            self.path,
-            "w",
-            encoding="utf-8"
-        ) as f:
-            json.dump(
-                self.data,
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
+        directory = os.path.dirname(self.path) or "."
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".nova-knowledge-",
+            suffix=".json",
+            dir=directory,
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(
+                    self.data,
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self.path)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
     def search(self, query, limit=8):
 
