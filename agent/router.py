@@ -1204,13 +1204,13 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
 
         tools_description = "\n".join(descriptions) or "No tools are currently enabled."
 
-        # Truncate tool_history to last 500 chars to keep prompt short
-        if tool_history and len(tool_history) > 500:
-            tool_history = "..." + tool_history[-500:]
+        # Core supplies a bounded, step-aware history. Do not blindly keep
+        # only the tail because earlier completed steps are authoritative.
+        if not tool_history:
+            tool_history = "None"
 
-        # Keep the beginning of the plan because it contains the first pending step.
-        if plan and len(plan) > 1200:
-            plan = plan[:1200]
+        if not plan:
+            plan = "No plan."
 
         return f"""You are Nova. Choose the next tool to run.
 
