@@ -27,7 +27,7 @@ class NovaCore:
             self.brain,
             self.tools
         )
-        self.planner = Planner(self.brain)
+        self.planner = Planner(self.brain, self.tools)
         self.verifier = Verifier(self.tools)
 
         self.max_steps = 12
@@ -243,6 +243,21 @@ class NovaCore:
         text = str(tool_history)
 
         return self._verified_success_line_matches(text)
+
+    def _remember_verified_tool_result(self, tool_name, tool_input, result, verification):
+        """Persist concise verified tool evidence for follow-up turns."""
+        try:
+            evidence = verification.evidence if verification is not None else ""
+            message = (
+                "Verified tool evidence\n"
+                f"Tool: {tool_name}\n"
+                f"Input: {tool_input}\n"
+                f"Result: {str(result)[:900]}\n"
+                f"Evidence: {str(evidence)[:300]}"
+            )
+            self.short_memory.add("tool", message)
+        except Exception:
+            pass
 
     def _has_successful_web_search(
         self,
@@ -1593,6 +1608,14 @@ Nova must choose another useful action.
                 f"Message: {verification.message}\n"
                 f"Tool success: {succeeded}"
             )
+
+            if succeeded:
+                self._remember_verified_tool_result(
+                    tool_name,
+                    tool_input,
+                    result,
+                    verification
+                )
 
             current_step = self.planner.get_next_step(plan)
             current_step_id = (
