@@ -243,7 +243,14 @@ class CoreTests(unittest.TestCase):
     def test_verified_task_response_never_asks_model_to_explain_missing_capabilities(self):
         core = NovaCore.__new__(NovaCore)
         response = core._build_verified_task_response([
-            "Tool: desktop\nResult:\nSTATUS: SUCCESS\nTyped: 'HELLO_NOVA_TEST'\nVerification: CONFIRMED\nEvidence: Typed: 'HELLO_NOVA_TEST'\nMessage: ✓ desktop type confirmed.\nTool success: True"
+            "STEP: 1\nTOOL_NAME: desktop\nINPUT: {}\n"
+            "BEGIN_RAW_TOOL_RESULT\n"
+            "STATUS: SUCCESS\nTyped: 'HELLO_NOVA_TEST'\n"
+            "Verification: CONFIRMED\n"
+            "END_RAW_TOOL_RESULT\n"
+            "VERIFIER_STATUS: CONFIRMED\n"
+            "VERIFIER_EVIDENCE: Typed: 'HELLO_NOVA_TEST'\n"
+            "VERIFIER_MESSAGE: ✓ desktop type confirmed."
         ])
         self.assertIn("desktop type confirmed.", response)
         self.assertIn("Paths:", response) if "Path:" in response else self.assertNotIn("cannot provide", response)
