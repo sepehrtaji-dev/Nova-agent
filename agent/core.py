@@ -574,7 +574,7 @@ class NovaCore:
             if not isinstance(path, str) or not path.strip():
                 return False, "edit_file requires a path."
 
-            if location not in {"projects", "desktop"}:
+            if location not in {"projects", "desktop", "system"}:
                 return False, "Invalid edit_file location."
 
         elif tool_name == "delete_file":
@@ -585,7 +585,7 @@ class NovaCore:
             if not isinstance(path, str) or not path.strip():
                 return False, "delete_file requires a path."
 
-            if location not in {"projects", "desktop"}:
+            if location not in {"projects", "desktop", "system"}:
                 return False, "Invalid delete_file location."
 
         elif tool_name == "generate_image":
