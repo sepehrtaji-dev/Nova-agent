@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import random
 from pathlib import Path
 from typing import Iterator, Sequence
@@ -106,8 +107,13 @@ class FineWebTokenDataset(IterableDataset):
             row_groups = list(range(parquet_file.num_row_groups))
 
             if self.shuffle_files:
+                digest = hashlib.blake2b(
+                    file_path.encode("utf-8"),
+                    digest_size=8,
+                ).digest()
+                file_seed = int.from_bytes(digest, "big") % 1_000_000
                 random.Random(
-                    self.seed + self._epoch + hash(file_path) % 1_000_000
+                    self.seed + self._epoch + file_seed
                 ).shuffle(row_groups)
 
             for row_group_index in row_groups:
