@@ -142,15 +142,27 @@ class NovaCore:
             return False
         return self._verified_success_line_matches(result)
 
-    def _verified_success_line_matches(self, text):
-        if not isinstance(text, str):
-            return False
+    def _trusted_verifier_status(self, value):
+        if not isinstance(value, str):
+            return None
 
-        return re.search(
-            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
-            text.replace("\\n", "\n"),
+        normalized = value.replace("\\n", "\n")
+        marker = re.search(
+            r"END_RAW_TOOL_RESULT\s*\n",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        trusted = normalized[marker.end():] if marker else normalized
+
+        match = re.search(
+            r"^VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*$",
+            trusted,
             flags=re.IGNORECASE | re.MULTILINE,
-        ) is not None
+        )
+        return match.group(1).lower() if match else None
+
+    def _verified_success_line_matches(self, text):
+        return self._trusted_verifier_status(text) == "confirmed"
 
     def _has_successful_tool(self, tool_history):
         """Return True only for verifier-confirmed entries."""
@@ -932,7 +944,7 @@ If nothing reliable can be extracted:
                         if isinstance(value, str) and value.strip():
                             candidates.append(value.strip())
 
-                for source in (result, evidence):
+                for source in (evidence,):
                     for line in source.splitlines():
                         for label in ("Path:", "Screenshot:", "Screenshot saved:", "Saved to:"):
                             if line.startswith(label):
@@ -949,11 +961,13 @@ If nothing reliable can be extracted:
         if asks_typed:
             for entry in structured:
                 inputs = entry.get("input", {})
-                if isinstance(inputs, dict):
-                    value = inputs.get("text")
-                    if isinstance(value, str) and value:
-                        return "Typed: " + repr(value)
-                match = re.search(r"Typed:\s*(.+)", str(entry.get("result", "")))
+                verification = entry.get("verification", {})
+                evidence = str(
+                    verification.get("evidence", "")
+                    if isinstance(verification, dict)
+                    else ""
+                )
+                match = re.search(r"Typed:\s*(.+)", evidence)
                 if match:
                     return "Typed: " + match.group(1).strip()
             return "The verified evidence does not contain the typed text."
@@ -961,11 +975,13 @@ If nothing reliable can be extracted:
         if asks_opened:
             for entry in structured:
                 inputs = entry.get("input", {})
-                if isinstance(inputs, dict):
-                    value = inputs.get("app")
-                    if isinstance(value, str) and value:
-                        return "Opened: " + value
-                match = re.search(r"Opened:\s*(.+)", str(entry.get("result", "")))
+                verification = entry.get("verification", {})
+                evidence = str(
+                    verification.get("evidence", "")
+                    if isinstance(verification, dict)
+                    else ""
+                )
+                match = re.search(r"Opened:\s*(.+)", evidence)
                 if match:
                     return "Opened: " + match.group(1).strip()
             return "The verified evidence does not contain an opened application."
@@ -1101,6 +1117,14 @@ If nothing reliable can be extracted:
 
         message = message.strip()
 
+        if not message:
+            return "Please enter a message."
+
+        self.short_memory.add(
+            "user",
+            message
+        )
+
         direct_identity_answer = self._direct_identity_answer(message)
         if direct_identity_answer is not None:
             self._status("Done")
@@ -1118,14 +1142,6 @@ If nothing reliable can be extracted:
             self._status("Done")
             self.short_memory.add("assistant", direct_capability_answer)
             return direct_capability_answer
-
-        if not message:
-            return "Please enter a message."
-
-        self.short_memory.add(
-            "user",
-            message
-        )
 
         try:
 
