@@ -170,6 +170,26 @@ class CoreTests(unittest.TestCase):
             "No. Nova is developed by the Taji-Soft team, not by Anthropic.",
         )
 
+    def test_follow_up_uses_verified_path_without_new_tool_call(self):
+        core = NovaCore.__new__(NovaCore)
+        core.short_memory = FakeMemory()
+        core.short_memory.add(
+            "tool",
+            "Verified tool evidence\nTool: desktop\nResult: STATUS: SUCCESS\\nScreenshot saved: C:\\\\Users\\\\Test\\\\nova.png\nEvidence: Screenshot: C:\\\\Users\\\\Test\\\\nova.png"
+        )
+
+        response = core._direct_evidence_answer("give me the exact path")
+
+        self.assertEqual(response, "Exact path: C:\\\\Users\\\\Test\\\\nova.png")
+
+    def test_verified_task_response_never_asks_model_to_explain_missing_capabilities(self):
+        core = NovaCore.__new__(NovaCore)
+        response = core._build_verified_task_response([
+            "Tool: desktop\nResult:\nSTATUS: SUCCESS\nTyped: 'HELLO_NOVA_TEST'\nVerification: CONFIRMED\nEvidence: Typed: 'HELLO_NOVA_TEST'\nMessage: ✓ desktop type confirmed.\nTool success: True"
+        ])
+        self.assertIn("desktop type confirmed.", response)
+        self.assertIn("Paths:", response) if "Path:" in response else self.assertNotIn("cannot provide", response)
+        self.assertNotIn("I couldn't provide", response)
     def test_capability_question_reports_real_read_access(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
