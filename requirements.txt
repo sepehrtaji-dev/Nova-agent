@@ -2,5 +2,12 @@ ollama
 rich
 pyautogui
 pillow
-datasets
 pytesseract
+numpy
+pyarrow
+datasets
+huggingface-hub
+torch
+PySide6
+diffusers
+safetensors
