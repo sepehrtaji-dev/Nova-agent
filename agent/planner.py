@@ -92,12 +92,23 @@ class Planner:
             if not description:
                 continue
 
-            normalized.append({
+            normalized_step = {
                 "id": index,
                 "description": description,
                 "status": "pending",
-                "result": None
-            })
+                "result": None,
+            }
+
+            tool = step.get("tool")
+            raw_input = step.get("input")
+            if isinstance(tool, str) and tool.strip():
+                tool = tool.strip()
+                if self.tools is not None and self.tools.exists(tool):
+                    normalized_step["tool"] = tool
+                    if isinstance(raw_input, dict):
+                        normalized_step["input"] = raw_input
+
+            normalized.append(normalized_step)
 
         return normalized
 
@@ -530,9 +541,16 @@ Schema:
 {{
   "goal": "short goal",
   "steps": [
-    {{"description": "which tool to use and exactly what to do"}}
+    {{
+      "tool": "registered tool name",
+      "input": {{}},
+      "description": "human-readable action description"
+    }}
   ]
-}}"""
+}}
+
+For every executable step, include "tool" and an exact "input" object.
+Do not put generated file content in write_file input."""
 
         try:
             print("\n[PLANNER] Creating plan...")
@@ -939,12 +957,31 @@ Schema:
                     "result"
                 )
 
-            normalized.append({
+            normalized_step = {
                 "id": index,
                 "description": description,
                 "status": status,
-                "result": result
-            })
+                "result": result,
+            }
+
+            tool = step.get("tool")
+            raw_input = step.get("input")
+            if isinstance(tool, str) and tool.strip():
+                tool = tool.strip()
+                if (
+                    self.tools is not None
+                    and self.tools.exists(tool)
+                ):
+                    normalized_step["tool"] = tool
+                    if isinstance(raw_input, dict):
+                        normalized_step["input"] = raw_input
+            elif old:
+                if isinstance(old.get("tool"), str):
+                    normalized_step["tool"] = old["tool"]
+                if isinstance(old.get("input"), dict):
+                    normalized_step["input"] = old["input"]
+
+            normalized.append(normalized_step)
 
         return normalized
 
@@ -1076,10 +1113,28 @@ Schema:
                 "pending"
             )
 
-            lines.append(
+            line = (
                 f"{step_id}. "
                 f"[{status}] "
                 f"{description}"
             )
+
+            tool = step.get("tool")
+            raw_input = step.get("input")
+            if isinstance(tool, str) and tool.strip():
+                line += f" | TOOL={tool.strip()}"
+            if isinstance(raw_input, dict):
+                try:
+                    encoded = json.dumps(
+                        raw_input,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                except (TypeError, ValueError):
+                    encoded = ""
+                if encoded:
+                    line += f" | INPUT={encoded}"
+
+            lines.append(line)
 
         return "\n".join(lines)
