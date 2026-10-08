@@ -1584,6 +1584,22 @@ Return JSON only.
         )
         return match.group(1) if match else None
 
+    def _pending_planned_tool(self, plan_line):
+        if not isinstance(plan_line, str):
+            return None
+
+        text = plan_line.strip()
+        tools = getattr(self.tools, "tools", {})
+        if not isinstance(tools, dict):
+            return None
+
+        for name in tools:
+            pattern = rf"\[pending\]\s*{re.escape(str(name))}\s*:"
+            if re.search(pattern, text, re.IGNORECASE):
+                return str(name)
+
+        return None
+
     def _deterministic_plan_decision(self, message, task_type, plan, tool_history, allowed_tools=None):
         """Return a tool decision for an unambiguous pending plan step.
 
@@ -1609,6 +1625,10 @@ Return JSON only.
             return None
 
         pending_lower = pending.lower()
+
+        planned_tool = self._pending_planned_tool(pending)
+        if planned_tool is not None and planned_tool not in allowed:
+            return None
 
         desktop_step = re.search(
             r"\bdesktop\s*:\s*(.+)$",
@@ -1845,6 +1865,20 @@ Return JSON only.
                     "computer"
                 )
             )
+
+            pending_tool = None
+            if isinstance(plan, str):
+                for plan_line in plan.splitlines():
+                    if "[pending]" in plan_line.lower():
+                        pending_tool = self._pending_planned_tool(plan_line)
+                        break
+
+            if (
+                tool_decision
+                and pending_tool is not None
+                and tool_decision.get("tool") != pending_tool
+            ):
+                tool_decision = None
 
             if (
                 tool_decision
