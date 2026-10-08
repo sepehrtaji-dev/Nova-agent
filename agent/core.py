@@ -478,6 +478,38 @@ class NovaCore:
             if location not in {"projects", "desktop", "system"}:
                 return False, "Invalid directory location."
 
+        elif tool_name == "find_files":
+
+            location = data.get(
+                "location",
+                "projects"
+            )
+            path = data.get(
+                "path",
+                "."
+            )
+
+            if not isinstance(path, str):
+                return False, "find_files path is invalid."
+
+            if location not in {
+                "projects",
+                "desktop",
+                "system"
+            }:
+                return False, "Invalid find_files location."
+
+            for key in (
+                "created_within_hours",
+                "modified_within_hours"
+            ):
+                if key in data and data.get(key) is not None:
+                    try:
+                        if float(data.get(key)) < 0:
+                            return False, f"{key} must be non-negative."
+                    except (TypeError, ValueError):
+                        return False, f"{key} must be numeric."
+
         elif tool_name == "read_file":
 
             path = data.get("path")
