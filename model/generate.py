@@ -7,8 +7,13 @@ from model.tokenizer import ByteBPETokenizer
 from model.config import ModelConfig
 
 
-CHECKPOINT = "data/checkpoints/best.pt"
-TOKENIZER_PATH = "data/tokenizer/nova_tokenizer.json"
+import os
+
+CHECKPOINT = os.getenv("NOVA_CHECKPOINT", "data/checkpoints/best.pt")
+TOKENIZER_PATH = os.getenv(
+    "NOVA_TOKENIZER_PATH",
+    "data/tokenizer/nova_tokenizer.json",
+)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -24,7 +29,22 @@ def generate(
 ) -> str:
     model.eval()
 
+    if not isinstance(prompt, str):
+        prompt = str(prompt)
+
+    if max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be non-negative.")
+
+    if temperature <= 0:
+        raise ValueError("temperature must be greater than 0.")
+
+    if top_k is not None and top_k < 1:
+        raise ValueError("top_k must be None or greater than 0.")
+
     prompt_ids = tokenizer.encode(prompt)
+
+    if not prompt_ids:
+        raise ValueError("prompt must produce at least one token.")
 
     input_ids = torch.tensor(
         [prompt_ids],
@@ -43,9 +63,6 @@ def generate(
 
         logits, _ = model(input_ids)
         next_token_logits = logits[:, -1, :]
-
-        if temperature <= 0:
-            raise ValueError("temperature must be greater than 0.")
 
         next_token_logits = next_token_logits / temperature
 
