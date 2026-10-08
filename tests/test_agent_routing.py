@@ -70,6 +70,14 @@ class RouterTests(unittest.TestCase):
         )
         self.assertEqual(router_brain.calls, 0)
 
+    def test_recent_file_query_routes_to_find_files(self):
+        planner = Planner(self.brain, self.tools)
+        plan = planner.create_plan(
+            "What files did you create in the last 24 hours?"
+        )
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertTrue(plan["steps"][0]["description"].startswith("find_files:"))
+
     def test_compound_search_and_file_request_preserves_both_steps(self):
         planner = Planner(self.brain, self.tools)
         plan = planner.create_plan(
