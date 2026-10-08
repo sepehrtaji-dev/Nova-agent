@@ -893,15 +893,27 @@ If nothing reliable can be extracted:
         if structured_entries:
             structured = list(reversed(structured_entries))
         else:
-            structured = [
-                {
-                    "tool": "legacy",
-                    "input": {},
-                    "result": entry,
-                    "verification": {},
-                }
-                for entry in reversed(self._verified_tool_entries())
-            ]
+            structured = []
+            for entry in reversed(self._verified_tool_entries()):
+                match = re.search(
+                    r"^Evidence:\s*(.*)$",
+                    str(entry),
+                    flags=re.IGNORECASE | re.MULTILINE,
+                )
+                evidence = match.group(1).strip() if match else ""
+                if not evidence:
+                    continue
+                structured.append(
+                    {
+                        "tool": "legacy",
+                        "input": {},
+                        "result": "",
+                        "verification": {
+                            "status": "confirmed",
+                            "evidence": evidence,
+                        },
+                    }
+                )
 
         if not structured:
             return None
