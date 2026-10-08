@@ -44,11 +44,14 @@ Tool results are returned to the agent so Nova can decide what should happen nex
 
 Nova runs locally through Ollama.
 
-Current model:
+Default local model:
 
 ```text
 qwen2.5:3b
 ```
+
+The runtime model is configurable with `NOVA_MODEL`. Context and generation
+budgets can be tuned with `NOVA_NUM_CTX` and `NOVA_NUM_PREDICT`.
 
 The model is used for:
 
