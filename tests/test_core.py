@@ -137,6 +137,36 @@ class FakeVerifier:
 
 
 class CoreTests(unittest.TestCase):
+    def test_identity_question_reports_nova_and_taji_soft(self):
+        core = NovaCore.__new__(NovaCore)
+        core.access = {"web": True, "git": True, "pc": True}
+
+        self.assertEqual(
+            core._direct_identity_answer("who are you?"),
+            "I'm Nova, a local AI assistant developed by the Taji-Soft team.",
+        )
+        self.assertEqual(
+            core._direct_identity_answer("who are you, and who are you developed by?"),
+            "I'm Nova, a local AI assistant. I'm developed by the Taji-Soft team.",
+        )
+
+    def test_identity_question_does_not_attribute_nova_to_anthropic(self):
+        core = NovaCore.__new__(NovaCore)
+        core.access = {"web": True, "git": True, "pc": True}
+
+        self.assertEqual(
+            core._direct_identity_answer("who are you developed by?"),
+            "Nova is developed by the Taji-Soft team.",
+        )
+        self.assertEqual(
+            core._direct_identity_answer("are you sure you are developed by Taji-soft team?"),
+            "Yes. Nova is developed by the Taji-Soft team.",
+        )
+        self.assertEqual(
+            core._direct_identity_answer("are you developed by Anthropic?"),
+            "No. Nova is developed by the Taji-Soft team, not by Anthropic.",
+        )
+
     def test_capability_question_reports_real_read_access(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
