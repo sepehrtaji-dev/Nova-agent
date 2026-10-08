@@ -62,18 +62,23 @@ The model is used for:
 
 ### 🛠 Tool System
 
-Nova currently supports several tools:
+Nova currently exposes capabilities through a registry-driven tool system:
 
-| Tool | Purpose |
+| Capability | Purpose |
 |---|---|
 | `web_search` | Search the public web |
 | `terminal` | Execute terminal commands |
 | `list_files` | List files and directories |
 | `read_file` | Read text files |
 | `write_file` | Create or overwrite files |
+| `edit_file` | Modify existing files |
+| `delete_file` | Delete files |
 | `create_directory` | Create directories |
+| `git` | Local Git and GitHub CLI workflows |
+| `desktop` | Real mouse, keyboard, window, app, and screenshot control |
+| `generate_image` | Generate local images |
 
-The tool system is registry-based, allowing additional tools to be added without rebuilding the entire agent.
+Tools are registered with capability metadata. Nova derives the enabled tool set from the registry instead of maintaining a separate hard-coded tool list in the agent core.
 
 ---
 
@@ -99,7 +104,7 @@ Nova can break the task into steps:
 7. Finish
 ```
 
-The important part is that Nova receives the **real result** of each tool execution.
+The important part is that Nova receives the **real result** of each tool execution and verifies it before using it as evidence.
 
 For example:
 
@@ -476,7 +481,7 @@ The terminal UI should show useful high-level activity without exposing private 
 
 ### Extensible
 
-New tools should be addable without rewriting the entire agent.
+New tools should be addable without rewriting the entire agent. Tool permissions and descriptions are attached to registry entries so planning can discover capabilities dynamically.
 
 ---
 
