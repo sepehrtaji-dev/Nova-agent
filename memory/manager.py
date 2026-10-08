@@ -85,7 +85,11 @@ class MemoryManager:
                 continue
 
             score = len(overlap)
-            if any(token in str(key).casefold().split(".") for token in words):
+            key_text = re.sub(r"[_\-\.]+", " ", str(key).casefold())
+            if any(
+                word in key_text or word.rstrip("s") in key_text
+                for word in words
+            ):
                 score += 1
 
             scored.append((score, key, value_text))
