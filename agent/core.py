@@ -1299,8 +1299,8 @@ If nothing reliable can be extracted:
                         "inventing computer actions."
                     )
                 )
-            except Exception as exc:
-                response = f"Hi! I'm Nova. What would you like to work on? ({type(exc).__name__})"
+            except Exception:
+                response = "I'm here and ready to help."
 
             if not isinstance(response, str):
                 response = str(response)
