@@ -253,6 +253,100 @@ class Planner:
             ],
         }
 
+    def _deterministic_search_and_file_plan(self, goal):
+        """Preserve both halves of a search + file request in execution order."""
+        if not isinstance(goal, str):
+            return None
+
+        text = re.sub(r"\s+", " ", goal.strip())
+        if not text:
+            return None
+
+        if self.tools is None:
+            return None
+
+        if not (
+            self.tools.exists("web_search")
+            and self.tools.exists("write_file")
+        ):
+            return None
+
+        search_match = re.search(
+            r"\b(?:search|look\s+up|find)\s+(?:the\s+web\s+)?"
+            r"(?:for|about|information\s+about)?\s*(.+?)\s+"
+            r"(?:and\s+(?:then\s+)?)?"
+            r"(?:create|make|write|save|generate)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        file_match = re.search(
+            r"\b(?:create|make|write|save|generate)\b[^.\n]{0,120}"
+            r"\b(?:file|script|program|source|code)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if not search_match or not file_match:
+            return None
+
+        query = search_match.group(1).strip(" ,.")
+        if not query:
+            return None
+
+        filename_match = re.search(
+            r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if filename_match:
+            filename = filename_match.group(1)
+        else:
+            lowered = text.lower()
+            language_defaults = (
+                ("c++", "hello.cpp"),
+                ("c plus plus", "hello.cpp"),
+                ("cpp", "hello.cpp"),
+                ("python", "script.py"),
+                ("javascript", "script.js"),
+                ("typescript", "script.ts"),
+                ("rust", "script.rs"),
+                ("java", "Main.java"),
+                ("golang", "script.go"),
+            )
+            filename = next(
+                (
+                    name
+                    for marker, name in language_defaults
+                    if marker in lowered
+                ),
+                "generated_code.txt",
+            )
+
+        location = (
+            "desktop"
+            if re.search(r"\bdesktop\b", text, flags=re.IGNORECASE)
+            else "projects"
+        )
+
+        return {
+            "goal": goal,
+            "steps": [
+                {
+                    "id": 1,
+                    "description": f"web_search: search for {query}",
+                    "status": "pending",
+                    "result": None,
+                },
+                {
+                    "id": 2,
+                    "description": f"write_file: create {filename} in {location}",
+                    "status": "pending",
+                    "result": None,
+                },
+            ],
+        }
+
     def _deterministic_single_file_plan(self, goal):
         """Build a minimal plan for an explicit source-file/script request."""
         if not isinstance(goal, str):
@@ -384,6 +478,10 @@ class Planner:
                 "goal": "",
                 "steps": []
             }
+
+        deterministic_plan = self._deterministic_search_and_file_plan(goal)
+        if deterministic_plan is not None:
+            return deterministic_plan
 
         deterministic_plan = self._deterministic_desktop_plan(goal)
         if deterministic_plan is not None:
