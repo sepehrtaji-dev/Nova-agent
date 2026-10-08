@@ -110,6 +110,24 @@ class Planner:
         if not text:
             return None
 
+        # A filename-like target belongs to the filesystem capability, not app control.
+        if re.search(
+            r"\.[a-z0-9]{1,12}\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            app_control_words = re.search(
+                r"\b(?:open|launch|close)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if app_control_words and not re.search(
+                r"\b(?:screenshot|click|move|type|press|scroll)\b",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                return None
+
         desktop_action = re.search(
             r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|"
             r"click|double[- ]click|right[- ]click|middle[- ]click|"
