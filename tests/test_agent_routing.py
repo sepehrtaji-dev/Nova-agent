@@ -45,6 +45,31 @@ class RouterTests(unittest.TestCase):
         self.tools = FakeTools()
         self.router = ToolRouter(self.brain, self.tools)
 
+    def test_structured_plan_input_is_executed_without_llm_redirection(self):
+        planner_brain = FakeBrain(
+            '{"goal":"read a file","steps":[{"tool":"read_file","input":{"path":"notes.txt","location":"projects"},"description":"read notes.txt"}]}'
+        )
+        planner = Planner(planner_brain, self.tools)
+        plan = planner.create_plan("inspect notes.txt")
+        summary = planner.get_plan_summary(plan)
+
+        router_brain = FakeBrain('{"action":"tool","task_type":"computer","tool":"write_file","input":{"path":"wrong.txt","location":"projects"}}')
+        router = ToolRouter(router_brain, self.tools)
+
+        decision = router.decide(
+            message="inspect notes.txt",
+            task_type="computer",
+            plan=summary,
+            allowed_tools=["read_file", "write_file"],
+        )
+
+        self.assertEqual(decision["tool"], "read_file")
+        self.assertEqual(
+            json.loads(decision["input"]),
+            {"path": "notes.txt", "location": "projects"},
+        )
+        self.assertEqual(router_brain.calls, 0)
+
     def test_compound_search_and_file_request_preserves_both_steps(self):
         planner = Planner(self.brain, self.tools)
         plan = planner.create_plan(
