@@ -49,6 +49,12 @@ class ToolRegistry:
                 f"Tool execution error: {e}"
             )
 
+    def get_capability(self, name):
+        data = self.tools.get(name)
+        if not isinstance(data, dict):
+            return None
+        return data.get("capability")
+
     def get_descriptions(self):
 
         if not self.tools:

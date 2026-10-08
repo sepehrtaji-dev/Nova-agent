@@ -18,15 +18,15 @@ class FakeBrain:
 class FakeTools:
     def __init__(self):
         self.tools = {
-            "write_file": {"description": "write", "function": lambda x: None},
-            "read_file": {"description": "read", "function": lambda x: None},
-            "list_files": {"description": "list", "function": lambda x: None},
-            "create_directory": {"description": "mkdir", "function": lambda x: None},
-            "terminal": {"description": "terminal", "function": lambda x: None},
-            "web_search": {"description": "web", "function": lambda x: None},
-            "generate_image": {"description": "image", "function": lambda x: None},
-                        "git": {"description": "git", "function": lambda x: None},
-            "desktop": {"description": "Control the desktop and GUI", "function": lambda x: None},
+            "write_file": {"description": "Create or overwrite a file on disk", "function": lambda x: None},
+            "read_file": {"description": "Read the contents of a text file from the projects folder or desktop", "function": lambda x: None},
+            "list_files": {"description": "List files and directories in the projects folder or desktop", "function": lambda x: None},
+            "create_directory": {"description": "Create a directory", "function": lambda x: None},
+            "terminal": {"description": "Execute terminal shell commands", "function": lambda x: None},
+            "web_search": {"description": "Search the public web for current information", "function": lambda x: None},
+            "generate_image": {"description": "Generate an image", "function": lambda x: None},
+                        "git": {"description": "Run git operations on a local repository", "function": lambda x: None},
+            "desktop": {"description": "Control the desktop and GUI: screenshots, mouse, keyboard, apps, and windows", "function": lambda x: None},
         }
 
     def exists(self, name):
@@ -57,7 +57,7 @@ class RouterTests(unittest.TestCase):
         )
 
         self.assertEqual(len(plan["steps"]), 2)
-        self.assertEqual(brain.calls, 1)
+        self.assertEqual(brain.calls, 0)
         self.assertIn("desktop:", plan["steps"][0]["description"])
     def test_compound_notepad_request_gets_ordered_desktop_steps(self):
         planner = Planner(self.brain, self.tools)
@@ -87,6 +87,17 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["action"], "type")
         self.assertEqual(payload["text"], "HELLO_NOVA_TEST")
+    def test_in_app_search_uses_registered_desktop_capability(self):
+        planner = Planner(self.brain, self.tools)
+        plan = planner.create_plan(
+            'use firefox to search about cs2 game'
+        )
+        self.assertEqual(len(plan["steps"]), 4)
+        self.assertTrue(all("desktop:" in step["description"] for step in plan["steps"]))
+        self.assertIn("open firefox", plan["steps"][0]["description"])
+        self.assertIn("press ctrl+l", plan["steps"][1]["description"])
+        self.assertIn('type "cs2 game"', plan["steps"][2]["description"])
+        self.assertIn("press enter", plan["steps"][3]["description"])
     def test_single_file_creation_gets_one_deterministic_write_step(self):
         planner = Planner(self.brain)
         plan = planner.create_plan(
@@ -205,6 +216,18 @@ class RouterTests(unittest.TestCase):
             )
         )
 
+    def test_model_cannot_override_a_planned_tool(self):
+        plan = (
+            "Goal: open Notepad\\n"
+            "1. [pending] desktop: open notepad"
+        )
+        decision = self.router.decide(
+            message="open notepad",
+            task_type="computer",
+            plan=plan,
+            allowed_tools=["desktop", "edit_file"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
     def test_click_gets_real_coordinates_deterministically(self):
         decision = self.router._force_desktop_decision(
             "click at 500, 400"

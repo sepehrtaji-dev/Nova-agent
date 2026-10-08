@@ -48,6 +48,13 @@ class FakeKnowledge:
 class FakeTools:
     def __init__(self):
         self.calls = []
+        self.tools = {
+            "write_file": {"capability": "pc", "description": "Create or overwrite a file"},
+            "read_file": {"capability": "pc", "description": "Read the contents of a file"},
+            "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+            "web_search": {"capability": "web", "description": "Search the public web"},
+            "git": {"capability": "git", "description": "Run git operations"},
+        }
 
     def exists(self, name):
         return name == "write_file"
@@ -170,9 +177,112 @@ class CoreTests(unittest.TestCase):
             "No. Nova is developed by the Taji-Soft team, not by Anthropic.",
         )
 
+    def test_structured_evidence_answers_follow_up_without_raw_memory_parsing(self):
+        core = NovaCore.__new__(NovaCore)
+        core.execution_state = {
+            "last_plan": None,
+            "verified_tools": [
+                {
+                    "tool": "desktop",
+                    "input": {"action": "screenshot"},
+                    "result": r"STATUS: SUCCESS\nScreenshot saved: C:\Users\Test\nova.png",
+                    "verification": {
+                        "status": "confirmed",
+                        "evidence": r"Screenshot: C:\Users\Test\nova.png",
+                        "message": "desktop screenshot confirmed.",
+                    },
+                }
+            ],
+            "last_verified": None,
+        }
+        core.short_memory = FakeMemory()
+
+        response = core._direct_evidence_answer("give me the exact path")
+
+        self.assertEqual(response, r"Exact path: C:\Users\Test\nova.png")
+        self.assertEqual(core.short_memory.messages, [])
+
+    def test_structured_evidence_reports_recent_actions(self):
+        core = NovaCore.__new__(NovaCore)
+        core.execution_state = {
+            "verified_tools": [
+                {
+                    "tool": "desktop",
+                    "input": {"action": "open_app", "app": "notepad"},
+                    "result": "STATUS: SUCCESS",
+                    "verification": {
+                        "status": "confirmed",
+                        "evidence": "process found",
+                        "message": "desktop open_app confirmed.",
+                    },
+                }
+            ]
+        }
+        core.short_memory = FakeMemory()
+
+        response = core._direct_evidence_answer("what did you do")
+
+        self.assertIn("desktop open_app confirmed.", response)
+    def test_follow_up_uses_verified_path_without_new_tool_call(self):
+        core = NovaCore.__new__(NovaCore)
+        core.short_memory = FakeMemory()
+        evidence = (
+            "Verified tool evidence\n"
+            "Tool: desktop\n"
+            "Result: STATUS: SUCCESS\n"
+            "Screenshot saved: "
+            r"C:\Users\Test\nova.png"
+            "\nEvidence: Screenshot: "
+            r"C:\Users\Test\nova.png"
+        )
+        core.short_memory.add("tool", evidence)
+
+        response = core._direct_evidence_answer("give me the exact path")
+
+        self.assertEqual(response, r"Exact path: C:\Users\Test\nova.png")
+    def test_verified_task_response_never_asks_model_to_explain_missing_capabilities(self):
+        core = NovaCore.__new__(NovaCore)
+        response = core._build_verified_task_response([
+            "Tool: desktop\nResult:\nSTATUS: SUCCESS\nTyped: 'HELLO_NOVA_TEST'\nVerification: CONFIRMED\nEvidence: Typed: 'HELLO_NOVA_TEST'\nMessage: ✓ desktop type confirmed.\nTool success: True"
+        ])
+        self.assertIn("desktop type confirmed.", response)
+        self.assertIn("Paths:", response) if "Path:" in response else self.assertNotIn("cannot provide", response)
+        self.assertNotIn("I couldn't provide", response)
+    def test_capability_summary_comes_from_enabled_registry_tools(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {
+            "tools": {
+                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+                "web_search": {"capability": "web", "description": "Search the public web"},
+            }
+        })()
+        core.access = {"web": True, "git": False, "pc": True}
+
+        response = core._direct_capability_answer("what can you do?")
+
+        self.assertIn("desktop", response)
+        self.assertIn("web search", response)
+        self.assertNotIn("git", response)
+    def test_allowed_tools_come_from_registry_metadata(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {
+            "tools": {
+                "custom_tool": {"capability": "pc"},
+                "web_tool": {"capability": "web"},
+                "git_tool": {"capability": "git"},
+            }
+        })()
+        core.access = {"web": False, "git": True, "pc": True}
+        self.assertEqual(core._allowed_tools(), ["custom_tool", "git_tool"])
     def test_capability_question_reports_real_read_access(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
+        core.tools = type("Registry", (), {
+            "tools": {
+                "read_file": {"capability": "pc", "description": "Read the contents of a file"},
+                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+            }
+        })()
 
         self.assertEqual(
             core._direct_capability_answer("can you read files? just say yes or no?"),
@@ -182,6 +292,11 @@ class CoreTests(unittest.TestCase):
     def test_capability_question_reports_os_control(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
+        core.tools = type("Registry", (), {
+            "tools": {
+                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+            }
+        })()
 
         self.assertEqual(
             core._direct_capability_answer("can you use my os?"),
@@ -195,6 +310,11 @@ class CoreTests(unittest.TestCase):
     def test_capability_question_reports_no_when_pc_access_is_disabled(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": False}
+        core.tools = type("Registry", (), {
+            "tools": {
+                "read_file": {"capability": "pc"},
+            }
+        })()
 
         self.assertEqual(
             core._direct_capability_answer("can you read files"),
@@ -245,7 +365,7 @@ class CoreTests(unittest.TestCase):
             "with a simple PyTorch neural network"
         )
 
-        self.assertIn("created successfully", response)
+        self.assertIn("file confirmed", response)
         self.assertEqual(len(core.tools.calls), 1)
         self.assertEqual(core.router.generate_calls, 1)
         self.assertEqual(core.planner.replan_calls, 0)

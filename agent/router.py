@@ -730,7 +730,22 @@ class ToolRouter:
     )
 
     def _has_desktop_intent(self, message):
-        return bool(self._desktop_intent.search(message))
+        if not isinstance(message, str):
+            return False
+
+        text = re.sub(r"\s+", " ", message.strip())
+        match = self._desktop_intent.search(text)
+        if not match:
+            return False
+
+        if re.search(
+            r"\b(?:open|launch)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]*\.[a-z0-9]{1,12}\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return False
+
+        return True
 
     def _force_desktop_decision(self, message):
         """Build a deterministic desktop tool decision directly from user text."""
@@ -966,7 +981,7 @@ class ToolRouter:
         if not isinstance(message, str):
             return False
 
-        text = re.sub(r"\\s+", " ", message.strip().lower())
+        text = re.sub(r"\s+", " ", message.strip().lower())
         if not text:
             return False
 
@@ -1046,6 +1061,7 @@ class ToolRouter:
             r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
             r"\b(?:terminal|powershell|cmd|shell)\b",
             r"\b(?:git|github)\b[^\n]{0,100}\b(?:clone|commit|push|pull|checkout|branch|status|init|add|create repo|repository)\b",
+            r"\buse\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\s+to\s+search\b",
             r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
             r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
             r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
@@ -1584,6 +1600,22 @@ Return JSON only.
         )
         return match.group(1) if match else None
 
+    def _pending_planned_tool(self, plan_line):
+        if not isinstance(plan_line, str):
+            return None
+
+        text = plan_line.strip()
+        tools = getattr(self.tools, "tools", {})
+        if not isinstance(tools, dict):
+            return None
+
+        for name in tools:
+            pattern = rf"\[pending\]\s*{re.escape(str(name))}\s*:"
+            if re.search(pattern, text, re.IGNORECASE):
+                return str(name)
+
+        return None
+
     def _deterministic_plan_decision(self, message, task_type, plan, tool_history, allowed_tools=None):
         """Return a tool decision for an unambiguous pending plan step.
 
@@ -1610,17 +1642,46 @@ Return JSON only.
 
         pending_lower = pending.lower()
 
-        desktop_step = re.search(
-            r"\bdesktop\s*:\s*(.+)$",
+        pending_action = re.search(
+            r":\s*(.+)$",
             pending,
             flags=re.IGNORECASE,
         )
-        if desktop_step and "desktop" in allowed:
-            desktop_decision = self._force_desktop_decision(
-                desktop_step.group(1).strip()
+        action_text = (
+            pending_action.group(1).strip()
+            if pending_action
+            else pending
+        )
+        action_lower = action_text.lower()
+        combined = f"{pending} {message or ''}".strip()
+
+        planned_tool = self._pending_planned_tool(pending)
+        if planned_tool is not None and planned_tool not in allowed:
+            return None
+
+        planned_tool = self._pending_planned_tool(pending)
+        if planned_tool in allowed:
+            tool_meta = getattr(self.tools, "tools", {}).get(planned_tool, {})
+            tool_description = (
+                str(tool_meta.get("description", "")).lower()
+                if isinstance(tool_meta, dict)
+                else ""
             )
-            if desktop_decision:
-                return desktop_decision
+            desktop_step = re.search(
+                r":\s*(.+)$",
+                pending,
+                flags=re.IGNORECASE,
+            )
+            if (
+                desktop_step
+                and ("desktop" in tool_description or "gui" in tool_description)
+            ):
+                desktop_decision = self._force_desktop_decision(
+                    desktop_step.group(1).strip()
+                )
+                if desktop_decision:
+                    desktop_decision["tool"] = planned_tool
+                    return desktop_decision
 
         write_words = ("file", "script", "program", "source", "code")
         write_intent = (
@@ -1670,83 +1731,106 @@ Return JSON only.
                 }, ensure_ascii=False)
             }
 
-        filename = self._extract_filename(f"{pending} {message or ''}")
-
-        simple_tools = (
-            ("read_file", ("read_file", "read file", "open file", "inspect file", "check file", "view file", "show file")),
-            ("list_files", ("list_files", "list files", "list directory", "list folder", "show files")),
-            ("create_directory", ("create_directory", "create directory", "create folder", "make directory", "make folder")),
+        filename = self._extract_filename(
+            f"{pending} {message or ''}"
         )
 
-        for tool_name, aliases in simple_tools:
-            if tool_name not in allowed:
-                continue
-            if not any(alias in pending_lower for alias in aliases):
-                continue
+        if planned_tool is not None:
+            combined = f"{pending} {message or ''}"
 
-            if tool_name == "read_file":
-                if not filename:
-                    return None
+            if (
+                "file" in tool_description
+                and re.search(r"\bread\b", action_lower)
+                and filename
+            ):
                 location = (
                     "desktop"
-                    if re.search(r"\bdesktop\b", f"{pending} {message or ''}", re.IGNORECASE)
+                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
                     else "projects"
                 )
-                payload = {"path": filename, "location": location}
-            elif tool_name == "list_files":
-                payload = {"path": ".", "location": "projects"}
-            else:
-                folder_match = re.search(
-                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
-                    f"{pending} {message or ''}",
-                    re.IGNORECASE,
-                )
-                if not folder_match:
-                    return None
-                payload = {
-                    "path": folder_match.group(1),
-                    "location": "projects",
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": planned_tool,
+                    "input": json.dumps(
+                        {"path": filename, "location": location},
+                        ensure_ascii=False,
+                    ),
                 }
 
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": tool_name,
-                "input": json.dumps(payload, ensure_ascii=False),
-            }
+            if (
+                "file" in tool_description
+                and re.search(r"\blist\b", action_lower)
+            ):
+                location = (
+                    "desktop"
+                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
+                    else "projects"
+                )
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": planned_tool,
+                    "input": json.dumps(
+                        {"path": ".", "location": location},
+                        ensure_ascii=False,
+                    ),
+                }
 
-        if "web_search" in allowed and any(
-            alias in pending
-            for alias in ("web search", "search the web", "search the internet", "look up")
-        ):
+            if (
+                "directory" in tool_description
+                and re.search(r"\b(?:create|make)\b", action_lower)
+            ):
+                folder_match = re.search(
+                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
+                    combined,
+                    re.IGNORECASE,
+                )
+                if folder_match:
+                    location = (
+                        "desktop"
+                        if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
+                        else "projects"
+                    )
+                    return {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": planned_tool,
+                        "input": json.dumps(
+                            {"path": folder_match.group(1), "location": location},
+                            ensure_ascii=False,
+                        ),
+                    }
+
+        if planned_tool is not None and "web" in tool_description and "search" in tool_description:
             query = re.sub(
-                r"^\s*(?:go and )?(?:search|look up)(?: the web| the internet| online)?\s*(?:for|about)?\s*",
-                "",
-                str(message or "").strip(),
+                r'^\s*(?:go\s+and\s+)?(?:search|look\s+up)(?:\s+(?:the\s+web|the\s+internet|online))?\s*(?:for|about)?\s*',
+                '',
+                str(message or '').strip(),
                 flags=re.IGNORECASE,
             ).strip()
             if query:
                 return {
                     "action": "tool",
                     "task_type": "computer",
-                    "tool": "web_search",
+                    "tool": planned_tool,
                     "input": json.dumps({"query": query}, ensure_ascii=False),
                 }
 
-        if "terminal" in allowed and any(
-            alias in pending
-            for alias in ("run command", "run terminal", "execute command", "run script", "execute script")
+        if planned_tool is not None and "terminal" in tool_description and re.search(
+            r'\b(?:run|execute)\b',
+            action_lower,
         ):
             match = re.search(
                 r'(?:run|execute)\s+(?:the\s+)?(?:command|script)?\s*["\'](.+?)["\']',
-                str(message or "").strip(),
+                str(message or '').strip(),
                 flags=re.IGNORECASE,
             )
             if match:
                 return {
                     "action": "tool",
                     "task_type": "computer",
-                    "tool": "terminal",
+                    "tool": planned_tool,
                     "input": json.dumps(
                         {"command": match.group(1).strip(), "location": "projects"},
                         ensure_ascii=False,
@@ -1754,7 +1838,6 @@ Return JSON only.
                 }
 
         return None
-
     def decide(
         self,
         message,
@@ -1772,15 +1855,8 @@ Return JSON only.
             )
         )
 
-        # Real OS control is deterministic: do not ask the LLM to invent
-        # coordinates, key names, or desktop actions.
-        if self._has_desktop_intent(message) and not has_successful_tool:
-            desktop_decision = self._force_desktop_decision(message)
-            if desktop_decision:
-                if allowed_tools is None or "desktop" in set(allowed_tools):
-                    return desktop_decision
-
-        # Deterministic execution for an explicit pending plan step.
+        # The plan is authoritative. Resolve its pending step before looking
+        # at the whole user message so compound tasks keep their order.
         deterministic = self._deterministic_plan_decision(
             message=message,
             task_type=task_type,
@@ -1792,6 +1868,13 @@ Return JSON only.
             self._remember_file_generation(deterministic)
             return deterministic
 
+        # Fallback for a direct atomic desktop request when the plan did not
+        # describe a concrete executable step.
+        if self._has_desktop_intent(message) and not has_successful_tool:
+            desktop_decision = self._force_desktop_decision(message)
+            if desktop_decision:
+                if allowed_tools is None or "desktop" in set(allowed_tools):
+                    return desktop_decision
         prompt = self._build_decision_prompt(
             message=message,
             task_type=task_type,
@@ -1845,6 +1928,20 @@ Return JSON only.
                     "computer"
                 )
             )
+
+            pending_tool = None
+            if isinstance(plan, str):
+                for plan_line in plan.splitlines():
+                    if "[pending]" in plan_line.lower():
+                        pending_tool = self._pending_planned_tool(plan_line)
+                        break
+
+            if (
+                tool_decision
+                and pending_tool is not None
+                and tool_decision.get("tool") != pending_tool
+            ):
+                tool_decision = None
 
             if (
                 tool_decision
