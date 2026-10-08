@@ -24,10 +24,10 @@ def generate(
 ) -> str:
     model.eval()
 
-    input_ids = tokenizer.encode(prompt)
+    prompt_ids = tokenizer.encode(prompt)
 
     input_ids = torch.tensor(
-        [input_ids],
+        [prompt_ids],
         dtype=torch.long,
         device=device,
     )
@@ -72,10 +72,11 @@ def generate(
             dim=1,
         )
 
-        if next_token.item() == 3:
+        if next_token.item() == tokenizer.SPECIAL_TOKENS.get("<eos>", 3):
             break
 
-    return tokenizer.decode(input_ids[0].tolist())
+    generated_ids = input_ids[0, len(prompt_ids):].tolist()
+    return tokenizer.decode(generated_ids)
 
 
 def load_model():
