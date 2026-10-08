@@ -988,12 +988,36 @@ class ToolRouter:
 
         # Questions that explicitly ask Nova to control the PC are computer tasks.
         if re.match(r"^(?:how|what|why|can|could|would)\b", text):
-            if re.search(
+            has_target = re.search(
                 r"\b(?:mouse|keyboard|screen|window|app|application)\b",
                 text,
-            ) and re.search(
+            )
+            has_action = re.search(
                 r"\b(?:click|move|type|press|scroll|open|close|focus|control|take|capture)\b",
                 text,
+            )
+
+            if has_target and has_action:
+                return True
+
+            if re.search(
+                r"\b(?:press|hit)\s+(?:the\s+)?(?:key\s+)?[a-z0-9]+(?:\+[a-z0-9]+)+\b",
+                text,
+                re.IGNORECASE,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:click|move)\b[^\n]*\b-?\d+\s*[,x]\s*-?\d+\b",
+                text,
+                re.IGNORECASE,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:type|write)\b\s+[\"'][^\"']+[\"']",
+                text,
+                re.IGNORECASE,
             ):
                 return True
 
@@ -1051,6 +1075,9 @@ KEY INSIGHT: If the user wants Nova to DO something (even passively like
 "study this", "look at this", "analyze this", "check this"), that requires
 tools → computer.
 If the user just wants Nova to TELL them something → conversation.
+If the user asks a follow-up that only needs information already present in
+the previous conversation or verified tool evidence, choose conversation and
+report that evidence instead of running another tool.
 
 SPECIAL CASE - GitHub repo creation:
 If the user wants to create a GitHub repo but no GitHub token (ghp_...) 
@@ -1116,13 +1143,15 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
         plan="No plan.",
         allowed_tools=None
     ):
-        if allowed_tools is None:
-            tool_names = ", ".join(self._get_tool_names())
-        else:
-            tool_names = ", ".join(
-                n for n in self._get_tool_names()
-                if n in set(allowed_tools)
-            )
+        allowed = set(allowed_tools) if allowed_tools is not None else None
+        descriptions = []
+
+        for name, data in self.tools.tools.items():
+            if allowed is not None and name not in allowed:
+                continue
+            descriptions.append(f"- {name}: {data['description']}")
+
+        tools_description = "\n".join(descriptions) or "No tools are currently enabled."
 
         # Truncate tool_history to last 500 chars to keep prompt short
         if tool_history and len(tool_history) > 500:
@@ -1134,7 +1163,7 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
 
         return f"""You are Nova. Choose the next tool to run.
 
-TOOLS: {tool_names}
+AVAILABLE TOOLS:\n{tools_description}
 
 PLAN:
 {plan}
@@ -1146,6 +1175,8 @@ USER REQUEST: {message}
 
 RULES:
 - Look at the plan. Find the first pending step. Run that tool.
+- Use the tool descriptions above to choose valid inputs; do not invent unsupported capabilities.
+- If the user is only asking to recall/report information already present in verified tool evidence or recent conversation, do not execute a new computer action.
 - For write_file: ONLY return path and location. Never include content or code.
 - For terminal: return the command to run.
 - For git: return action and required fields.

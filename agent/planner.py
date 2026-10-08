@@ -3,8 +3,18 @@ import re
 
 
 class Planner:
-    def __init__(self, brain):
+    def __init__(self, brain, tools=None):
         self.brain = brain
+        self.tools = tools
+
+    def _tool_descriptions(self):
+        if self.tools is None:
+            return "No tool registry was provided."
+
+        try:
+            return self.tools.get_descriptions()
+        except Exception:
+            return "Tool descriptions are unavailable."
 
     def _extract_json(self, response):
         if not response:
@@ -115,6 +125,15 @@ class Planner:
         )
 
         if not desktop_action:
+            return None
+
+        # Let the model decompose compound requests into multiple tool steps.
+        # Atomic desktop commands can still use the deterministic fast path.
+        if re.search(
+            r"\b(?:and|then|after(?:wards)?|followed\s+by)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
             return None
 
         return {
@@ -277,21 +296,17 @@ class Planner:
 
 Create a concrete step-by-step plan. Each step must map to exactly ONE tool call.
 
-Available tools:
-- write_file: create a file on disk
-- read_file: read a file
-- list_files: list directory contents
-- create_directory: make a folder
-- terminal: run a shell command
-- web_search: search the web
-- git: git operations (init, clone, add, commit, push, pull, status, log, create_repo)
+AVAILABLE TOOLS:
+{self._tool_descriptions()}
 
 USER GOAL: {goal}
 
 CONTEXT: {context}
 
 Rules:
-- Each step = one tool call. Be specific about which tool and what inputs.
+- Each step = one tool call. Be specific about which tool and its exact input fields.
+- Use only tools present in AVAILABLE TOOLS.
+- For compound requests, create one step per real action in execution order.
 - If the task needs a GitHub token and none is in the context, first step must be: "ask user for GitHub PAT token"
 - For GitHub repo creation the steps must be in order:
   1. ask for token (if not already provided)

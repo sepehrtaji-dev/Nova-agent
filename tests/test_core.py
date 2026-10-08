@@ -22,11 +22,14 @@ class FakeExtractor:
 
 
 class FakeMemory:
+    def __init__(self):
+        self.messages = []
+
     def add(self, role, content):
-        return None
+        self.messages.append((role, content))
 
     def get(self):
-        return []
+        return self.messages
 
 
 class FakeLongMemory:
@@ -197,6 +200,30 @@ class CoreTests(unittest.TestCase):
             core._direct_capability_answer("can you read files"),
             "No.",
         )
+
+    def test_verified_tool_evidence_is_persisted_for_follow_up(self):
+        core = NovaCore.__new__(NovaCore)
+        core.short_memory = FakeMemory()
+
+        verification = VerificationResult(
+            "confirmed",
+            "screenshot saved",
+            "screenshot path observed",
+        )
+
+        core._remember_verified_tool_result(
+            "desktop",
+            '{"action":"screenshot"}',
+            "Screenshot saved: C:\\Users\\Test\\nova.png",
+            verification,
+        )
+
+        self.assertEqual(len(core.short_memory.messages), 1)
+        role, content = core.short_memory.messages[0]
+        self.assertEqual(role, "tool")
+        self.assertIn("Verified tool evidence", content)
+        self.assertIn("nova.png", content)
+        self.assertIn("screenshot saved", content)
 
     def test_verified_write_completes_without_replan(self):
         core = NovaCore.__new__(NovaCore)
