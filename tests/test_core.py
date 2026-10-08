@@ -177,6 +177,52 @@ class CoreTests(unittest.TestCase):
             "No. Nova is developed by the Taji-Soft team, not by Anthropic.",
         )
 
+    def test_structured_evidence_answers_follow_up_without_raw_memory_parsing(self):
+        core = NovaCore.__new__(NovaCore)
+        core.execution_state = {
+            "last_plan": None,
+            "verified_tools": [
+                {
+                    "tool": "desktop",
+                    "input": {"action": "screenshot"},
+                    "result": r"STATUS: SUCCESS\nScreenshot saved: C:\Users\Test\nova.png",
+                    "verification": {
+                        "status": "confirmed",
+                        "evidence": r"Screenshot: C:\Users\Test\nova.png",
+                        "message": "desktop screenshot confirmed.",
+                    },
+                }
+            ],
+            "last_verified": None,
+        }
+        core.short_memory = FakeMemory()
+
+        response = core._direct_evidence_answer("give me the exact path")
+
+        self.assertEqual(response, r"Exact path: C:\Users\Test\nova.png")
+        self.assertEqual(core.short_memory.messages, [])
+
+    def test_structured_evidence_reports_recent_actions(self):
+        core = NovaCore.__new__(NovaCore)
+        core.execution_state = {
+            "verified_tools": [
+                {
+                    "tool": "desktop",
+                    "input": {"action": "open_app", "app": "notepad"},
+                    "result": "STATUS: SUCCESS",
+                    "verification": {
+                        "status": "confirmed",
+                        "evidence": "process found",
+                        "message": "desktop open_app confirmed.",
+                    },
+                }
+            ]
+        }
+        core.short_memory = FakeMemory()
+
+        response = core._direct_evidence_answer("what did you do")
+
+        self.assertIn("desktop open_app confirmed.", response)
     def test_follow_up_uses_verified_path_without_new_tool_call(self):
         core = NovaCore.__new__(NovaCore)
         core.short_memory = FakeMemory()
