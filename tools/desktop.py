@@ -369,13 +369,20 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
 
         apps = self._get_windows_start_apps()
         target = re.sub(r"\s+", " ", candidate).strip().casefold()
-        matches = []
+        exact_matches = []
+        partial_matches = []
 
         for name, app_id in apps:
             normalized = re.sub(r"\s+", " ", name).strip().casefold()
-            if normalized == target or target in normalized or normalized in target:
-                matches.append((name, app_id))
+            if normalized == target:
+                exact_matches.append((name, app_id))
+            elif target in normalized or normalized in target:
+                partial_matches.append((name, app_id))
 
+        if len(exact_matches) == 1:
+            return exact_matches[0][0], exact_matches[0][1], None
+
+        matches = exact_matches or partial_matches
         if len(matches) == 1:
             return matches[0][0], matches[0][1], None
 
