@@ -85,7 +85,12 @@ def restore_rng_state(state) -> None:
     torch.set_rng_state(torch.as_tensor(state["torch"], dtype=torch.uint8, device="cpu"))
 
     if torch.cuda.is_available() and "cuda" in state:
-        torch.set_rng_state(torch.as_tensor(state["torch"], dtype=torch.uint8, device="cpu"))
+        torch.cuda.set_rng_state_all(
+            [
+                torch.as_tensor(item, dtype=torch.uint8, device="cpu")
+                for item in state["cuda"]
+            ]
+        )
 
 
 def build_optimizer(
@@ -448,7 +453,13 @@ def train(
     last_train_loss = 0.0
     tokens_seen = 0
 
-    if config.resume_from:
+    resume_path = (
+        Path(config.resume_from)
+        if config.resume_from
+        else None
+    )
+
+    if resume_path and resume_path.is_file():
         (
             start_step,
             best_val_loss,
@@ -456,7 +467,7 @@ def train(
             tokens_seen,
             rng_state,
         ) = load_checkpoint(
-            config.resume_from,
+            resume_path,
             model,
             optimizer,
             device,
