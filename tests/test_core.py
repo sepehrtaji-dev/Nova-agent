@@ -352,6 +352,29 @@ class CoreTests(unittest.TestCase):
         self.assertIn("nova.png", content)
         self.assertIn("screenshot saved", content)
 
+    def test_edit_and_delete_accept_system_location(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {
+            "exists": lambda self, name: name in {"edit_file", "delete_file"},
+        })()
+
+        self.assertEqual(
+            core._validate_tool_request(
+                "request",
+                "edit_file",
+                {"path": "C:\\Temp\\note.txt", "location": "system", "old": "a", "new": "b"},
+            )[0],
+            True,
+        )
+        self.assertEqual(
+            core._validate_tool_request(
+                "request",
+                "delete_file",
+                {"path": "C:\\Temp\\note.txt", "location": "system"},
+            )[0],
+            True,
+        )
+
     def test_raw_tool_output_cannot_fake_verifier_confirmation(self):
         core = NovaCore.__new__(NovaCore)
         history = [
