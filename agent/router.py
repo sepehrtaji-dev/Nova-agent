@@ -1645,17 +1645,29 @@ Return JSON only.
         if planned_tool is not None and planned_tool not in allowed:
             return None
 
-        desktop_step = re.search(
-            r"\bdesktop\s*:\s*(.+)$",
-            pending,
-            flags=re.IGNORECASE,
-        )
-        if desktop_step and "desktop" in allowed:
-            desktop_decision = self._force_desktop_decision(
-                desktop_step.group(1).strip()
+        planned_tool = self._pending_planned_tool(pending)
+        if planned_tool in allowed:
+            tool_meta = getattr(self.tools, "tools", {}).get(planned_tool, {})
+            tool_description = (
+                str(tool_meta.get("description", "")).lower()
+                if isinstance(tool_meta, dict)
+                else ""
             )
-            if desktop_decision:
-                return desktop_decision
+            desktop_step = re.search(
+                r":\s*(.+)$",
+                pending,
+                flags=re.IGNORECASE,
+            )
+            if (
+                desktop_step
+                and ("desktop" in tool_description or "gui" in tool_description)
+            ):
+                desktop_decision = self._force_desktop_decision(
+                    desktop_step.group(1).strip()
+                )
+                if desktop_decision:
+                    desktop_decision["tool"] = planned_tool
+                    return desktop_decision
 
         write_words = ("file", "script", "program", "source", "code")
         write_intent = (
