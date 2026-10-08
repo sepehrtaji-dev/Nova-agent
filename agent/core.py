@@ -733,8 +733,22 @@ If nothing reliable can be extracted:
                 except Exception:
                     confidence = 0.0
 
+                confidence = max(0.0, min(1.0, confidence))
                 if confidence < 0.65:
                     continue
+
+                urls = re.findall(
+                    r"^URL:\s*(\S+)\s*$",
+                    str(result),
+                    flags=re.MULTILINE,
+                )
+                source = str(source).strip()
+                if source and source not in urls:
+                    # A generated source is only trustworthy when it exactly
+                    # matches a URL that appeared in the real search result.
+                    continue
+                if not source and len(urls) == 1:
+                    source = urls[0]
 
                 if freshness not in {
                     "stable",
@@ -978,7 +992,7 @@ If nothing reliable can be extracted:
     def _build_verified_task_response(self, tool_history):
         if not tool_history:
             return "No verified computer action was completed."
-        blocks = [b for b in tool_history if "Tool success: True" in b]
+        blocks = [b for b in tool_history if "Verification: CONFIRMED" in b]
         if not blocks:
             return "No computer action could be verified as successful."
         summaries = []
@@ -1203,13 +1217,21 @@ If nothing reliable can be extracted:
         used_tools = set()
         workspace_revision = 0
 
+        # Verified evidence belongs to the previous task unless this message is
+        # handled by one of the explicit follow-up/evidence paths above.
+        state = getattr(self, "execution_state", None)
+        if isinstance(state, dict):
+            state["verified_tools"] = []
+            state["last_verified"] = None
+            state["last_plan"] = None
+
         self._status(
             "Understanding request..."
         )
 
         task_type = self.router.classify_task(
             message=message,
-            conversation=self.short_memory.get()
+            conversation=self._conversation_context(max_chars=8000)
         )
 
         if task_type not in {
@@ -1232,10 +1254,11 @@ If nothing reliable can be extracted:
                 f"User message: {message}\\n\\n"
                 f"Recent conversation: {self.short_memory.get()}\\n\\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\\n\\n"
-                "Respond naturally and directly. Do not mention tools, "
+                "Answer the user's actual question or statement. "
+                "Do not default to a generic 'How can I help?' response when "
+                "the user clearly asked something else. Do not mention tools, "
                 "verification, task classification, or internal processing. "
-                "For a greeting, simply greet the user and invite them to "
-                "say what they need. Keep the answer concise."
+                "Use the recent conversation and stored knowledge when relevant."
             )
 
             try:
