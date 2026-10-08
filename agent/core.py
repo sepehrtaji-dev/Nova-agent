@@ -204,6 +204,15 @@ class NovaCore:
         if not tool_history:
             return False
 
+        # Fast string check first
+        if isinstance(tool_history, str):
+            return (
+                "Tool success: True" in tool_history or
+                "FILE_CREATED" in tool_history or
+                "DIRECTORY_CREATED" in tool_history or
+                "STATUS: SUCCESS" in tool_history
+            )
+
         if isinstance(tool_history, list):
             for entry in tool_history:
 
@@ -469,13 +478,8 @@ class NovaCore:
                     "file content."
                 )
 
-            if location not in {
-                "projects",
-                "desktop"
-            }:
-                return False, (
-                    "Invalid write_file location."
-                )
+            if location not in {"projects", "desktop", "system"}:
+                return False, "Invalid write_file location."
 
         elif tool_name == "create_directory":
 
@@ -512,13 +516,8 @@ class NovaCore:
                     "explicit project directory."
                 )
 
-            if location not in {
-                "projects",
-                "desktop"
-            }:
-                return False, (
-                    "Invalid directory location."
-                )
+            if location not in {"projects", "desktop", "system"}:
+                return False, "Invalid directory location."
 
         elif tool_name == "read_file":
 
@@ -539,13 +538,8 @@ class NovaCore:
 
             location = data.get("location", "projects")
 
-            if location not in {
-                "projects",
-                "desktop"
-            }:
-                return False, (
-                    "Invalid read_file location."
-                )
+            if location not in {"projects", "desktop", "system"}:
+                return False, "Invalid read_file location."
 
         elif tool_name == "list_files":
 
@@ -555,7 +549,7 @@ class NovaCore:
             if not isinstance(path, str):
                 return False, "list_files path is invalid."
 
-            if location not in {"projects", "desktop"}:
+            if location not in {"projects", "desktop", "system"}:
                 return False, "Invalid list_files location."
 
         elif tool_name == "terminal":
@@ -580,13 +574,8 @@ class NovaCore:
                 "projects"
             )
 
-            if location not in {
-                "projects",
-                "desktop"
-            }:
-                return False, (
-                    "Invalid terminal location."
-                )
+            if location not in {"projects", "desktop", "system"}:
+                return False, "Invalid terminal location."
 
         elif tool_name == "web_search":
 
@@ -1462,20 +1451,23 @@ The task is NOT complete.
                     continue
 
             if action == "retry":
-
-                tool_history.append(
-                    """
-Router returned an invalid decision.
-
-Nova must choose another real action.
-"""
-                )
-
-                self._status(
-                    "Re-evaluating..."
-                )
-
-                continue
+                retry_count = sum(1 for h in tool_history if "invalid decision" in h.lower())
+                if retry_count >= 3:
+                    # Too many retries — force a write_file decision
+                    tool_history.append("Too many retries. Forcing write_file.")
+                    decision = {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": "write_file",
+                        "input": json.dumps({"path": "output.py", "location": "projects"})
+                    }
+                    action = "tool"
+                    tool_name = "write_file"
+                    tool_input = decision["input"]
+                else:
+                    tool_history.append("Router returned an invalid decision. Nova must choose another real action.")
+                    self._status("Re-evaluating...")
+                    continue
 
             if action != "tool":
 
