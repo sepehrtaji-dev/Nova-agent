@@ -7,12 +7,14 @@ class ToolRegistry:
         self,
         name,
         description,
-        function
+        function,
+        capability="pc"
     ):
 
         self.tools[name] = {
             "description": description,
-            "function": function
+            "function": function,
+            "capability": capability,
         }
 
     def exists(self, name):
