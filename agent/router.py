@@ -988,12 +988,36 @@ class ToolRouter:
 
         # Questions that explicitly ask Nova to control the PC are computer tasks.
         if re.match(r"^(?:how|what|why|can|could|would)\b", text):
-            if re.search(
+            has_target = re.search(
                 r"\b(?:mouse|keyboard|screen|window|app|application)\b",
                 text,
-            ) and re.search(
+            )
+            has_action = re.search(
                 r"\b(?:click|move|type|press|scroll|open|close|focus|control|take|capture)\b",
                 text,
+            )
+
+            if has_target and has_action:
+                return True
+
+            if re.search(
+                r"\b(?:press|hit)\s+(?:the\s+)?(?:key\s+)?[a-z0-9]+(?:\+[a-z0-9]+)+\b",
+                text,
+                re.IGNORECASE,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:click|move)\b[^\n]*\b-?\d+\s*[,x]\s*-?\d+\b",
+                text,
+                re.IGNORECASE,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:type|write)\b\s+[\"'][^\"']+[\"']",
+                text,
+                re.IGNORECASE,
             ):
                 return True
 
