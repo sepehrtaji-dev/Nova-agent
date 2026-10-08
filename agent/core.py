@@ -1283,9 +1283,10 @@ If nothing reliable can be extracted:
                 f"User message: {message}\\n\\n"
                 f"Recent conversation: {self.short_memory.get()}\\n\\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\\n\\n"
-                "Answer the user's actual question or statement. "
-                "Do not default to a generic 'How can I help?' response when "
-                "the user clearly asked something else. Do not mention tools, "
+                "Answer the user's actual question or statement directly. "
+                "For casual questions, answer the question first and only then "
+                "offer help when useful. Never replace a direct answer with a "
+                "generic invitation to ask something else. Do not mention tools, "
                 "verification, task classification, or internal processing. "
                 "Use the recent conversation and stored knowledge when relevant."
             )
