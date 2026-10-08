@@ -14,13 +14,15 @@ except ImportError:
 
 
 class ImageGenTool:
-    """
-    Stable Diffusion image generation tool for Nova agent.
-    Uses local model at D:\\AI_Models\\SD15 (diffusers format).
-    """
+    """Local Stable Diffusion image generation tool for Nova."""
 
     def __init__(self):
-        self.model_path = Path(r"D:\AI_Models\SD15")
+        configured_model = os.getenv("NOVA_IMAGE_MODEL_PATH", "").strip()
+        self.model_path = Path(
+            configured_model
+            if configured_model
+            else os.path.join(os.getcwd(), "models", "SD15")
+        ).expanduser()
         # Keep generated files inside the active Nova workspace on every machine.
         self.output_dir = Path(os.path.abspath(
             os.path.join(os.getcwd(), "projects", "generated_images")
