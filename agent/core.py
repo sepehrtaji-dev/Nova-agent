@@ -1313,7 +1313,7 @@ If nothing reliable can be extracted:
                 )
             )
 
-            conversation = self.short_memory.format_for_prompt(max_chars=12000)
+            conversation = self._conversation_context(max_chars=12000)
 
             history = self._format_tool_history(tool_history, max_chars=12000)
 
