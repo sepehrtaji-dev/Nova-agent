@@ -32,6 +32,11 @@ def generate(
         device=device,
     )
 
+    generation_start = min(
+        input_ids.size(1),
+        model.config.max_sequence_length,
+    )
+
     for _ in range(max_new_tokens):
         if input_ids.size(1) > model.config.max_sequence_length:
             input_ids = input_ids[:, -model.config.max_sequence_length:]
@@ -75,7 +80,7 @@ def generate(
         if next_token.item() == tokenizer.SPECIAL_TOKENS.get("<eos>", 3):
             break
 
-    generated_ids = input_ids[0, len(prompt_ids):].tolist()
+    generated_ids = input_ids[0, generation_start:].tolist()
     return tokenizer.decode(generated_ids)
 
 
