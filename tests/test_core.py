@@ -48,6 +48,13 @@ class FakeKnowledge:
 class FakeTools:
     def __init__(self):
         self.calls = []
+        self.tools = {
+            "write_file": {"capability": "pc"},
+            "read_file": {"capability": "pc"},
+            "desktop": {"capability": "pc"},
+            "web_search": {"capability": "web"},
+            "git": {"capability": "git"},
+        }
 
     def exists(self, name):
         return name == "write_file"
@@ -190,6 +197,17 @@ class CoreTests(unittest.TestCase):
         self.assertIn("desktop type confirmed.", response)
         self.assertIn("Paths:", response) if "Path:" in response else self.assertNotIn("cannot provide", response)
         self.assertNotIn("I couldn't provide", response)
+    def test_allowed_tools_come_from_registry_metadata(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {
+            "tools": {
+                "custom_tool": {"capability": "pc"},
+                "web_tool": {"capability": "web"},
+                "git_tool": {"capability": "git"},
+            }
+        })()
+        core.access = {"web": False, "git": True, "pc": True}
+        self.assertEqual(core._allowed_tools(), ["custom_tool", "git_tool"])
     def test_capability_question_reports_real_read_access(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
