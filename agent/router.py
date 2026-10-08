@@ -1610,6 +1610,18 @@ Return JSON only.
 
         pending_lower = pending.lower()
 
+        desktop_step = re.search(
+            r"\bdesktop\s*:\s*(.+)$",
+            pending,
+            flags=re.IGNORECASE,
+        )
+        if desktop_step and "desktop" in allowed:
+            desktop_decision = self._force_desktop_decision(
+                desktop_step.group(1).strip()
+            )
+            if desktop_decision:
+                return desktop_decision
+
         write_words = ("file", "script", "program", "source", "code")
         write_intent = (
             "write_file" in pending_lower
