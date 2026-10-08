@@ -14,7 +14,7 @@ _SYMBOLS = {
     r"\to": "→", r"\rightarrow": "→", r"\leftarrow": "←",
     r"\Rightarrow": "⇒", r"\Leftrightarrow": "⇔",
     r"\in": "∈", r"\notin": "∉", r"\forall": "∀", r"\exists": "∃",
-    r"\partial": "∂", r"\nabla": "∇", r"\sum": "Σ", r"\prod": "Π", r"\int": "∫",
+    r"\partial": "∂", r"\nabla": "∇", r"\sum": "∑", r"\prod": "∏", r"\int": "∫",
     r"\ldots": "…", r"\cdots": "⋯", r"\quad": " ", r"\qquad": "  ", r"\,": " "
 }
 
@@ -82,6 +82,7 @@ def parse_math(text):
         return body.translate(_SUPER_MAP if marker == "^" else _SUB_MAP)
 
     value = re.sub(r"([_^])(\{[^{}]*\}|[A-Za-z0-9+\-=()])", script, value)
+    value = value.replace(r"\left", "").replace(r"\right", "")
     for key in sorted(_SYMBOLS, key=len, reverse=True):
         value = value.replace(key, _SYMBOLS[key])
     value = re.sub(r"\\text\s*\{([^{}]*)\}", r"\1", value)
