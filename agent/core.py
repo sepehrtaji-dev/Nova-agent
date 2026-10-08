@@ -901,8 +901,11 @@ If nothing reliable can be extracted:
             return None
 
         asks_path = bool(re.search(
-            r"\b(?:exact\s+path|path|where\s+(?:did|was)|location)\b",
-            text,
+            r"(?:\bexact\s+path\b|"
+            r"\b(?:what|which)\s+(?:is|was)\s+(?:the\s+)?(?:exact\s+)?path\b|"
+            r"\bwhere\s+(?:did|was)\b.{0,80}\b(?:save|saved|put|placed|write|wrote|store|stored|create|created)\b|"
+            r"\b(?:location|path)\s+(?:of|for)\s+(?:that|the|this)\b)"
+            , text,
         ))
         asks_typed = bool(re.search(
             r"\b(?:what|which)\b.*\b(?:type|typed|wrote|written)\b",
