@@ -1064,6 +1064,7 @@ class ToolRouter:
             r"\buse\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\s+to\s+search\b",
             r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
             r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
+            r"\b(?:type|write)\b[^\n]{0,120}\b(?:address\s+bar|search\s+(?:box|field)|text\s+(?:box|field)|input\s+field|textbox|browser|notepad|terminal|window|app|application)\b",
             r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
         ]
 
