@@ -93,7 +93,7 @@ def load_tools():
     registry.register(
         "desktop",
         (
-            "Control the desktop: screenshots, mouse, keyboard, apps, and windows."
+            "Control the desktop and GUI. Actions: screenshot, click, move, type, key, scroll, open_app, close_app, get_windows, focus_window. Input uses an action field plus the fields required by that action."
         ),
         desktop.run
     )
