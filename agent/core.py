@@ -1017,41 +1017,30 @@ If nothing reliable can be extracted:
 
         return None
     def _build_verified_task_response(self, tool_history):
-        """Build a final computer-task response strictly from verified evidence."""
         if not tool_history:
             return "No verified computer action was completed."
-
-        blocks = [block for block in tool_history if "Tool success: True" in block]
+        blocks = [b for b in tool_history if "Tool success: True" in b]
         if not blocks:
             return "No computer action could be verified as successful."
-
         summaries = []
         paths = []
-
         for block in blocks:
-            message_match = re.search(r"Message:\s*(.+)", block)
-            if message_match:
-                summary = message_match.group(1).strip()
-                summary = re.sub(r"^✓\s*", "", summary)
+            msg_match = re.search(r"Message:\s*(.+)", block)
+            if msg_match:
+                summary = re.sub(r"^[\u2713\s]+", "", msg_match.group(1).strip())
                 if summary and summary not in summaries:
                     summaries.append(summary)
-
             for line in block.splitlines():
-                if line.startswith("Path:"):
+                if line.startswith("Location:") or line.startswith("Path:"):
                     value = line.split(":", 1)[1].strip()
-                    if value and value not in paths:
+                    if value and value not in paths and "screenshot" not in value.lower():
                         paths.append(value)
-                elif line.startswith("Screenshot:"):
-                    value = line.split(":", 1)[1].strip()
-                    if value and value not in paths:
-                        paths.append(value)
-
         if not summaries:
-            summaries.append("Verified computer actions completed successfully.")
-
-        response = "Done.\n" + "\n".join(f"• {item}" for item in summaries)
+            summaries.append("Task completed successfully.")
+        nl = "\n"
+        response = "Done." + nl + nl.join(f"\u2022 {i}" for i in summaries)
         if paths:
-            response += "\n\nPaths:\n" + "\n".join(f"• {path}" for path in paths)
+            response += nl + nl + "Paths:" + nl + nl.join(f"\u2022 {p}" for p in paths)
         return response
 
     def _capability_enabled_by_description(self, keywords):
@@ -1451,23 +1440,9 @@ The task is NOT complete.
                     continue
 
             if action == "retry":
-                retry_count = sum(1 for h in tool_history if "invalid decision" in h.lower())
-                if retry_count >= 3:
-                    # Too many retries — force a write_file decision
-                    tool_history.append("Too many retries. Forcing write_file.")
-                    decision = {
-                        "action": "tool",
-                        "task_type": "computer",
-                        "tool": "write_file",
-                        "input": json.dumps({"path": "output.py", "location": "projects"})
-                    }
-                    action = "tool"
-                    tool_name = "write_file"
-                    tool_input = decision["input"]
-                else:
-                    tool_history.append("Router returned an invalid decision. Nova must choose another real action.")
-                    self._status("Re-evaluating...")
-                    continue
+                tool_history.append("Router returned an invalid decision.")
+                self._status("Re-evaluating...")
+                continue
 
             if action != "tool":
 
@@ -1485,13 +1460,12 @@ No computer operation was performed.
 
                 continue
 
-            tool_name = decision.get(
-                "tool"
-            )
-
-            tool_input = decision.get(
-                "input"
-            )
+            tool_name  = decision.get("tool")
+            tool_input = decision.get("input")
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                tool_history.append("Router decision missing tool name.")
+                self._status("Re-evaluating...")
+                continue
 
             allowed_tools = set(self._allowed_tools())
 
