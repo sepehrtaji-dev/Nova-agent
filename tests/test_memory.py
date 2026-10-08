@@ -40,9 +40,8 @@ class MemoryTests(unittest.TestCase):
             memory.add(
                 "current topic",
                 "this fact is expired",
-                expires_at=None,
+                freshness="volatile",
             )
-
             memory.data[-1]["expires_at"] = (
                 datetime.utcnow() - timedelta(days=1)
             ).isoformat()
