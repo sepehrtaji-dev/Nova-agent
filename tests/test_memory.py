@@ -1,6 +1,4 @@
-import os
-import tempfile
-import unittest
+import json
 from datetime import datetime, timedelta
 
 from memory.embeddings import EmbeddingModel
@@ -80,6 +78,27 @@ class MemoryTests(unittest.TestCase):
             facts = [item["fact"] for item in results]
             self.assertIn("this fact is valid", facts)
             self.assertNotIn("this fact is expired", facts)
+
+    def test_knowledge_ignores_malformed_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "knowledge.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump([{"topic": "valid", "fact": "useful fact"}, "bad"], handle)
+
+            memory = KnowledgeMemory(path=path)
+            results = memory.search("valid useful")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["topic"], "valid")
+
+    def test_knowledge_retrieval_uses_token_overlap_not_substrings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "knowledge.json")
+            memory = KnowledgeMemory(path=path)
+            memory.add("agent", "agentic systems", freshness="stable")
+            memory.add("cat", "concatenate strings", freshness="stable")
+
+            results = memory.search("agent")
+            self.assertEqual(results[0]["topic"], "agent")
 
     def test_embedding_is_deterministic_without_model_download(self):
         model = EmbeddingModel(dimensions=64)
