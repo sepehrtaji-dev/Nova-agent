@@ -823,6 +823,9 @@ If nothing reliable can be extracted:
                 "I'm developed by the Taji-Soft team."
             )
 
+        if taji_soft and re.search(r"\b(?:sure|really|correct|right)\b", text):
+            return "Yes. Nova is developed by the Taji-Soft team."
+
         if developer:
             if anthro and not taji_soft:
                 return (
@@ -830,9 +833,6 @@ If nothing reliable can be extracted:
                     "not by Anthropic."
                 )
             return "Nova is developed by the Taji-Soft team."
-
-        if taji_soft and re.search(r"\b(?:sure|really|correct|right)\b", text):
-            return "Yes. Nova is developed by the Taji-Soft team."
 
         if identity:
             return "I'm Nova, a local AI assistant developed by the Taji-Soft team."
