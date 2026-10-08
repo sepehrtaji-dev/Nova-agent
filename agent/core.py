@@ -980,6 +980,27 @@ If nothing reliable can be extracted:
             response += "\n\nPaths:\n" + "\n".join(f"• {path}" for path in paths)
         return response
 
+    def _capability_enabled_by_description(self, keywords):
+        if not hasattr(self, "tools") or not hasattr(self.tools, "tools"):
+            return False
+
+        if isinstance(keywords, str):
+            keywords = (keywords,)
+
+        for data in self.tools.tools.values():
+            if not isinstance(data, dict):
+                continue
+
+            description = str(data.get("description", "")).lower()
+            if not all(str(keyword).lower() in description for keyword in keywords):
+                continue
+
+            capability = data.get("capability", "pc")
+            if self.access.get(capability, True):
+                return True
+
+        return False
+
     def _direct_capability_answer(self, message):
         """Answer simple capability questions without asking the LLM to guess."""
         if not isinstance(message, str):
@@ -995,21 +1016,21 @@ If nothing reliable can be extracted:
         if re.search(r"\b(?:read|open|inspect|view)\s+files?\b", text):
             return (
                 "Yes."
-                if "read_file" in self._allowed_tools()
+                if self._capability_enabled_by_description(("file", "read"))
                 else "No."
             )
 
         if re.search(r"\b(?:run|execute)\b.*\b(?:commands?|cmd|terminal|powershell|shell)\b", text):
             return (
                 "Yes."
-                if "terminal" in self._allowed_tools()
+                if self._capability_enabled_by_description(("terminal",))
                 else "No."
             )
 
         if re.search(r"\b(?:use|control|access|operate)\b.*\b(?:my\s+)?(?:os|operating\s+system|pc|computer)\b", text):
             return (
                 "Yes."
-                if "desktop" in self._allowed_tools()
+                if self._capability_enabled_by_description(("desktop",))
                 else "No."
             )
 
