@@ -18,15 +18,15 @@ class FakeBrain:
 class FakeTools:
     def __init__(self):
         self.tools = {
-            "write_file": {"description": "write", "function": lambda x: None},
-            "read_file": {"description": "read", "function": lambda x: None},
-            "list_files": {"description": "list", "function": lambda x: None},
-            "create_directory": {"description": "mkdir", "function": lambda x: None},
-            "terminal": {"description": "terminal", "function": lambda x: None},
-            "web_search": {"description": "web", "function": lambda x: None},
-            "generate_image": {"description": "image", "function": lambda x: None},
-                        "git": {"description": "git", "function": lambda x: None},
-            "desktop": {"description": "Control the desktop and GUI", "function": lambda x: None},
+            "write_file": {"description": "Create or overwrite a file on disk", "function": lambda x: None},
+            "read_file": {"description": "Read the contents of a text file from the projects folder or desktop", "function": lambda x: None},
+            "list_files": {"description": "List files and directories in the projects folder or desktop", "function": lambda x: None},
+            "create_directory": {"description": "Create a directory", "function": lambda x: None},
+            "terminal": {"description": "Execute terminal shell commands", "function": lambda x: None},
+            "web_search": {"description": "Search the public web for current information", "function": lambda x: None},
+            "generate_image": {"description": "Generate an image", "function": lambda x: None},
+                        "git": {"description": "Run git operations on a local repository", "function": lambda x: None},
+            "desktop": {"description": "Control the desktop and GUI: screenshots, mouse, keyboard, apps, and windows", "function": lambda x: None},
         }
 
     def exists(self, name):
