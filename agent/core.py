@@ -913,7 +913,7 @@ If nothing reliable can be extracted:
         return entries if isinstance(entries, list) else []
 
     def _direct_evidence_answer(self, message):
-        """Answer follow-up questions from structured verified evidence only."""
+        """Answer follow-up questions from verified evidence only."""
         if not isinstance(message, str):
             return None
 
@@ -934,6 +934,9 @@ If nothing reliable can be extracted:
                 }
                 for entry in reversed(self._verified_tool_entries())
             ]
+
+        if not structured:
+            return None
 
         asks_path = bool(re.search(
             r"\b(?:exact\s+path|path|where\s+(?:did|was)|location)\b",
@@ -963,23 +966,26 @@ If nothing reliable can be extracted:
                 )
                 inputs = entry.get("input", {})
                 candidates = []
+
                 if isinstance(inputs, dict):
                     for key in ("path", "saved_path", "screenshot_path"):
                         value = inputs.get(key)
                         if isinstance(value, str) and value.strip():
                             candidates.append(value.strip())
 
-                combined = result + "\n" + evidence
-                for line in combined.splitlines():
-                    for label in ("Path:", "Screenshot:", "Screenshot saved:", "Saved to:", "Location:"):
-                        if line.startswith(label):
-                            value = line.split(":", 1)[1].strip()
-                            if value:
-                                candidates.append(value)
+                for source in (result, evidence):
+                    for line in source.splitlines():
+                        for label in ("Path:", "Screenshot:", "Screenshot saved:", "Saved to:"):
+                            if line.startswith(label):
+                                value = line.split(":", 1)[1].strip()
+                                if value:
+                                    candidates.append(value)
 
                 for value in candidates:
                     if re.match(r"^[A-Za-z]:\\+", value) or value.startswith("/"):
                         return "Exact path: " + value
+
+            return "No exact path is present in the verified evidence."
 
         if asks_typed:
             for entry in structured:
@@ -991,9 +997,10 @@ If nothing reliable can be extracted:
                 match = re.search(r"Typed:\s*(.+)", str(entry.get("result", "")))
                 if match:
                     return "Typed: " + match.group(1).strip()
+            return "The verified evidence does not contain the typed text."
 
-
-        if asks_opened:            for entry in structured:
+        if asks_opened:
+            for entry in structured:
                 inputs = entry.get("input", {})
                 if isinstance(inputs, dict):
                     value = inputs.get("app")
@@ -1002,13 +1009,16 @@ If nothing reliable can be extracted:
                 match = re.search(r"Opened:\s*(.+)", str(entry.get("result", "")))
                 if match:
                     return "Opened: " + match.group(1).strip()
+            return "The verified evidence does not contain an opened application."
 
-        if asks_actions and structured:
+        if asks_actions:
             summaries = []
             for entry in structured[:6]:
                 verification = entry.get("verification", {})
-                status = str(verification.get("status", "")) if isinstance(verification, dict) else ""
-                message_text = str(verification.get("message", "")) if isinstance(verification, dict) else ""
+                if not isinstance(verification, dict):
+                    continue
+                status = str(verification.get("status", "")).lower()
+                message_text = str(verification.get("message", "")).strip()
                 if status == "confirmed" and message_text:
                     clean = re.sub(r"^[✓\s]+", "", message_text).strip()
                     if clean and clean not in summaries:
