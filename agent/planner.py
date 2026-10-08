@@ -129,7 +129,7 @@ class Planner:
                 return None
 
         source_language = re.search(
-            r"\b(?:python|c\+\+|cpp|c\s+language|javascript|typescript|rust|java|golang|go)\b",
+            r"(?:\bpython\b|c\+\+|\bcpp\b|\bc\s+language\b|\bjavascript\b|\btypescript\b|\brust\b|\bjava\b|\bgolang\b|\bgo\b)",
             text,
             flags=re.IGNORECASE,
         )
