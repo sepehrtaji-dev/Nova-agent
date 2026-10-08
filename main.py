@@ -97,10 +97,11 @@ def render_header(core: NovaCore):
     brand.append("  ", style="white")
     brand.append("LOCAL AI AGENT", style="dim")
 
+    model_name = str(getattr(getattr(core, "brain", None), "model", "local")).strip()
     header.add_row(
         brand,
         Text("CHAT / AGENT", style="dim"),
-        Text("QWEN 2.5 · 3B", style="dim"),
+        Text(model_name.upper(), style="dim"),
     )
 
     console.print(
