@@ -313,6 +313,12 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(self.router.classify_task(message), "computer")
         self.assertEqual(self.brain.calls, 0)
 
+    def test_direct_app_open_is_computer(self):
+        message = "please open firefox"
+        self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.assertEqual(self.router.classify_task(message), "computer")
+        self.assertEqual(self.brain.calls, 0)
+
     def test_plan_preserves_filename_case(self):
         plan = (
             "Goal: create file\n"
