@@ -55,6 +55,31 @@ class Verifier:
         self.tools = tools
 
     # ── Public entry point ────────────────────────────────────────────────────
+    def _resolve_path_for_verification(self, tool_input):
+        path = str(tool_input.get("path", "")).strip()
+        location = str(tool_input.get("location", "projects")).strip().lower()
+
+        if not path:
+            return None
+
+        if location == "system":
+            return os.path.abspath(path) if os.path.isabs(path) else None
+
+        roots = {
+            "projects": os.path.abspath(os.path.join(os.getcwd(), "projects")),
+            "desktop": os.path.abspath(os.path.join(os.path.expanduser("~"), "Desktop")),
+        }
+        root = roots.get(location)
+        if root is None:
+            return None
+
+        actual_path = os.path.abspath(os.path.join(root, path))
+        try:
+            common = os.path.commonpath([root, actual_path])
+        except ValueError:
+            return None
+        return actual_path if common == root else None
+
 
     def verify(self, tool_name, tool_input_str, tool_result):
         """
@@ -195,28 +220,12 @@ class Verifier:
                 message=f"read_file failed: {tool_result[:120]}",
             )
 
-        roots = {
-            "projects": os.path.abspath(os.path.join(os.getcwd(), "projects")),
-            "desktop": os.path.abspath(os.path.join(os.path.expanduser("~"), "Desktop")),
-        }
-        root = roots.get(location)
-        if not root or not path:
+        actual_path = self._resolve_path_for_verification(tool_input)
+        if actual_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:200],
-                message="read_file could not resolve its requested location.",
-            )
-
-        actual_path = os.path.abspath(os.path.join(root, path))
-        try:
-            common = os.path.commonpath([root, actual_path])
-        except ValueError:
-            common = ""
-        if common != root:
-            return VerificationResult(
-                status="failed",
-                evidence=f"Resolved path escapes workspace: {actual_path}",
-                message="read_file path escapes its allowed workspace.",
+                message="read_file could not resolve its requested location safely.",
             )
 
         if not os.path.isfile(actual_path):
@@ -287,28 +296,12 @@ class Verifier:
                 message=f"list_files failed: {tool_result[:120]}",
             )
 
-        roots = {
-            "projects": os.path.abspath(os.path.join(os.getcwd(), "projects")),
-            "desktop": os.path.abspath(os.path.join(os.path.expanduser("~"), "Desktop")),
-        }
-        root = roots.get(location)
-        if not root:
+        actual_path = self._resolve_path_for_verification(tool_input)
+        if actual_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:200],
-                message="list_files could not resolve its location.",
-            )
-
-        actual_path = os.path.abspath(os.path.join(root, path))
-        try:
-            common = os.path.commonpath([root, actual_path])
-        except ValueError:
-            common = ""
-        if common != root:
-            return VerificationResult(
-                status="failed",
-                evidence=f"Resolved path escapes workspace: {actual_path}",
-                message="list_files path escapes its allowed workspace.",
+                message="list_files could not resolve its requested location safely.",
             )
 
         if not os.path.isdir(actual_path):
