@@ -1792,15 +1792,8 @@ Return JSON only.
             )
         )
 
-        # Real OS control is deterministic: do not ask the LLM to invent
-        # coordinates, key names, or desktop actions.
-        if self._has_desktop_intent(message) and not has_successful_tool:
-            desktop_decision = self._force_desktop_decision(message)
-            if desktop_decision:
-                if allowed_tools is None or "desktop" in set(allowed_tools):
-                    return desktop_decision
-
-        # Deterministic execution for an explicit pending plan step.
+        # The plan is authoritative. Resolve its pending step before looking
+        # at the whole user message so compound tasks keep their order.
         deterministic = self._deterministic_plan_decision(
             message=message,
             task_type=task_type,
@@ -1812,6 +1805,13 @@ Return JSON only.
             self._remember_file_generation(deterministic)
             return deterministic
 
+        # Fallback for a direct atomic desktop request when the plan did not
+        # describe a concrete executable step.
+        if self._has_desktop_intent(message) and not has_successful_tool:
+            desktop_decision = self._force_desktop_decision(message)
+            if desktop_decision:
+                if allowed_tools is None or "desktop" in set(allowed_tools):
+                    return desktop_decision
         prompt = self._build_decision_prompt(
             message=message,
             task_type=task_type,
