@@ -1718,52 +1718,78 @@ Return JSON only.
                 }, ensure_ascii=False)
             }
 
-        filename = self._extract_filename(f"{pending} {message or ''}")
-
-        simple_tools = (
-            ("read_file", ("read_file", "read file", "open file", "inspect file", "check file", "view file", "show file")),
-            ("list_files", ("list_files", "list files", "list directory", "list folder", "show files")),
-            ("create_directory", ("create_directory", "create directory", "create folder", "make directory", "make folder")),
+        filename = self._extract_filename(
+            f"{pending} {message or ''}"
         )
 
-        for tool_name, aliases in simple_tools:
-            if tool_name not in allowed:
-                continue
-            if not any(alias in pending_lower for alias in aliases):
-                continue
+        if planned_tool is not None:
+            combined = f"{pending} {message or ''}"
 
-            if tool_name == "read_file":
-                if not filename:
-                    return None
+            if (
+                "file" in tool_description
+                and re.search(r"\bread\b", action_lower)
+                and filename
+            ):
                 location = (
                     "desktop"
-                    if re.search(r"\bdesktop\b", f"{pending} {message or ''}", re.IGNORECASE)
+                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
                     else "projects"
                 )
-                payload = {"path": filename, "location": location}
-            elif tool_name == "list_files":
-                payload = {"path": ".", "location": "projects"}
-            else:
-                folder_match = re.search(
-                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
-                    f"{pending} {message or ''}",
-                    re.IGNORECASE,
-                )
-                if not folder_match:
-                    return None
-                payload = {
-                    "path": folder_match.group(1),
-                    "location": "projects",
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": planned_tool,
+                    "input": json.dumps(
+                        {"path": filename, "location": location},
+                        ensure_ascii=False,
+                    ),
                 }
 
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": tool_name,
-                "input": json.dumps(payload, ensure_ascii=False),
-            }
+            if (
+                "file" in tool_description
+                and re.search(r"\blist\b", action_lower)
+            ):
+                location = (
+                    "desktop"
+                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
+                    else "projects"
+                )
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": planned_tool,
+                    "input": json.dumps(
+                        {"path": ".", "location": location},
+                        ensure_ascii=False,
+                    ),
+                }
 
-        if "web_search" in allowed and any(
+            if (
+                "directory" in tool_description
+                and re.search(r"\b(?:create|make)\b", action_lower)
+            ):
+                folder_match = re.search(
+                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
+                    combined,
+                    re.IGNORECASE,
+                )
+                if folder_match:
+                    location = (
+                        "desktop"
+                        if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
+                        else "projects"
+                    )
+                    return {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": planned_tool,
+                        "input": json.dumps(
+                            {"path": folder_match.group(1), "location": location},
+                            ensure_ascii=False,
+                        ),
+                    }
+
+                if "web_search" in allowed and any(
             alias in pending
             for alias in ("web search", "search the web", "search the internet", "look up")
         ):
