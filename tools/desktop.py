@@ -532,7 +532,7 @@ class DesktopTool:
                     )
                 else:
                     return (
-                        f"STATUS: SUCCESS\n"
+                        f"STATUS: ERROR\n"
                         f"Not found on screen: {image}"
                     )
             except Exception as e:
