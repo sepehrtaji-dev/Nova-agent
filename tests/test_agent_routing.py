@@ -337,6 +337,23 @@ class RouterTests(unittest.TestCase):
             )
         self.assertEqual(self.brain.calls, 0)
 
+    def test_run_app_pending_plan_routes_to_open_app(self):
+        plan = (
+            "Goal: run an app\n"
+            "1. [pending] desktop: run firefox"
+        )
+        decision = self.router.decide(
+            message="please run firefox",
+            task_type="computer",
+            plan=plan,
+            allowed_tools=["desktop"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "open_app")
+        self.assertEqual(payload["app"], "firefox")
+
+
     def test_generic_app_launch_does_not_depend_on_app_name(self):
         planner = Planner(self.brain, self.tools)
         for message in (
