@@ -921,7 +921,20 @@ If nothing reliable can be extracted:
         if not text:
             return None
 
-        structured = list(reversed(self._structured_verified_entries()))
+        structured_entries = self._structured_verified_entries()
+        if structured_entries:
+            structured = list(reversed(structured_entries))
+        else:
+            structured = [
+                {
+                    "tool": "legacy",
+                    "input": {},
+                    "result": entry,
+                    "verification": {},
+                }
+                for entry in reversed(self._verified_tool_entries())
+            ]
+
         asks_path = bool(re.search(
             r"\b(?:exact\s+path|path|where\s+(?:did|was)|location)\b",
             text,
