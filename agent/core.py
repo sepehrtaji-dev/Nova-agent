@@ -192,6 +192,53 @@ class NovaCore:
 
         return False
 
+    def _format_verified_web_results(self, tool_history):
+        if not isinstance(tool_history, str):
+            return None
+
+        blocks = re.findall(
+            r"TOOL_NAME:\s*web_search\s*\n"
+            r"INPUT:\s*.*?\n"
+            r"BEGIN_RAW_TOOL_RESULT\n"
+            r"(.*?)"
+            r"\nEND_RAW_TOOL_RESULT\n"
+            r"VERIFIER_STATUS:\s*CONFIRMED",
+            tool_history,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        if not blocks:
+            return None
+
+        entries = []
+        for raw in blocks:
+            matches = re.findall(
+                r"\[\d+\]\s*\n"
+                r"Title:\s*(.*?)\n"
+                r"URL:\s*(.*?)\n"
+                r"Snippet:\s*(.*?)(?=\n\n\[\d+\]|\Z)",
+                raw,
+                flags=re.DOTALL,
+            )
+            for title, url, snippet in matches:
+                title = re.sub(r"\s+", " ", title).strip()
+                url = re.sub(r"\s+", " ", url).strip()
+                snippet = re.sub(r"\s+", " ", snippet).strip()
+                if title or snippet:
+                    entries.append((title, url, snippet))
+
+        if not entries:
+            return None
+
+        lines = ["Verified web search results:"]
+        for index, (title, url, snippet) in enumerate(entries[:6], start=1):
+            lines.append(f"{index}. {title}")
+            if snippet:
+                lines.append(f"   {snippet}")
+            if url:
+                lines.append(f"   Source: {url}")
+
+        return "\n".join(lines)
+
     def _format_tool_history(self, tool_history, max_chars=12000):
         """Keep the full step ledger within a predictable prompt budget."""
         if not isinstance(tool_history, list) or not tool_history:
@@ -1417,6 +1464,8 @@ If nothing reliable can be extracted:
         last_tool_error = None
         web_search_used = False
         direct_read_response = None
+        direct_file_search_response = None
+        direct_web_response = None
 
         for step in range(
             self.max_steps
@@ -1935,6 +1984,11 @@ Nova must choose another useful action.
                         status="completed"
                     )
 
+                if tool_name == "find_files":
+                    direct_file_search_response = (
+                        f"File search results:\n{result}"
+                    )
+
                 if tool_name == "read_file":
                     read_data = self._parse_tool_input(tool_input)
                     read_path = ""
@@ -1956,6 +2010,13 @@ Nova must choose another useful action.
 
                 if tool_name == "web_search":
                     web_search_used = True
+                    direct_web_response = self._format_verified_web_results(
+                        "TOOL_NAME: web_search\n"
+                        "BEGIN_RAW_TOOL_RESULT\n"
+                        f"{result}\n"
+                        "END_RAW_TOOL_RESULT\n"
+                        "VERIFIER_STATUS: CONFIRMED"
+                    )
                     self._status("Learning from search...")
 
                     search_data = self._parse_tool_input(tool_input)
@@ -2066,10 +2127,20 @@ Nova must choose another useful action.
             self.short_memory.add("assistant", response)
             return response
 
+        if direct_file_search_response is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_file_search_response)
+            return direct_file_search_response
+
         if direct_read_response is not None:
             self._status("Done")
             self.short_memory.add("assistant", direct_read_response)
             return direct_read_response
+
+        if direct_web_response is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_web_response)
+            return direct_web_response
 
         if (
             web_search_used
