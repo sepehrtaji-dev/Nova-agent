@@ -18,10 +18,11 @@ _SYMBOLS = {
     r"\ldots": "…", r"\cdots": "⋯", r"\quad": " ", r"\qquad": "  ", r"\,": " "
 }
 
-_SUPER = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁼⁽⁾")
-_SUB = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₋₊₌₍₎")
-
-def _group(text, start):
+_SUPER_MAP = str.maketrans(
+    "0123456789+-=()abcdefghijklmnopqrstuvwxyz",
+    "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁼⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
+)
+_SUB_MAP = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₋₊₌₍₎")def _group(text, start):
     if start >= len(text) or text[start] != "{":
         return None, start
     depth = 0
@@ -76,7 +77,7 @@ def parse_math(text):
         if body.startswith("{") and body.endswith("}"):
             body = body[1:-1]
         body = re.sub(r"\s+", "", body)
-        return body.translate(_SUPER if marker == "^" else _SUB)
+        return body.translate(_SUPER_MAP if marker == "^" else _SUB_MAP)
 
     value = re.sub(r"([_^])(\{[^{}]*\}|[A-Za-z0-9+\-=()])", script, value)
     for key in sorted(_SYMBOLS, key=len, reverse=True):
