@@ -66,7 +66,7 @@ class OllamaBrain:
             retry_options.update({
                 "temperature": 0.0,
                 "num_ctx": max(int(base_options.get("num_ctx", 4096)), 8192),
-                "num_predict": min(int(base_options.get("num_predict", 1024)), 256),
+                "num_predict": min(int(base_options.get("num_predict", 1536)), 1024),
                 "repeat_penalty": max(float(base_options.get("repeat_penalty", 1.3)), 1.15),
                 "repeat_last_n": 128,
             })
