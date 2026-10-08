@@ -237,10 +237,17 @@ class DesktopTool:
             return "DESKTOP ERROR: move requires 'x' and 'y'."
 
         pyautogui.moveTo(int(x), int(y), duration=duration)
+        actual_x, actual_y = pyautogui.position()
+
+        status = "SUCCESS" if (
+            int(actual_x) == int(x)
+            and int(actual_y) == int(y)
+        ) else "ERROR"
 
         return (
-            f"STATUS: SUCCESS\n"
-            f"Mouse moved to: ({x}, {y})"
+            f"STATUS: {status}\n"
+            f"Mouse moved to: ({actual_x}, {actual_y})\n"
+            f"Requested position: ({int(x)}, {int(y)})"
         )
 
     def _action_type(self, data):
@@ -255,11 +262,16 @@ class DesktopTool:
             return "DESKTOP ERROR: type requires 'text'."
 
         pyautogui.typewrite(text, interval=interval)
+        time.sleep(0.2)
+        screenshot_path, _ = self._screenshot("after_type")
 
-        return (
+        result = (
             f"STATUS: SUCCESS\n"
             f"Typed: {text[:80]!r}"
         )
+        if screenshot_path:
+            result += f"\nScreenshot: {screenshot_path}"
+        return result
 
     def _action_key(self, data):
         pyautogui, err = _import_pyautogui()
@@ -278,10 +290,16 @@ class DesktopTool:
         else:
             pyautogui.press(key)
 
-        return (
+        time.sleep(0.2)
+        screenshot_path, _ = self._screenshot("after_key")
+
+        result = (
             f"STATUS: SUCCESS\n"
             f"Key pressed: {key}"
         )
+        if screenshot_path:
+            result += f"\nScreenshot: {screenshot_path}"
+        return result
 
     def _action_scroll(self, data):
         pyautogui, err = _import_pyautogui()
@@ -298,10 +316,16 @@ class DesktopTool:
             pyautogui.scroll(amount)
 
         direction = "up" if amount > 0 else "down"
-        return (
+        time.sleep(0.2)
+        screenshot_path, _ = self._screenshot("after_scroll")
+
+        result = (
             f"STATUS: SUCCESS\n"
             f"Scrolled {direction} by {abs(amount)} clicks"
         )
+        if screenshot_path:
+            result += f"\nScreenshot: {screenshot_path}"
+        return result
 
     def _action_open_app(self, data):
         app = str(data.get("app", "")).strip()
