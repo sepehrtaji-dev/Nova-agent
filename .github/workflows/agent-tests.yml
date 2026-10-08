@@ -32,4 +32,5 @@ jobs:
           tests/test_core.py
           tests/test_math_parser.py
           tests/test_memory.py
+          tests/test_tokenizer_roundtrip.py
           tests/test_desktop_app_resolution.py
