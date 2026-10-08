@@ -529,7 +529,7 @@ class NovaCore:
                 "projects"
             )
 
-            if location not in {"projects", "desktop", "system"}:
+            if location not in {"projects", "desktop"}:
                 return False, "Invalid terminal location."
 
         elif tool_name == "web_search":
