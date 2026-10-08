@@ -927,7 +927,7 @@ class ToolRouter:
 
         # Open app
         open_match = _re.search(
-            r"\b(?:open|launch)\s+(?:the\s+)?(?:app\s+)?(.+?)(?:\s+app)?$",
+            r"\b(?:open|launch|run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?(.+?)(?:\s+app)?$",
             msg,
             flags=_re.IGNORECASE,
         )
