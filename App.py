@@ -424,7 +424,14 @@ class NovaWindow(QMainWindow):
 
         model_label = QLabel("LOCAL MODEL")
         model_label.setObjectName("tinyLabel")
-        model_value = QLabel("Qwen 2.5 · 3B")
+        model_name = str(
+            getattr(
+                getattr(self.core, "brain", None),
+                "model",
+                "Local model",
+            )
+        ).strip()
+        model_value = QLabel(model_name)
         model_value.setObjectName("modelValue")
         footer_layout.addWidget(model_label)
         footer_layout.addWidget(model_value)
