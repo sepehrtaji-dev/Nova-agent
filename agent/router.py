@@ -712,20 +712,14 @@ class ToolRouter:
     # Desktop intent — force desktop tool before model decides
     _desktop_intent = re.compile(
         r"\b(?:"
-        r"screenshot|take\s+a\s+screenshot|capture\s+screen"
-        r"|open\s+(?:app|application)\b|launch\s+(?:app|application)\b"
-        r"|(?:run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?[a-z0-9][a-z0-9 ._-]{1,40}"
-        r"|open\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}"
-        r"|launch\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}"
-        r"|close\s+(?:app|application)\b"
-        r"|click\s+(?:on\s+)?(?:the\s+)?"
-        r"|move\s+(?:the\s+)?mouse"
-        r"|type(?:\s+(?:into|in|on))?\b"
-        r"|press\s+(?:key|ctrl|alt|enter|escape)"
-        r"|scroll\s+(?:up|down)"
-        r"|list\s+(?:open\s+)?windows"
-        r"|focus\s+window"
-        r"|control\s+(?:the\s+)?(?:mouse|keyboard|screen)"
+        r"take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|\bscreenshot\b"
+        r"|click\s+(?:on\s+)?(?:the\s+)?(?:button|icon|link|checkbox|menu\s+item)"
+        r"|move\s+(?:the\s+)?mouse\s+to"
+        r"|scroll\s+(?:up|down)\s+(?:in|on|the)\s+\w"
+        r"|list\s+open\s+windows|show\s+(?:all\s+)?open\s+windows"
+        r"|focus\s+(?:the\s+)?window\s+\w"
+        r"|press\s+(?:ctrl|alt|shift|win|cmd)\s*\+"
+        r"|open\s+(?:firefox|chrome|safari|edge|notepad|calculator|terminal|vscode|gedit|kate|vlc|spotify|telegram|discord|slack)\b"
         r")\b",
         re.IGNORECASE
     )
@@ -2104,4 +2098,3 @@ Return JSON only.
             "action": "retry",
             "task_type": "conversation"
         }
-
