@@ -1014,10 +1014,17 @@ class ToolRouter:
         if not text:
             return False
 
+        if re.match(
+            r"^(?:how\s+are\s+you|how\s+have\s+you\s+been)(?:\s+(?:today|lately|recently))?[!?.,]*$",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
         casual = {
             "hi", "hello", "hey", "hey nova", "hi nova", "hello nova",
-            "yo", "sup", "what's up", "whats up", "how are you",
-            "how are you?", "good morning", "good afternoon", "good evening",
+            "yo", "sup", "what's up", "whats up",
+            "good morning", "good afternoon", "good evening",
             "good night", "thanks", "thank you", "thx", "bye", "goodbye"
         }
 
