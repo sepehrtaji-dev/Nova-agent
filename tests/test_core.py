@@ -248,6 +248,21 @@ class CoreTests(unittest.TestCase):
         self.assertIn("desktop type confirmed.", response)
         self.assertIn("Paths:", response) if "Path:" in response else self.assertNotIn("cannot provide", response)
         self.assertNotIn("I couldn't provide", response)
+    def test_capability_summary_comes_from_enabled_registry_tools(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {
+            "tools": {
+                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+                "web_search": {"capability": "web", "description": "Search the public web"},
+            }
+        })()
+        core.access = {"web": True, "git": False, "pc": True}
+
+        response = core._direct_capability_answer("what can you do?")
+
+        self.assertIn("desktop", response)
+        self.assertIn("web search", response)
+        self.assertNotIn("git", response)
     def test_allowed_tools_come_from_registry_metadata(self):
         core = NovaCore.__new__(NovaCore)
         core.tools = type("Registry", (), {
