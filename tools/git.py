@@ -5,6 +5,7 @@ import sys
 import urllib.request
 import urllib.error
 import shutil
+import re
 
 
 class GitTool:
@@ -123,8 +124,6 @@ class GitTool:
     # ── Blocked operations ────────────────────────────────────────────────────
 
     BLOCKED = {
-        "push --force",
-        "push -f",
         "reset --hard HEAD~",
         "clean -fd",
         "filter-branch",
@@ -132,10 +131,12 @@ class GitTool:
     }
 
     def _is_blocked(self, args):
-        cmd = " ".join(args).lower()
-        for b in self.BLOCKED:
-            if b in cmd:
-                return True, b
+        cmd = " ".join(str(arg) for arg in args).lower()
+        if re.search(r"\bgit\s+push\b.*(?:^|\s)(?:--force(?:-with-lease)?|-f)(?:\s|$)", cmd):
+            return True, "force push"
+        for blocked in self.BLOCKED:
+            if blocked in cmd:
+                return True, blocked
         return False, None
 
     def _check_gh_cli(self):
@@ -241,8 +242,12 @@ class GitTool:
             if description:
                 args.extend(["--description", description])
 
-            # Clone it locally after creation
-            clone_path = os.path.join(self.projects_path, name)
+            # Clone it locally after creation. Use only the repository
+            # basename so owner/repository cannot escape the workspace.
+            clone_name = str(name).replace("\\", "/").rstrip("/").split("/")[-1]
+            if not clone_name or clone_name in {".", ".."}:
+                return "GIT ERROR: invalid repository name."
+            clone_path = os.path.join(self.projects_path, clone_name)
 
             # Create repo first (without --clone)
             result = self._run_gh(args, self.projects_path)
@@ -255,7 +260,21 @@ class GitTool:
             # gh repo create outputs something like: https://github.com/user/repo.git
             import re
             url_match = re.search(r'(https?://github\.com/[^/\s]+/[^/\s]+)', result)
-            repo_url = url_match.group(1) if url_match else f"https://github.com/{name}.git"
+            if not url_match:
+                view_result = self._run_gh(
+                    ["repo", "view", name, "--json", "url", "--jq", ".url"],
+                    self.projects_path,
+                )
+                if "STATUS: SUCCESS" in view_result:
+                    match = re.search(r"OUTPUT:\s*\n(https?://\S+)", view_result)
+                    if match:
+                        repo_url = match.group(1).strip()
+                    else:
+                        return result + "\n\nRepository created, but its clone URL could not be verified."
+                else:
+                    return result + "\n\nRepository created, but its clone URL could not be verified."
+            else:
+                repo_url = url_match.group(1)
 
             clone_result = self._run_git(["clone", repo_url, clone_path], self.projects_path)
 
@@ -276,6 +295,9 @@ class GitTool:
                 return "GIT ERROR: 'url' is required for clone."
 
             dest_name = data.get("dest") or url.rstrip("/").split("/")[-1].replace(".git", "")
+            dest_name = os.path.basename(str(dest_name).replace("\\", "/"))
+            if not dest_name or dest_name in {".", ".."}:
+                return "GIT ERROR: invalid clone destination."
             dest_path = os.path.join(self.projects_path, dest_name)
 
             return self._run_git(["clone", url, dest_path], self.projects_path)
