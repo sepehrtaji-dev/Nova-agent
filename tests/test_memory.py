@@ -4,12 +4,35 @@ import unittest
 from datetime import datetime, timedelta
 
 from memory.embeddings import EmbeddingModel
+from memory.storage import MemoryStorage
 from memory.knowledge import KnowledgeMemory
 from memory.short_term import ShortTermMemory
 from memory.vector_memory import VectorMemory
 
 
 class MemoryTests(unittest.TestCase):
+    def test_corrupt_long_term_memory_recovers_to_empty_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "long_term.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("{not valid json")
+
+            storage = MemoryStorage(path=path)
+            data = storage.load()
+
+            self.assertIsInstance(data, dict)
+            self.assertIn("profile", data)
+            self.assertIn("facts", data)
+
+    def test_corrupt_knowledge_memory_recovers_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "knowledge.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("not json")
+
+            memory = KnowledgeMemory(path=path)
+            self.assertEqual(memory.search("anything"), [])
+
     def test_short_term_memory_keeps_a_reasonable_window(self):
         memory = ShortTermMemory(limit=40)
         for index in range(45):
