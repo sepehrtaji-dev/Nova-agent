@@ -626,7 +626,7 @@ The UI includes:
 - A persistent **RUN TRACE** after each request
 - High-level model activity such as `PLAN`, `WEB`, `GIT`, `TERM`, `READ`, `WRITE`, `THINK`, and `DONE`
 - No private chain-of-thought is displayed
-- Qwen 2.5 3B model indicator
+- Configured local model indicator
 - Capability controls for **Web Search**, **Git**, and **PC Use**
 - Session reset and screen controls
 - Permission state visible directly in the header
