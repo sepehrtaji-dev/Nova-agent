@@ -1457,7 +1457,7 @@ Return JSON only.
         self._last_file_generation_error = None
 
         extension = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-        language = {
+        code_languages = {
             "cpp": "C++",
             "c": "C",
             "py": "Python",
@@ -1469,13 +1469,39 @@ Return JSON only.
             "java": "Java",
             "rs": "Rust",
             "go": "Go",
-        }.get(extension, "source")
+        }
+        is_text_document = extension in {"txt", "md", "markdown"}
+        language = code_languages.get(extension, "source")
 
-        prompt = (
-            f"Generate complete raw {language} source code for \"{path}\".\n\n"
-            f"User request: {user_request}\n\n"
-            "Output source code only. No Markdown fences, explanation, JSON, placeholders, TODOs, or ellipsis."
-        )
+        bounded_history = str(tool_history or "")
+        if len(bounded_history) > 14000:
+            bounded_history = bounded_history[-14000:]
+
+        bounded_conversation = str(conversation or "")
+        if len(bounded_conversation) > 8000:
+            bounded_conversation = bounded_conversation[-8000:]
+
+        if is_text_document:
+            prompt = (
+                "Generate the complete text content for the requested document.\n\n"
+                f"User request: {user_request}\n\n"
+                f"Recent conversation:\n{bounded_conversation}\n\n"
+                "Tool ledger:\n"
+                f"{bounded_history}\n\n"
+                "Rules:\n"
+                "- Use only facts explicitly supported by verified evidence in the ledger.\n"
+                "- Never invent a fact, version, date, source, URL, or result.\n"
+                "- Preserve uncertainty when evidence is incomplete.\n"
+                "- Return document content only."
+            )
+        else:
+            prompt = (
+                f"Generate complete raw {language} source code for \"{path}\".\n\n"
+                f"User request: {user_request}\n\n"
+                f"Recent conversation:\n{bounded_conversation}\n\n"
+                f"Relevant tool history:\n{bounded_history}\n\n"
+                "Output source code only. No Markdown fences, explanation, placeholders, TODOs, or ellipsis."
+            )
 
         try:
             raw = self.brain.generate(
