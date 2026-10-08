@@ -1,3 +1,6 @@
-datasets
+ollama
+rich
 pyautogui
 pillow
+datasets
+pytesseract
