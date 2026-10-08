@@ -865,6 +865,13 @@ If nothing reliable can be extracted:
                 else "No."
             )
 
+        if re.search(r"\b(?:use|control|access|operate)\b.*\b(?:my\s+)?(?:os|operating\s+system|pc|computer)\b", text):
+            return (
+                "Yes."
+                if "desktop" in self._allowed_tools()
+                else "No."
+            )
+
         return None
 
     def ask(self, message):

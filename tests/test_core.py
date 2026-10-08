@@ -176,6 +176,19 @@ class CoreTests(unittest.TestCase):
             "Yes.",
         )
 
+    def test_capability_question_reports_os_control(self):
+        core = NovaCore.__new__(NovaCore)
+        core.access = {"web": True, "git": True, "pc": True}
+
+        self.assertEqual(
+            core._direct_capability_answer("can you use my os?"),
+            "Yes.",
+        )
+        self.assertEqual(
+            core._direct_capability_answer("can you really use os?"),
+            "Yes.",
+        )
+
     def test_capability_question_reports_no_when_pc_access_is_disabled(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": False}

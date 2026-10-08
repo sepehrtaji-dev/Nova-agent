@@ -104,7 +104,7 @@ class Planner:
             r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|"
             r"click|double[- ]click|right[- ]click|middle[- ]click|"
             r"move\s+(?:the\s+)?mouse|"
-            r"type\s+(?:into|in|on)|"
+            r"type(?:\s+(?:into|in|on))?\b|"
             r"press\s+(?:key|ctrl|alt|enter|escape)|"
             r"scroll\s+(?:up|down)|"
             r"open\s+(?:app|application)|launch\s+(?:app|application)|"

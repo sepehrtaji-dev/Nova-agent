@@ -196,6 +196,32 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(payload["x"], 300)
         self.assertEqual(payload["y"], 250)
 
+    def test_natural_type_request_is_deterministic(self):
+        decision = self.router.decide(
+            message='type "hello from nova"',
+            task_type="computer",
+            plan='Goal: type text\n1. [pending] desktop: type "hello from nova"',
+            allowed_tools=["desktop"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "type")
+        self.assertEqual(payload["text"], "hello from nova")
+        self.assertEqual(self.brain.calls, 0)
+
+    def test_type_here_request_is_deterministic(self):
+        decision = self.router.decide(
+            message="type hello here",
+            task_type="computer",
+            plan="Goal: type hello here\n1. [pending] desktop: type hello here",
+            allowed_tools=["desktop"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "type")
+        self.assertEqual(payload["text"], "hello")
+        self.assertEqual(self.brain.calls, 0)
+
     def test_mouse_control_does_not_call_llm(self):
         decision = self.router.decide(
             message="click at 500, 400",
