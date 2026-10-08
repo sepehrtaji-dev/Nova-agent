@@ -854,6 +854,137 @@ If nothing reliable can be extracted:
 
         return None
 
+    def _verified_tool_entries(self):
+        entries = []
+        try:
+            messages = self.short_memory.get()
+        except Exception:
+            return entries
+
+        if not isinstance(messages, list):
+            return entries
+
+        for item in messages:
+            if not isinstance(item, dict) or item.get("role") != "tool":
+                continue
+            content = item.get("content", "")
+            if isinstance(content, str) and "Verified tool evidence" in content:
+                entries.append(content)
+        return entries
+
+    def _direct_evidence_answer(self, message):
+        """Answer follow-up questions from verified local evidence only."""
+        if not isinstance(message, str):
+            return None
+
+        text = re.sub(r"\s+", " ", message.strip().lower())
+        if not text:
+            return None
+
+        entries = self._verified_tool_entries()
+        if not entries:
+            return None
+
+        asks_path = bool(re.search(
+            r"\b(?:exact\s+path|path|where\s+(?:did|was)|location)\b",
+            text,
+        ))
+        asks_typed = bool(re.search(
+            r"\b(?:what|which)\b.*\b(?:type|typed|wrote|written)\b",
+            text,
+        ))
+        asks_opened = bool(re.search(
+            r"\b(?:what|which)\b.*\b(?:open|opened|launch|launched)\b",
+            text,
+        ))
+
+        latest = entries[-1]
+        search_entries = list(reversed(entries))
+
+        if asks_path:
+            paths = []
+            for entry in search_entries:
+                for line in entry.splitlines():
+                    value = None
+                    if line.startswith("Path:"):
+                        value = line.split(":", 1)[1].strip()
+                    elif line.startswith("Screenshot:"):
+                        value = line.split(":", 1)[1].strip()
+                    elif line.startswith("Screenshot saved:"):
+                        value = line.split(":", 1)[1].strip()
+                    elif line.startswith("Saved to:"):
+                        value = line.split(":", 1)[1].strip()
+
+                    if value and (
+                        re.match(r"^[A-Za-z]:\\", value)
+                        or value.startswith("/")
+                    ):
+                        if value not in paths:
+                            paths.append(value)
+
+            if paths:
+                return "Exact path: " + paths[0]
+
+        if asks_typed:
+            for entry in search_entries:
+                match = re.search(r"Typed:\s*(.+)", entry)
+                if match:
+                    return "Typed: " + match.group(1).strip()
+
+        if asks_opened:
+            for entry in search_entries:
+                match = re.search(r"Opened:\s*(.+)", entry)
+                if match:
+                    return "Opened: " + match.group(1).strip()
+
+        if re.search(
+            r"\b(?:did\s+(?:it|that)|was\s+it|is\s+it)\s+(?:successful|successful\?|done|completed)",
+            text,
+        ):
+            for entry in search_entries:
+                if "Tool success: True" in entry:
+                    return "Yes. The latest recorded tool action was verified successfully."
+
+        return None
+
+    def _build_verified_task_response(self, tool_history):
+        """Build a final computer-task response strictly from verified evidence."""
+        if not tool_history:
+            return "No verified computer action was completed."
+
+        blocks = [block for block in tool_history if "Tool success: True" in block]
+        if not blocks:
+            return "No computer action could be verified as successful."
+
+        summaries = []
+        paths = []
+
+        for block in blocks:
+            message_match = re.search(r"Message:\s*(.+)", block)
+            if message_match:
+                summary = message_match.group(1).strip()
+                summary = re.sub(r"^✓\s*", "", summary)
+                if summary and summary not in summaries:
+                    summaries.append(summary)
+
+            for line in block.splitlines():
+                if line.startswith("Path:"):
+                    value = line.split(":", 1)[1].strip()
+                    if value and value not in paths:
+                        paths.append(value)
+                elif line.startswith("Screenshot:"):
+                    value = line.split(":", 1)[1].strip()
+                    if value and value not in paths:
+                        paths.append(value)
+
+        if not summaries:
+            summaries.append("Verified computer actions completed successfully.")
+
+        response = "Done.\n" + "\n".join(f"• {item}" for item in summaries)
+        if paths:
+            response += "\n\nPaths:\n" + "\n".join(f"• {path}" for path in paths)
+        return response
+
     def _direct_capability_answer(self, message):
         """Answer simple capability questions without asking the LLM to guess."""
         if not isinstance(message, str):
@@ -908,6 +1039,12 @@ If nothing reliable can be extracted:
             self._status("Done")
             self.short_memory.add("assistant", direct_identity_answer)
             return direct_identity_answer
+
+        direct_evidence_answer = self._direct_evidence_answer(message)
+        if direct_evidence_answer is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_evidence_answer)
+            return direct_evidence_answer
 
         direct_capability_answer = self._direct_capability_answer(message)
         if direct_capability_answer is not None:
@@ -1790,6 +1927,14 @@ Nova must choose another useful action.
                 response
             )
 
+            return response
+
+        if task_type == "computer":
+            response = self._build_verified_task_response(
+                tool_history
+            )
+            self._status("Done")
+            self.short_memory.add("assistant", response)
             return response
 
         prompt = self._build_final_prompt(
