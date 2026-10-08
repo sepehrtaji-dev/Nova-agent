@@ -1894,14 +1894,11 @@ Return JSON only.
         )
 
         try:
-
             raw = self.brain.generate(
                 prompt,
-                json_mode=True
+                system_prompt="Return ONLY valid JSON. No explanation. No extra text."
             )
-
         except Exception:
-
             raw = ""
 
         data = self._extract_json(
