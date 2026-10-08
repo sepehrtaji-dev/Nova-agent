@@ -899,7 +899,12 @@ If nothing reliable can be extracted:
         if asks_path:
             paths = []
             for entry in search_entries:
-                for line in entry.replace("\\n", "\n").splitlines():
+                normalized_entry = re.sub(
+                    r"\\n(?=(?:Tool|Input|Result|Verification|Evidence|Message|Path|Screenshot|Screenshot saved|Saved to)\\b)",
+                    "\n",
+                    entry,
+                )
+                for line in normalized_entry.splitlines():
                     value = None
                     if line.startswith("Path:"):
                         value = line.split(":", 1)[1].strip()
