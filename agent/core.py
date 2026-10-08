@@ -865,9 +865,17 @@ If nothing reliable can be extracted:
             return entries
 
         for item in messages:
-            if not isinstance(item, dict) or item.get("role") != "tool":
+            if isinstance(item, dict):
+                if item.get("role") != "tool":
+                    continue
+                content = item.get("content", "")
+            elif isinstance(item, (tuple, list)) and len(item) >= 2:
+                if item[0] != "tool":
+                    continue
+                content = item[1]
+            else:
                 continue
-            content = item.get("content", "")
+
             if isinstance(content, str) and "Verified tool evidence" in content:
                 entries.append(content)
         return entries
