@@ -156,7 +156,12 @@ class Planner:
                     if not isinstance(data, dict):
                         continue
                     description = str(data.get("description", "")).lower()
-                    if "desktop" in description or "gui" in description:
+                    has_gui_marker = any(
+                        marker in description
+                        for marker in ("desktop control", "gui", "mouse", "keyboard", "screenshot")
+                    )
+                    has_control_marker = "control" in description or "operate" in description
+                    if has_gui_marker and has_control_marker:
                         desktop_tool = name
                         break
 
