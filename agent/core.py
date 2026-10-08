@@ -36,6 +36,11 @@ class NovaCore:
             "git": True,
             "pc": True,
         }
+        self.execution_state = {
+            "last_plan": None,
+            "verified_tools": [],
+            "last_verified": None,
+        }
 
     def set_access(self, web=None, git=None, pc=None):
         """Update UI-controlled capability permissions for future actions."""
@@ -232,20 +237,50 @@ class NovaCore:
         return self._verified_success_line_matches(text)
 
     def _remember_verified_tool_result(self, tool_name, tool_input, result, verification):
-        """Persist concise verified tool evidence for follow-up turns."""
+        """Store structured verified evidence for follow-up turns."""
         try:
-            evidence = verification.evidence if verification is not None else ""
+            state = getattr(self, "execution_state", None)
+            if not isinstance(state, dict):
+                state = {
+                    "last_plan": None,
+                    "verified_tools": [],
+                    "last_verified": None,
+                }
+                self.execution_state = state
+
+            parsed_input = self._parse_tool_input(tool_input)
+            if not isinstance(parsed_input, dict):
+                parsed_input = {}
+
+            entry = {
+                "tool": str(tool_name),
+                "input": parsed_input,
+                "result": str(result),
+                "verification": {
+                    "status": getattr(verification, "status", "unverifiable"),
+                    "evidence": str(getattr(verification, "evidence", "")),
+                    "message": str(getattr(verification, "message", "")),
+                },
+            }
+
+            verified = state.setdefault("verified_tools", [])
+            if not isinstance(verified, list):
+                verified = []
+                state["verified_tools"] = verified
+            verified.append(entry)
+            state["verified_tools"] = verified[-20:]
+            state["last_verified"] = entry
+
             message = (
                 "Verified tool evidence\n"
                 f"Tool: {tool_name}\n"
                 f"Input: {tool_input}\n"
                 f"Result: {str(result)[:900]}\n"
-                f"Evidence: {str(evidence)[:300]}"
+                f"Evidence: {str(getattr(verification, 'evidence', ''))[:300]}"
             )
             self.short_memory.add("tool", message)
         except Exception:
             pass
-
     def _has_successful_web_search(
         self,
         tool_history
@@ -870,8 +905,15 @@ If nothing reliable can be extracted:
                 entries.append(content)
         return entries
 
+    def _structured_verified_entries(self):
+        state = getattr(self, "execution_state", None)
+        if not isinstance(state, dict):
+            return []
+        entries = state.get("verified_tools", [])
+        return entries if isinstance(entries, list) else []
+
     def _direct_evidence_answer(self, message):
-        """Answer follow-up questions from verified local evidence only."""
+        """Answer follow-up questions from structured verified evidence only."""
         if not isinstance(message, str):
             return None
 
@@ -879,10 +921,7 @@ If nothing reliable can be extracted:
         if not text:
             return None
 
-        entries = self._verified_tool_entries()
-        if not entries:
-            return None
-
+        structured = list(reversed(self._structured_verified_entries()))
         asks_path = bool(re.search(
             r"\b(?:exact\s+path|path|where\s+(?:did|was)|location)\b",
             text,
@@ -895,61 +934,76 @@ If nothing reliable can be extracted:
             r"\b(?:what|which)\b.*\b(?:open|opened|launch|launched)\b",
             text,
         ))
-
-        latest = entries[-1]
-        search_entries = list(reversed(entries))
+        asks_actions = bool(re.search(
+            r"\b(?:what\s+did\s+you\s+do|what\s+happened|what\s+did\s+nova\s+do)\b",
+            text,
+        ))
 
         if asks_path:
-            paths = []
-            for entry in search_entries:
-                normalized_entry = re.sub(
-                    r"\\n(?=(?:Tool|Input|Result|Verification|Evidence|Message|Path|Screenshot|Screenshot saved|Saved to)\\b)",
-                    "\n",
-                    entry,
+            for entry in structured:
+                result = str(entry.get("result", ""))
+                verification = entry.get("verification", {})
+                evidence = str(
+                    verification.get("evidence", "")
+                    if isinstance(verification, dict)
+                    else ""
                 )
-                for line in normalized_entry.splitlines():
-                    value = None
-                    if line.startswith("Path:"):
-                        value = line.split(":", 1)[1].strip()
-                    elif line.startswith("Screenshot:"):
-                        value = line.split(":", 1)[1].strip()
-                    elif line.startswith("Screenshot saved:"):
-                        value = line.split(":", 1)[1].strip()
-                    elif line.startswith("Saved to:"):
-                        value = line.split(":", 1)[1].strip()
+                inputs = entry.get("input", {})
+                candidates = []
+                if isinstance(inputs, dict):
+                    for key in ("path", "saved_path", "screenshot_path"):
+                        value = inputs.get(key)
+                        if isinstance(value, str) and value.strip():
+                            candidates.append(value.strip())
 
-                    if value and (
-                        re.match(r"^[A-Za-z]:\\+", value)
-                        or value.startswith("/")
-                    ):
-                        if value not in paths:
-                            paths.append(value)
+                combined = result + "\n" + evidence
+                for line in combined.splitlines():
+                    for label in ("Path:", "Screenshot:", "Screenshot saved:", "Saved to:", "Location:"):
+                        if line.startswith(label):
+                            value = line.split(":", 1)[1].strip()
+                            if value:
+                                candidates.append(value)
 
-            if paths:
-                return "Exact path: " + paths[0]
+                for value in candidates:
+                    if re.match(r"^[A-Za-z]:\\+", value) or value.startswith("/"):
+                        return "Exact path: " + value
 
         if asks_typed:
-            for entry in search_entries:
-                match = re.search(r"Typed:\s*(.+)", entry)
+            for entry in structured:
+                inputs = entry.get("input", {})
+                if isinstance(inputs, dict):
+                    value = inputs.get("text")
+                    if isinstance(value, str) and value:
+                        return "Typed: " + repr(value)
+                match = re.search(r"Typed:\s*(.+)", str(entry.get("result", "")))
                 if match:
                     return "Typed: " + match.group(1).strip()
 
         if asks_opened:
-            for entry in search_entries:
-                match = re.search(r"Opened:\s*(.+)", entry)
+            for entry in structured:
+                inputs = entry.get("input", {})
+                if isinstance(inputs, dict):
+                    value = inputs.get("app")
+                    if isinstance(value, str) and value:
+                        return "Opened: " + value
+                match = re.search(r"Opened:\s*(.+)", str(entry.get("result", "")))
                 if match:
                     return "Opened: " + match.group(1).strip()
 
-        if re.search(
-            r"\b(?:did\s+(?:it|that)|was\s+it|is\s+it)\s+(?:successful|successful\?|done|completed)",
-            text,
-        ):
-            for entry in search_entries:
-                if "Tool success: True" in entry:
-                    return "Yes. The latest recorded tool action was verified successfully."
+        if asks_actions and structured:
+            summaries = []
+            for entry in structured[:6]:
+                verification = entry.get("verification", {})
+                status = str(verification.get("status", "")) if isinstance(verification, dict) else ""
+                message_text = str(verification.get("message", "")) if isinstance(verification, dict) else ""
+                if status == "confirmed" and message_text:
+                    clean = re.sub(r"^[✓\s]+", "", message_text).strip()
+                    if clean and clean not in summaries:
+                        summaries.append(clean)
+            if summaries:
+                return "Verified actions: " + "; ".join(summaries)
 
         return None
-
     def _build_verified_task_response(self, tool_history):
         """Build a final computer-task response strictly from verified evidence."""
         if not tool_history:
@@ -1243,6 +1297,15 @@ If nothing reliable can be extracted:
                 goal=message,
                 context=self.short_memory.get()
             )
+            state = getattr(self, "execution_state", None)
+            if not isinstance(state, dict):
+                state = {
+                    "last_plan": None,
+                    "verified_tools": [],
+                    "last_verified": None,
+                }
+                self.execution_state = state
+            state["last_plan"] = plan
 
             if not plan.get("steps"):
                 plan = {
