@@ -265,7 +265,7 @@ class CoreTests(unittest.TestCase):
             "with a simple PyTorch neural network"
         )
 
-        self.assertIn("created successfully", response)
+        self.assertIn("file confirmed", response)
         self.assertEqual(len(core.tools.calls), 1)
         self.assertEqual(core.router.generate_calls, 1)
         self.assertEqual(core.planner.replan_calls, 0)
