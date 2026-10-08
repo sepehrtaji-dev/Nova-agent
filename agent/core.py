@@ -992,8 +992,8 @@ If nothing reliable can be extracted:
                 if match:
                     return "Typed: " + match.group(1).strip()
 
-        if asks_opened:
-            for entry in structured:
+
+        if asks_opened:            for entry in structured:
                 inputs = entry.get("input", {})
                 if isinstance(inputs, dict):
                     value = inputs.get("app")
