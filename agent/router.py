@@ -336,9 +336,9 @@ class ToolRouter:
         if not isinstance(tool_history, str) or not tool_history.strip():
             return False
         return re.search(
-            r"Verification:\s*CONFIRMED\b",
-            tool_history,
-            flags=re.IGNORECASE,
+            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
+            tool_history.replace("\\n", "\n"),
+            flags=re.IGNORECASE | re.MULTILINE,
         ) is not None
 
     def _get_tool_names(self, allowed_tools=None):
