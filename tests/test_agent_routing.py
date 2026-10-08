@@ -415,6 +415,26 @@ class RouterTests(unittest.TestCase):
         history = "Tool: desktop\nResult: STATUS: SUCCESS\nOpened: imaginary"
         self.assertFalse(self.router._has_successful_tool(history))
 
+    def test_terminal_location_matches_runtime_contract(self):
+        self.assertTrue(
+            self.router._validate_basic_tool_input(
+                "terminal",
+                {"command": "echo ok", "location": "projects"},
+            )
+        )
+        self.assertTrue(
+            self.router._validate_basic_tool_input(
+                "terminal",
+                {"command": "echo ok", "location": "desktop"},
+            )
+        )
+        self.assertFalse(
+            self.router._validate_basic_tool_input(
+                "terminal",
+                {"command": "echo ok", "location": "system"},
+            )
+        )
+
     def test_failed_git_history_is_not_success(self):
         history = (
             "Tool: git\n"
