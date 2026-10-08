@@ -810,7 +810,7 @@ class ToolRouter:
         # Keyboard text input
         if _re.search(r"\b(?:type|write)\b", msg):
             text_match = _re.search(
-                r"\b(?:type|write)\s+(?:this\s+)?(?:text\s+)?["'](.+?)["']\s*$",
+                r"""\b(?:type|write)\s+(?:this\s+)?(?:text\s+)?["'](.+?)["']\s*$""",
                 str(message or "").strip(),
                 flags=_re.IGNORECASE,
             )
