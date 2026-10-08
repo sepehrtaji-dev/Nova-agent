@@ -396,7 +396,7 @@ class RouterTests(unittest.TestCase):
         decision = router.decide(
             message="do the planned task",
             task_type="computer",
-            plan="Goal: read notes.txt\n1. [pending] read_file: read notes.txt in projects",
+            plan="Goal: inspect a requested resource\n1. [pending] read_file: inspect the requested resource",
             allowed_tools=["read_file", "terminal"],
         )
         self.assertEqual(decision["action"], "retry")
