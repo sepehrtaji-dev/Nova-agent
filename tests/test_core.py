@@ -49,11 +49,11 @@ class FakeTools:
     def __init__(self):
         self.calls = []
         self.tools = {
-            "write_file": {"capability": "pc"},
-            "read_file": {"capability": "pc"},
-            "desktop": {"capability": "pc"},
-            "web_search": {"capability": "web"},
-            "git": {"capability": "git"},
+            "write_file": {"capability": "pc", "description": "Create or overwrite a file"},
+            "read_file": {"capability": "pc", "description": "Read the contents of a file"},
+            "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+            "web_search": {"capability": "web", "description": "Search the public web"},
+            "git": {"capability": "git", "description": "Run git operations"},
         }
 
     def exists(self, name):
@@ -213,8 +213,8 @@ class CoreTests(unittest.TestCase):
         core.access = {"web": True, "git": True, "pc": True}
         core.tools = type("Registry", (), {
             "tools": {
-                "read_file": {"capability": "pc"},
-                "desktop": {"capability": "pc"},
+                "read_file": {"capability": "pc", "description": "Read the contents of a file"},
+                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
             }
         })()
 
@@ -228,7 +228,7 @@ class CoreTests(unittest.TestCase):
         core.access = {"web": True, "git": True, "pc": True}
         core.tools = type("Registry", (), {
             "tools": {
-                "desktop": {"capability": "pc"},
+                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
             }
         })()
 
