@@ -20,6 +20,7 @@ class FakeTools:
         self.tools = {
             "write_file": {"description": "Create or overwrite a file on disk", "function": lambda x: None},
             "read_file": {"description": "Read the contents of a text file from the projects folder or desktop", "function": lambda x: None},
+            "find_files": {"description": "Find files recursively with optional filename/time filters", "function": lambda x: None},
             "list_files": {"description": "List files and directories in the projects folder or desktop", "function": lambda x: None},
             "create_directory": {"description": "Create a directory", "function": lambda x: None},
             "terminal": {"description": "Execute terminal shell commands", "function": lambda x: None},
