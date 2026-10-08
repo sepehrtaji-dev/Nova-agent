@@ -1516,6 +1516,50 @@ If the entire task is completed:
 Return JSON only.
 """
 
+    def _verified_web_document(self, tool_history):
+        if not isinstance(tool_history, str):
+            return None
+
+        blocks = re.findall(
+            r"TOOL_NAME:\s*web_search\s*\n"
+            r".*?BEGIN_RAW_TOOL_RESULT\n"
+            r"(.*?)"
+            r"\nEND_RAW_TOOL_RESULT\n"
+            r"VERIFIER_STATUS:\s*CONFIRMED",
+            tool_history,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        if not blocks:
+            return None
+
+        entries = []
+        for raw in blocks:
+            matches = re.findall(
+                r"\[\d+\]\s*\n"
+                r"Title:\s*(.*?)\n"
+                r"URL:\s*(.*?)\n"
+                r"Snippet:\s*(.*?)(?=\n\n\[\d+\]|\Z)",
+                raw,
+                flags=re.DOTALL,
+            )
+            for title, url, snippet in matches:
+                title = re.sub(r"\s+", " ", title).strip()
+                url = re.sub(r"\s+", " ", url).strip()
+                snippet = re.sub(r"\s+", " ", snippet).strip()
+                entries.append((title, url, snippet))
+
+        if not entries:
+            return None
+
+        lines = ["Verified search evidence:"]
+        for index, (title, url, snippet) in enumerate(entries[:6], start=1):
+            lines.append(f"{index}. {title}")
+            if snippet:
+                lines.append(f"   {snippet}")
+            if url:
+                lines.append(f"   Source: {url}")
+        return "\n".join(lines)
+
     def generate_file_content(
         self,
         user_request,
@@ -1542,6 +1586,18 @@ Return JSON only.
         }
         is_text_document = extension in {"txt", "md", "markdown"}
         language = code_languages.get(extension, "source")
+
+        if re.search(r":\s*$", str(user_request or "").strip()):
+            self._last_file_generation_error = (
+                "The file request ends with an empty 'containing:' clause; "
+                "no content was supplied."
+            )
+            return None
+
+        if is_text_document:
+            verified_document = self._verified_web_document(tool_history)
+            if verified_document is not None:
+                return verified_document
 
         bounded_history = str(tool_history or "")
         if len(bounded_history) > 14000:
