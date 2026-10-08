@@ -40,6 +40,17 @@ def load_tools():
     )
 
     registry.register(
+        "find_files",
+        (
+            "Find files recursively with optional filename pattern and "
+            "created/modified time filters. Input: {path, location, pattern, "
+            "recursive, created_within_hours, modified_within_hours}."
+        ),
+        filesystem.find_files,
+        capability="pc"
+    )
+
+    registry.register(
         "write_file",
         (
             "Create or overwrite a file on disk. "
