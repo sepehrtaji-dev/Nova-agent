@@ -1960,7 +1960,7 @@ Nova must choose another useful action.
 
             return response
 
-        if task_type == "computer":
+        if task_type == "computer" and not successful_web_search:
             response = self._build_verified_task_response(
                 tool_history
             )
