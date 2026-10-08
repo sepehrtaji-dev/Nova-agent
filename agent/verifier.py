@@ -14,6 +14,7 @@ Verification results:
 import json
 import os
 import subprocess
+import re
 
 
 class VerificationResult:
@@ -106,63 +107,71 @@ class Verifier:
     # ── write_file ────────────────────────────────────────────────────────────
 
     def _verify_write_file(self, tool_input, tool_result):
-        """
-        1. Check tool result contains FILE_CREATED.
-        2. Re-read the file via the read_file tool and confirm content exists.
-        3. Check OS file size > 0.
-        """
-        path     = tool_input.get("path", "")
-        location = tool_input.get("location", "projects")
-
-        # Step 1: tool claimed success?
+        """Verify a write against the actual filesystem state and requested content."""
+        path = str(tool_input.get("path", "")).strip()
+        expected = tool_input.get("content")
         if "FILE_CREATED" not in tool_result:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
-                message=f"write_file did not return FILE_CREATED for '{path}'."
+                message=f"write_file did not return FILE_CREATED for '{path}'.",
             )
 
-        # Extract the actual path from the tool result
         actual_path = None
         for line in tool_result.splitlines():
             if line.startswith("Location:"):
-                actual_path = line.replace("Location:", "").strip()
+                actual_path = line.replace("Location:", "", 1).strip()
                 break
 
         if not actual_path:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:300],
-                message=f"write_file succeeded but actual path not found in result."
+                message="write_file succeeded but reported no concrete path.",
             )
 
-        # Step 2: OS-level check — file must exist and have content
         if not os.path.isfile(actual_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"os.path.isfile({actual_path!r}) = False",
-                message=f"File does not exist on disk: {actual_path}"
+                message=f"File does not exist on disk: {actual_path}",
             )
 
         size = os.path.getsize(actual_path)
-        if size == 0:
+        if isinstance(expected, str):
+            try:
+                with open(actual_path, "r", encoding="utf-8") as handle:
+                    actual = handle.read()
+            except Exception as exc:
+                return VerificationResult(
+                    status="unverifiable",
+                    evidence=str(exc),
+                    message=f"Could not read written file for verification: {actual_path}",
+                )
+            if actual != expected:
+                return VerificationResult(
+                    status="failed",
+                    evidence=f"Expected {len(expected)} chars, found {len(actual)} chars.",
+                    message=f"Written file content does not match the requested content: {actual_path}",
+                )
+        elif size == 0:
             return VerificationResult(
                 status="failed",
-                evidence=f"File size = 0 bytes: {actual_path}",
-                message=f"File was created but is empty: {actual_path}"
+                evidence=f"File size = {size} bytes",
+                message=f"File was created but is empty: {actual_path}",
             )
 
-        # Step 3: read first 200 chars as evidence
+        preview = ""
         try:
-            with open(actual_path, "r", encoding="utf-8", errors="replace") as f:
-                preview = f.read(200)
-        except Exception as e:
-            preview = f"(could not read: {e})"
+            with open(actual_path, "r", encoding="utf-8", errors="replace") as handle:
+                preview = handle.read(200)
+        except Exception as exc:
+            preview = f"(could not read: {exc})"
 
         return VerificationResult(
             status="confirmed",
             evidence=f"Path: {actual_path}\nSize: {size} bytes\nPreview: {preview!r}",
-            message=f"✓ File confirmed on disk: {actual_path} ({size} bytes)"
+            message=f"✓ File confirmed on disk: {actual_path} ({size} bytes)",
         )
 
     # ── read_file ─────────────────────────────────────────────────────────────
@@ -319,48 +328,56 @@ class Verifier:
     # ── terminal ──────────────────────────────────────────────────────────────
 
     def _verify_terminal(self, tool_input, tool_result):
-        """
-        1. Check STATUS: SUCCESS in result.
-        2. Check exit code = 0.
-        3. Capture stdout as evidence.
-        """
-        if "STATUS: ERROR" in tool_result:
-            # Extract stderr for useful feedback
-            stderr = ""
-            for line in tool_result.splitlines():
-                if line.startswith("STDERR:"):
-                    stderr = line
-                    break
+        """Verify terminal success from an explicit zero exit code."""
+        exit_match = re.search(r"^Exit code:\s*(-?\d+)\s*$", tool_result, flags=re.MULTILINE)
+        status_error = "STATUS: ERROR" in tool_result
+        status_success = "STATUS: SUCCESS" in tool_result
+
+        if status_error:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:500],
-                message=f"Terminal command failed. {stderr}"
+                message="Terminal command reported a non-success result.",
             )
 
-        if "STATUS: SUCCESS" not in tool_result:
+        if not status_success:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:300],
-                message="Terminal result has no STATUS marker."
+                message="Terminal result has no STATUS: SUCCESS marker.",
             )
 
-        # Extract stdout as evidence
+        if exit_match is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:400],
+                message="Terminal result did not expose an exit code.",
+            )
+
+        exit_code = int(exit_match.group(1))
+        if exit_code != 0:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Exit code: {exit_code}\n{tool_result[:300]}",
+                message=f"Terminal command failed with exit code {exit_code}.",
+            )
+
         stdout = ""
         capture = False
         for line in tool_result.splitlines():
             if line.startswith("STDOUT:"):
                 capture = True
                 continue
+            if capture and (line.startswith("STDERR:") or line.startswith("STATUS:")):
+                break
             if capture:
-                if line.startswith("STDERR:") or line.startswith("STATUS:"):
-                    break
                 stdout += line + "\n"
 
-        command = tool_input.get("command", "(unknown)")
+        command = str(tool_input.get("command", "(unknown)"))
         return VerificationResult(
             status="confirmed",
-            evidence=stdout[:300] if stdout else tool_result[:300],
-            message=f"✓ Command succeeded: {command[:80]}"
+            evidence=f"Exit code: 0\n{stdout[:260]}".strip(),
+            message=f"✓ Command exited successfully: {command[:80]}",
         )
 
     # ── git ───────────────────────────────────────────────────────────────────
@@ -385,7 +402,21 @@ class Verifier:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:300],
-                message=f"git {action} has no STATUS marker."
+                message=f"git {action} has no STATUS marker.",
+            )
+
+        exit_match = re.search(r"^Exit code:\s*(-?\d+)\s*$", tool_result, flags=re.MULTILINE)
+        if exit_match is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message=f"git {action} did not expose an exit code.",
+            )
+        if int(exit_match.group(1)) != 0:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message=f"git {action} reported a non-zero exit code.",
             )
 
         # Action-specific checks
@@ -449,24 +480,51 @@ class Verifier:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
-                message=f"edit_file did not return FILE_EDITED."
+                message="edit_file did not return FILE_EDITED.",
             )
         actual_path = None
         for line in tool_result.splitlines():
             if line.startswith("Location:"):
-                actual_path = line.replace("Location:", "").strip()
+                actual_path = line.replace("Location:", "", 1).strip()
                 break
-        if actual_path and os.path.isfile(actual_path):
-            size = os.path.getsize(actual_path)
+        if not actual_path or not os.path.isfile(actual_path):
             return VerificationResult(
-                status="confirmed",
-                evidence=f"Path: {actual_path}\nSize: {size} bytes",
-                message=f"✓ File edit confirmed on disk: {actual_path}"
+                status="failed",
+                evidence=tool_result[:300],
+                message="edit_file reported success but the target file could not be confirmed on disk.",
             )
+
+        old_value = tool_input.get("old")
+        new_value = tool_input.get("new", "")
+        try:
+            with open(actual_path, "r", encoding="utf-8", errors="replace") as handle:
+                content = handle.read()
+        except Exception as exc:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=str(exc),
+                message=f"Could not reread edited file: {actual_path}",
+            )
+
+        if isinstance(old_value, str) and old_value in content:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Old text is still present in {actual_path}.",
+                message="edit_file reported success but the old text remains.",
+            )
+
+        if isinstance(new_value, str) and new_value and new_value not in content:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Replacement text was not found in {actual_path}.",
+                message="edit_file reported success but the replacement text is missing.",
+            )
+
+        size = os.path.getsize(actual_path)
         return VerificationResult(
-            status="failed",
-            evidence=tool_result[:300],
-            message="edit_file reported success but the target file could not be confirmed on disk."
+            status="confirmed",
+            evidence=f"Path: {actual_path}\nSize: {size} bytes",
+            message=f"✓ File edit confirmed on disk: {actual_path}",
         )
 
     # ── delete_file ───────────────────────────────────────────────────────────
@@ -476,23 +534,29 @@ class Verifier:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
-                message="delete_file did not return FILE_DELETED."
+                message="delete_file did not return FILE_DELETED.",
             )
         actual_path = None
         for line in tool_result.splitlines():
             if line.startswith("Location:"):
-                actual_path = line.replace("Location:", "").strip()
+                actual_path = line.replace("Location:", "", 1).strip()
                 break
-        if actual_path and os.path.exists(actual_path):
+        if not actual_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="delete_file succeeded but reported no concrete path.",
+            )
+        if os.path.exists(actual_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"File still exists: {actual_path}",
-                message=f"✗ delete_file claimed success but file still exists: {actual_path}"
+                message=f"✗ delete_file claimed success but the file still exists: {actual_path}",
             )
         return VerificationResult(
             status="confirmed",
-            evidence=tool_result[:300],
-            message=f"✓ File deletion confirmed: {actual_path}"
+            evidence=f"Confirmed absent: {actual_path}",
+            message=f"✓ File deletion confirmed: {actual_path}",
         )
 
 
