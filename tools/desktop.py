@@ -475,15 +475,18 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
 
         try:
             if is_windows:
+                escaped_title = title.replace('"', '\"')
+                filter_value = f'WINDOWTITLE eq *{escaped_title}*'
                 result = subprocess.run(
-                    ["taskkill", "/F", "/FI", f"WINDOWTITLE eq *{title}*"],
+                    ["taskkill", "/F", "/FI", filter_value],
                     capture_output=True, text=True
                 )
                 success = result.returncode == 0
             elif is_mac:
+                escaped_title = title.replace("\\", "\\\\").replace('"', '\\"')
+                script = f'tell application "{escaped_title}" to quit'
                 result = subprocess.run(
-                    ["osascript", "-e",
-                     f'tell application "{title}" to quit'],
+                    ["osascript", "-e", script],
                     capture_output=True, text=True
                 )
                 success = result.returncode == 0
@@ -577,18 +580,25 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
         try:
             if is_windows:
                 script = (
-                    f'Add-Type -AssemblyName Microsoft.VisualBasic; '
-                    f'[Microsoft.VisualBasic.Interaction]::AppActivate("{title}")'
+                    '$title = $env:NOVA_WINDOW_TITLE; '
+                    'Add-Type -AssemblyName Microsoft.VisualBasic; '
+                    '[Microsoft.VisualBasic.Interaction]::AppActivate($title)'
                 )
+                env = os.environ.copy()
+                env["NOVA_WINDOW_TITLE"] = title
                 result = subprocess.run(
-                    ["powershell", "-Command", script],
-                    capture_output=True, text=True, timeout=10
+                    ["powershell", "-NoProfile", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    env=env,
                 )
                 success = result.returncode == 0
             elif is_mac:
+                escaped_title = title.replace("\\", "\\\\").replace('"', '\\"')
+                script = f'tell application "{escaped_title}" to activate'
                 result = subprocess.run(
-                    ["osascript", "-e",
-                     f'tell application "{title}" to activate'],
+                    ["osascript", "-e", script],
                     capture_output=True, text=True, timeout=10
                 )
                 success = result.returncode == 0
