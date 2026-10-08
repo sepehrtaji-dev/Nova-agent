@@ -153,7 +153,21 @@ class NovaCore:
         ) is not None
 
     def _has_successful_tool(self, tool_history):
-        """Return True only for explicitly verifier-confirmed tool entries."""
+        """Return True only for verifier-confirmed entries."""
+        state = getattr(self, "execution_state", None)
+        if isinstance(state, dict):
+            verified = state.get("verified_tools", [])
+            if isinstance(verified, list):
+                for entry in verified:
+                    if not isinstance(entry, dict):
+                        continue
+                    verification = entry.get("verification", {})
+                    if (
+                        isinstance(verification, dict)
+                        and verification.get("status") == "confirmed"
+                    ):
+                        return True
+
         if isinstance(tool_history, str):
             return self._verified_success_line_matches(tool_history)
 
@@ -249,55 +263,33 @@ class NovaCore:
         self,
         tool_history
     ):
-        if not tool_history:
-            return False
-
-        if isinstance(tool_history, list):
-            for entry in tool_history:
-
-                if isinstance(entry, dict):
+        state = getattr(self, "execution_state", None)
+        if isinstance(state, dict):
+            verified = state.get("verified_tools", [])
+            if isinstance(verified, list):
+                for entry in verified:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("tool") != "web_search":
+                        continue
+                    verification = entry.get("verification", {})
                     if (
-                        entry.get("tool")
-                        == "web_search"
-                        and
-                        entry.get("success")
-                        is True
+                        isinstance(verification, dict)
+                        and verification.get("status") == "confirmed"
                     ):
                         return True
 
-                    if (
-                        entry.get("tool")
-                        == "web_search"
-                    ):
-                        result = entry.get(
-                            "result",
-                            ""
-                        )
+        if isinstance(tool_history, str):
+            return bool(
+                re.search(
+                    r"^TOOL_NAME:\s*web_search\s*$[\s\S]*?"
+                    r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
+                    tool_history,
+                    flags=re.IGNORECASE | re.MULTILINE,
+                )
+            )
 
-                        if self._tool_succeeded(
-                            "web_search",
-                            result
-                        ):
-                            return True
-
-                elif isinstance(entry, str):
-                    if (
-                        "Tool: web_search"
-                        in entry
-                        and
-                        self._verified_success_line_matches(
-                            entry
-                        )
-                    ):
-                        return True
-
-        text = str(tool_history)
-
-        return (
-            "Tool: web_search" in text
-            and
-            self._verified_success_line_matches(text)
-        )
+        return False
 
     def _parse_tool_input(self, tool_input):
         if isinstance(tool_input, dict):
@@ -997,13 +989,17 @@ If nothing reliable can be extracted:
     def _build_verified_task_response(self, tool_history):
         if not tool_history:
             return "No verified computer action was completed."
-        blocks = [b for b in tool_history if "Verification: CONFIRMED" in b]
+        blocks = [b for b in tool_history if re.search(
+            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
+            b,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )]
         if not blocks:
             return "No computer action could be verified as successful."
         summaries = []
         paths = []
         for block in blocks:
-            msg_match = re.search(r"Message:\s*(.+)", block)
+            msg_match = re.search(r"VERIFIER_MESSAGE:\s*(.+)", block)
             if msg_match:
                 summary = re.sub(r"^[\u2713\s]+", "", msg_match.group(1).strip())
                 if summary and summary not in summaries:
@@ -1813,14 +1809,15 @@ Nova must choose another useful action.
             )
 
             tool_history.append(
-                f"Step: {step + 1}\n"
-                f"Tool: {tool_name}\n"
-                f"Input:\n{tool_input}\n"
-                f"Result:\n{result}\n"
-                f"Verification: {verification.status.upper()}\n"
-                f"Evidence: {verification.evidence[:300]}\n"
-                f"Message: {verification.message}\n"
-                f"Tool success: {succeeded}"
+                f"STEP: {step + 1}\n"
+                f"TOOL_NAME: {tool_name}\n"
+                f"INPUT:\n{tool_input}\n"
+                f"BEGIN_RAW_TOOL_RESULT\n"
+                f"{result}\n"
+                f"END_RAW_TOOL_RESULT\n"
+                f"VERIFIER_STATUS: {verification.status.upper()}\n"
+                f"VERIFIER_EVIDENCE: {verification.evidence[:300]}\n"
+                f"VERIFIER_MESSAGE: {verification.message}\n"
             )
 
             if succeeded:
