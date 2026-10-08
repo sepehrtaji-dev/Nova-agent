@@ -131,12 +131,18 @@ class GitTool:
     }
 
     def _is_blocked(self, args):
-        cmd = " ".join(str(arg) for arg in args).lower()
-        if re.search(r"\bgit\s+push\b.*(?:^|\s)(?:--force(?:-with-lease)?|-f)(?:\s|$)", cmd):
-            return True, "force push"
+        normalized = [str(arg).strip().lower() for arg in args]
+        command = " ".join(normalized)
+
+        if normalized and normalized[0] == "push":
+            force_flags = {"--force", "--force-with-lease", "-f"}
+            if any(flag in force_flags for flag in normalized[1:]):
+                return True, "force push"
+
         for blocked in self.BLOCKED:
-            if blocked in cmd:
+            if blocked in command:
                 return True, blocked
+
         return False, None
 
     def _check_gh_cli(self):
