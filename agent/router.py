@@ -1999,7 +1999,11 @@ Return JSON only.
 
                 if validated_function_call:
 
-                    if allowed_tools is not None and validated_function_call.get("tool") not in set(allowed_tools):
+                    if pending_tool is not None and validated_function_call.get("tool") != pending_tool:
+                        validated_function_call = None
+                    elif search_requested and validated_function_call.get("tool") != "web_search":
+                        validated_function_call = None
+                    elif allowed_tools is not None and validated_function_call.get("tool") not in set(allowed_tools):
                         validated_function_call = None
                     else:
                         self._remember_file_generation(
@@ -2082,7 +2086,11 @@ Return JSON only.
                 )
 
                 if validated_function_call:
-                    if (
+                    if pending_tool is not None and validated_function_call.get("tool") != pending_tool:
+                        validated_function_call = None
+                    elif search_requested and validated_function_call.get("tool") != "web_search":
+                        validated_function_call = None
+                    elif (
                         allowed_tools is not None
                         and validated_function_call.get("tool") not in set(allowed_tools)
                     ):
