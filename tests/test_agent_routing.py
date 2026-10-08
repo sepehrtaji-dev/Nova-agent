@@ -301,6 +301,18 @@ class RouterTests(unittest.TestCase):
     def test_explicit_search_is_computer(self):
         self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
 
+    def test_address_bar_typing_is_computer(self):
+        message = "type cs2 game in the address bar"
+        self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.assertEqual(self.router.classify_task(message), "computer")
+        self.assertEqual(self.brain.calls, 0)
+
+    def test_search_box_typing_is_computer(self):
+        message = "type hello in the search box"
+        self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.assertEqual(self.router.classify_task(message), "computer")
+        self.assertEqual(self.brain.calls, 0)
+
     def test_plan_preserves_filename_case(self):
         plan = (
             "Goal: create file\n"
