@@ -96,30 +96,34 @@ class MemoryExtractor:
             "value": value
         }
 
-    def _validate(self, data):
+    def _validate(self, data, source_text=""):
         if not isinstance(data, dict):
-            return {
-                "memories": []
-            }
+            return {"memories": []}
 
         memories = data.get("memories", [])
-
         if not isinstance(memories, list):
-            return {
-                "memories": []
-            }
+            return {"memories": []}
 
+        source = str(source_text or "").casefold()
         valid_memories = []
 
         for item in memories:
             normalized = self._normalize_memory(item)
+            if normalized is None:
+                continue
 
-            if normalized is not None:
-                valid_memories.append(normalized)
+            value = str(normalized["value"]).strip()
+            if not value:
+                continue
 
-        return {
-            "memories": valid_memories
-        }
+            # A memory is trusted only when the value is explicitly present
+            # in the user's own message. This blocks model-invented facts.
+            if value.casefold() not in source:
+                continue
+
+            valid_memories.append(normalized)
+
+        return {"memories": valid_memories}
 
     def should_extract(self, text):
         if not isinstance(text, str):
@@ -213,7 +217,7 @@ USER MESSAGE:
 
             data = self._extract_json(response)
 
-            return self._validate(data)
+            return self._validate(data, source_text=text)
 
         except Exception:
             return {
