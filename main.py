@@ -16,6 +16,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from agent.core import NovaCore
+from utils.math_parser import format_response_math
 
 
 theme = Theme(
@@ -192,6 +193,8 @@ def render_nova(message: str, elapsed: float | None = None):
         label.append(f"  ·  {elapsed:.2f}s", style="dim")
 
     console.print(label)
+
+    message = format_response_math(message)
 
     try:
         body = Markdown(message)
