@@ -731,17 +731,140 @@ class ToolRouter:
         return bool(self._desktop_intent.search(message))
 
     def _force_desktop_decision(self, message):
-        """Build a desktop tool decision directly from message intent."""
+        """Build a deterministic desktop tool decision directly from user text."""
         import re as _re
-        msg = message.lower()
+
+        msg = re.sub(r"\s+", " ", str(message or "").strip().lower())
+
+        def _coords():
+            match = _re.search(
+                r"\b(?:at|to|on)\s*\(?\s*(-?\d+)\s*[,x]\s*(-?\d+)\s*\)?",
+                msg,
+                flags=_re.IGNORECASE,
+            )
+            if not match:
+                match = _re.search(
+                    r"\b(-?\d+)\s*[,x]\s*(-?\d+)\b",
+                    msg,
+                    flags=_re.IGNORECASE,
+                )
+            if not match:
+                return None
+            return int(match.group(1)), int(match.group(2))
 
         # Screenshot
-        if any(w in msg for w in ["screenshot", "capture screen", "take a screenshot"]):
+        if _re.search(r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen)\b", msg):
             return {
                 "action": "tool",
                 "task_type": "computer",
                 "tool": "desktop",
-                "input": json.dumps({"action": "screenshot"})
+                "input": json.dumps({"action": "screenshot"}),
+            }
+
+        # Mouse click
+        if _re.search(r"\b(?:click|double[- ]click|right[- ]click|middle[- ]click)\b", msg):
+            coords = _coords()
+            if coords is None:
+                return None
+            x, y = coords
+            if "right" in msg:
+                button = "right"
+            elif "middle" in msg:
+                button = "middle"
+            else:
+                button = "left"
+            clicks = 2 if "double" in msg else 1
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({
+                    "action": "click",
+                    "x": x,
+                    "y": y,
+                    "button": button,
+                    "clicks": clicks,
+                }),
+            }
+
+        # Mouse move
+        if _re.search(r"\b(?:move|move\s+the)\b.*\bmouse\b|\bmouse\b.*\bmove\b", msg):
+            coords = _coords()
+            if coords is None:
+                return None
+            x, y = coords
+            duration_match = _re.search(r"\b(?:in|over|for)\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds)\b", msg)
+            duration = float(duration_match.group(1)) if duration_match else 0.3
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps({
+                    "action": "move",
+                    "x": x,
+                    "y": y,
+                    "duration": duration,
+                }),
+            }
+
+        # Keyboard text input
+        if _re.search(r"\b(?:type|write)\b", msg):
+            text_match = _re.search(
+                r"\b(?:type|write)\s+(?:this\s+)?(?:text\s+)?["'](.+?)["']\s*$",
+                str(message or "").strip(),
+                flags=_re.IGNORECASE,
+            )
+            if text_match:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "desktop",
+                    "input": json.dumps({
+                        "action": "type",
+                        "text": text_match.group(1),
+                    }, ensure_ascii=False),
+                }
+
+        # Keyboard key / shortcut
+        if _re.search(r"\b(?:press|hit)\b", msg):
+            key_match = _re.search(
+                r"\b(?:press|hit)\s+(?:the\s+)?(?:key\s+)?([a-z0-9]+(?:\+[a-z0-9]+)*)\s*$",
+                str(message or "").strip(),
+                flags=_re.IGNORECASE,
+            )
+            if key_match:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "desktop",
+                    "input": json.dumps({
+                        "action": "key",
+                        "key": key_match.group(1),
+                    }),
+                }
+
+        # Scroll
+        if _re.search(r"\bscroll\b", msg):
+            amount = 3
+            amount_match = _re.search(r"\b(?:by|with)\s+(\d+)\b", msg)
+            if amount_match:
+                amount = int(amount_match.group(1))
+            if _re.search(r"\b(?:down|lower)\b", msg):
+                amount = -abs(amount)
+            else:
+                amount = abs(amount)
+            coords = _coords()
+            payload = {
+                "action": "scroll",
+                "amount": amount,
+            }
+            if coords is not None:
+                payload["x"], payload["y"] = coords
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": "desktop",
+                "input": json.dumps(payload),
             }
 
         # List windows
@@ -750,40 +873,46 @@ class ToolRouter:
                 "action": "tool",
                 "task_type": "computer",
                 "tool": "desktop",
-                "input": json.dumps({"action": "get_windows"})
+                "input": json.dumps({"action": "get_windows"}),
             }
 
-        # Close app
-        close_pat = r'close' + r'\s+' + r'(?:the\s+)?' + r'(\w[\w\s]*?)' + r'(?:\s+app)?\s*$'
-        close_match = _re.search(close_pat, msg)
+        # Close app/window
+        close_match = _re.search(
+            r"\bclose\s+(?:the\s+)?(?:app\s+)?(.+?)(?:\s+app)?$",
+            msg,
+            flags=_re.IGNORECASE,
+        )
         if close_match:
-            title = close_match.group(1).strip()
             return {
                 "action": "tool",
                 "task_type": "computer",
                 "tool": "desktop",
-                "input": json.dumps({"action": "close_app", "title": title})
+                "input": json.dumps({
+                    "action": "close_app",
+                    "title": close_match.group(1).strip(),
+                }),
             }
 
         # Open app
-        open_pat = r'open' + r'\s+' + r'(?:the\s+|app\s+)?' + r'(\w[\w\s]*?)' + r'(?:\s+app)?\s*$'
-        open_match = _re.search(open_pat, msg)
+        open_match = _re.search(
+            r"\b(?:open|launch)\s+(?:the\s+)?(?:app\s+)?(.+?)(?:\s+app)?$",
+            msg,
+            flags=_re.IGNORECASE,
+        )
         if open_match:
             app = open_match.group(1).strip()
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": "desktop",
-                "input": json.dumps({"action": "open_app", "app": app})
-            }
+            if app not in {"file", "folder", "directory"}:
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "desktop",
+                    "input": json.dumps({
+                        "action": "open_app",
+                        "app": app,
+                    }),
+                }
 
-        # Default: screenshot
-        return {
-            "action": "tool",
-            "task_type": "computer",
-            "tool": "desktop",
-            "input": json.dumps({"action": "screenshot"})
-        }
+        return None
 
 
     _search_intent_pattern = re.compile(
@@ -843,8 +972,17 @@ class ToolRouter:
         if not text:
             return False
 
-        # Questions that start with how/what/why are usually conversational.
+        # Questions that explicitly ask Nova to control the PC are computer tasks.
         if re.match(r"^(?:how|what|why|can|could|would)\b", text):
+            if re.search(
+                r"\b(?:mouse|keyboard|screen|window|app|application)\b",
+                text,
+            ) and re.search(
+                r"\b(?:click|move|type|press|scroll|open|close|focus|control|take|capture)\b",
+                text,
+            ):
+                return True
+
             return bool(re.search(
                 r"\b(?:for me|on my (?:pc|computer)|in (?:the )?(?:projects|desktop) folder|to (?:create|write|run|read|edit|delete|modify))\b",
                 text,
@@ -1564,6 +1702,14 @@ Return JSON only.
             )
         )
 
+        # Real OS control is deterministic: do not ask the LLM to invent
+        # coordinates, key names, or desktop actions.
+        if self._has_desktop_intent(message) and not has_successful_tool:
+            desktop_decision = self._force_desktop_decision(message)
+            if desktop_decision:
+                if allowed_tools is None or "desktop" in set(allowed_tools):
+                    return desktop_decision
+
         # Deterministic execution for an explicit pending plan step.
         deterministic = self._deterministic_plan_decision(
             message=message,
@@ -1615,12 +1761,6 @@ Return JSON only.
                 return response_decision
 
         if task_type == "computer":
-
-            # Force desktop tool for OS control requests
-            if self._has_desktop_intent(message) and not has_successful_tool:
-                desktop_decision = self._force_desktop_decision(message)
-                if desktop_decision:
-                    return desktop_decision
 
             search_requested = (
                 self._has_search_intent(
