@@ -264,6 +264,51 @@ class Planner:
             ],
         }
 
+    def _deterministic_file_history_plan(self, goal):
+        if not isinstance(goal, str):
+            return None
+
+        text = re.sub(r"\s+", " ", goal.strip())
+        if not text or self.tools is None or not self.tools.exists("find_files"):
+            return None
+
+        asks_files = re.search(
+            r"\b(?:what|which|find|list|show)\b[^.\n]{0,100}\bfiles?\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        asks_recent = re.search(
+            r"\b(?:last|past|recent|recently|today|yesterday|within)\b[^.\n]{0,60}"
+            r"\b(?:hours?|day|days?|recently)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        asks_created = re.search(
+            r"\b(?:created|made|written|saved)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        asks_modified = re.search(
+            r"\b(?:modified|changed|updated|edited)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if not asks_files or not (asks_recent or asks_created or asks_modified):
+            return None
+
+        return {
+            "goal": goal,
+            "steps": [
+                {
+                    "id": 1,
+                    "description": f"find_files: inspect recent filesystem files for {text}",
+                    "status": "pending",
+                    "result": None,
+                }
+            ],
+        }
+
     def _deterministic_search_and_file_plan(self, goal):
         """Preserve both halves of a search + file request in execution order."""
         if not isinstance(goal, str):
@@ -497,6 +542,10 @@ class Planner:
                 "goal": "",
                 "steps": []
             }
+
+        deterministic_plan = self._deterministic_file_history_plan(goal)
+        if deterministic_plan is not None:
+            return deterministic_plan
 
         deterministic_plan = self._deterministic_search_and_file_plan(goal)
         if deterministic_plan is not None:
