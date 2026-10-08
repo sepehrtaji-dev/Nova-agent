@@ -1114,6 +1114,7 @@ class ToolRouter:
             ))
 
         patterns = [
+            r"\b(?:what|which|find|list|show)\b[^\n]{0,100}\bfiles?\b[^\n]{0,80}\b(?:created|made|written|saved|modified|changed|updated|edited|last|past|recent|today|yesterday)\b",
             r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove|read|open)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
             r"\b(?:create|make|write|save|generate)\b[^\n]{0,100}\b(?:file|script|program|source|source code|code)\b",
             r"\b(?:write|create|make|generate)\b[^\n]{0,60}\b(?:python|c\+\+|cpp|javascript|typescript|rust|java|golang)\b",
