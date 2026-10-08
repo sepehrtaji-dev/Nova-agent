@@ -1,3 +1,5 @@
+import os
+
 import ollama
 
 
@@ -16,16 +18,23 @@ SYSTEM_PROMPT = (
 
 class OllamaBrain:
 
-    def __init__(self, model="qwen2.5:3b"):
-        self.model = model
+    def __init__(self, model=None):
+        configured = os.getenv("NOVA_MODEL", "").strip()
+        self.model = model or configured or "qwen2.5:3b"
 
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
         system = system_prompt or SYSTEM_PROMPT
 
+        def _env_int(name, default, minimum):
+            try:
+                return max(minimum, int(os.getenv(name, default)))
+            except (TypeError, ValueError):
+                return default
+
         base_options = {
             "temperature": 0.1,
-            "num_ctx": 4096,
-            "num_predict": 1024,
+            "num_ctx": _env_int("NOVA_NUM_CTX", 8192, 2048),
+            "num_predict": _env_int("NOVA_NUM_PREDICT", 1536, 128),
             "repeat_penalty": 1.3,
             "repeat_last_n": 128,
         }
