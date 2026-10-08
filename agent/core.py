@@ -50,26 +50,13 @@ class NovaCore:
         return dict(self.access)
 
     def _allowed_tools(self):
+        """Return tools whose registry capability is currently enabled."""
         allowed = []
 
-        if self.access.get("web", True):
-            allowed.append("web_search")
-
-        if self.access.get("git", True):
-            allowed.append("git")
-
-        if self.access.get("pc", True):
-            allowed.extend([
-                "terminal",
-                "list_files",
-                "read_file",
-                "write_file",
-                "edit_file",
-                "delete_file",
-                "create_directory",
-                "desktop",
-                "generate_image",
-            ])
+        for name, data in self.tools.tools.items():
+            capability = data.get("capability", "pc")
+            if self.access.get(capability, True):
+                allowed.append(name)
 
         return allowed
 
