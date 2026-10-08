@@ -61,7 +61,18 @@ class KnowledgeMemory:
 
         results = []
 
+        now = datetime.utcnow()
+
         for item in self.data:
+            expires_at = item.get("expires_at")
+            if expires_at:
+                try:
+                    if datetime.fromisoformat(str(expires_at)) <= now:
+                        continue
+                except (TypeError, ValueError):
+                    # Malformed expiry metadata must not make stale knowledge
+                    # look authoritative.
+                    continue
 
             text = (
                 str(item.get("topic", "")) + " " +
