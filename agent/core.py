@@ -1066,6 +1066,37 @@ If nothing reliable can be extracted:
 
         return False
 
+    def _direct_memory_answer(self, message):
+        """Answer strong user-memory questions from stored facts, without guessing."""
+        if not isinstance(message, str):
+            return None
+
+        text = re.sub(r"\s+", " ", message.strip().casefold())
+        if not text or ("my " not in text and " me" not in text):
+            return None
+
+        try:
+            matches = self.long_memory.relevant(message, limit=3)
+        except Exception:
+            return None
+
+        if not matches:
+            return None
+
+        best = matches[0]
+        if int(best.get("score", 0)) < 2:
+            return None
+
+        key = str(best.get("key", "")).strip()
+        value = str(best.get("value", "")).strip()
+        if not key or not value:
+            return None
+
+        return (
+            "According to your saved memory, "
+            f"{key.replace('.', ' ')} is {value}."
+        )
+
     def _direct_capability_answer(self, message):
         """Answer simple capability questions without asking the LLM to guess."""
         if not isinstance(message, str):
@@ -1148,6 +1179,12 @@ If nothing reliable can be extracted:
             self._status("Done")
             self.short_memory.add("assistant", direct_evidence_answer)
             return direct_evidence_answer
+
+        direct_memory_answer = self._direct_memory_answer(message)
+        if direct_memory_answer is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_memory_answer)
+            return direct_memory_answer
 
         direct_capability_answer = self._direct_capability_answer(message)
         if direct_capability_answer is not None:
@@ -1246,14 +1283,6 @@ If nothing reliable can be extracted:
         used_tools = set()
         workspace_revision = 0
 
-        # Verified evidence belongs to the previous task unless this message is
-        # handled by one of the explicit follow-up/evidence paths above.
-        state = getattr(self, "execution_state", None)
-        if isinstance(state, dict):
-            state["verified_tools"] = []
-            state["last_verified"] = None
-            state["last_plan"] = None
-
         self._status(
             "Understanding request..."
         )
@@ -1283,6 +1312,7 @@ If nothing reliable can be extracted:
                 f"User message: {message}\\n\\n"
                 f"Recent conversation: {self.short_memory.get()}\\n\\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\\n\\n"
+                f"Relevant saved user memory:\\n{self.long_memory.get_relevant_context(message)}\\n\\n"
                 "Answer the user's actual question or statement directly. "
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
