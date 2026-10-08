@@ -383,6 +383,29 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["path"], "MyModel.py")
 
+    def test_repair_pass_cannot_switch_away_from_pending_plan_tool(self):
+        class RepairBrain(FakeBrain):
+            def generate(self, prompt, **kwargs):
+                self.calls += 1
+                if "Choose the next tool" in prompt:
+                    return "not-json"
+                return '{"action":"tool","task_type":"computer","tool":"terminal","input":{"command":"echo wrong"}}'
+
+        brain = RepairBrain()
+        router = ToolRouter(brain, self.tools)
+        decision = router.decide(
+            message="read notes.txt",
+            task_type="computer",
+            plan="Goal: read notes.txt\n1. [pending] read_file: read notes.txt in projects",
+            allowed_tools=["read_file", "terminal"],
+        )
+        self.assertEqual(decision["action"], "retry")
+        self.assertNotIn("tool", decision)
+
+    def test_raw_success_marker_is_not_success_without_verification(self):
+        history = "Tool: desktop\nResult: STATUS: SUCCESS\nOpened: imaginary"
+        self.assertFalse(self.router._has_successful_tool(history))
+
     def test_failed_git_history_is_not_success(self):
         history = (
             "Tool: git\n"
