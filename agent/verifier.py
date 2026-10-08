@@ -105,6 +105,7 @@ class Verifier:
             "delete_file":      self._verify_delete_file,
             "create_directory": self._verify_create_directory,
             "list_files":       self._verify_list_files,
+            "find_files":       self._verify_find_files,
             "terminal":         self._verify_terminal,
             "git":              self._verify_git,
             "web_search":       self._verify_web_search,
@@ -197,6 +198,29 @@ class Verifier:
             status="confirmed",
             evidence=f"Path: {actual_path}\nSize: {size} bytes\nPreview: {preview!r}",
             message=f"✓ File confirmed on disk: {actual_path} ({size} bytes)",
+        )
+
+    def _verify_find_files(self, tool_input, tool_result):
+        if "STATUS: ERROR" in tool_result or "FILESYSTEM ERROR" in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message="find_files returned an error.",
+            )
+
+        if "STATUS: SUCCESS" not in tool_result or "Match count:" not in tool_result:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:400],
+                message="find_files result is missing its success/count evidence.",
+            )
+
+        match = re.search(r"Match count:\s*(\d+)", tool_result)
+        count = int(match.group(1)) if match else 0
+        return VerificationResult(
+            status="confirmed",
+            evidence=tool_result[:900],
+            message=f"✓ File search confirmed: {count} matching file(s).",
         )
 
     # ── read_file ─────────────────────────────────────────────────────────────
