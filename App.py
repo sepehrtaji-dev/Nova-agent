@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from agent.core import NovaCore
+from utils.math_parser import format_response_math
 
 
 APP_BG = "#0b0c0f"
@@ -81,7 +82,8 @@ def _render_markdown_text(text):
     import html
     import re
 
-    escaped = html.escape(str(text or ""))
+    text = format_response_math(str(text or ""))
+    escaped = html.escape(text)
     escaped = re.sub(r"^### (.+)$", lambda m: "<h3>" + m.group(1) + "</h3>", escaped, flags=re.MULTILINE)
     escaped = re.sub(r"^## (.+)$", lambda m: "<h2>" + m.group(1) + "</h2>", escaped, flags=re.MULTILINE)
     escaped = re.sub(r"^# (.+)$", lambda m: "<h1>" + m.group(1) + "</h1>", escaped, flags=re.MULTILINE)
