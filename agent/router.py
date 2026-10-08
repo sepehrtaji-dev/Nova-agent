@@ -1789,38 +1789,35 @@ Return JSON only.
                         ),
                     }
 
-                if "web_search" in allowed and any(
-            alias in pending
-            for alias in ("web search", "search the web", "search the internet", "look up")
-        ):
+        if planned_tool is not None and "web" in tool_description and "search" in tool_description:
             query = re.sub(
-                r"^\s*(?:go and )?(?:search|look up)(?: the web| the internet| online)?\s*(?:for|about)?\s*",
-                "",
-                str(message or "").strip(),
+                r'^\s*(?:go\s+and\s+)?(?:search|look\s+up)(?:\s+(?:the\s+web|the\s+internet|online))?\s*(?:for|about)?\s*',
+                '',
+                str(message or '').strip(),
                 flags=re.IGNORECASE,
             ).strip()
             if query:
                 return {
                     "action": "tool",
                     "task_type": "computer",
-                    "tool": "web_search",
+                    "tool": planned_tool,
                     "input": json.dumps({"query": query}, ensure_ascii=False),
                 }
 
-        if "terminal" in allowed and any(
-            alias in pending
-            for alias in ("run command", "run terminal", "execute command", "run script", "execute script")
+        if planned_tool is not None and "terminal" in tool_description and re.search(
+            r'\b(?:run|execute)\b',
+            action_lower,
         ):
             match = re.search(
                 r'(?:run|execute)\s+(?:the\s+)?(?:command|script)?\s*["\'](.+?)["\']',
-                str(message or "").strip(),
+                str(message or '').strip(),
                 flags=re.IGNORECASE,
             )
             if match:
                 return {
                     "action": "tool",
                     "task_type": "computer",
-                    "tool": "terminal",
+                    "tool": planned_tool,
                     "input": json.dumps(
                         {"command": match.group(1).strip(), "location": "projects"},
                         ensure_ascii=False,
@@ -1828,7 +1825,6 @@ Return JSON only.
                 }
 
         return None
-
     def decide(
         self,
         message,
