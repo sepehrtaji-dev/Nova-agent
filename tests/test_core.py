@@ -211,6 +211,12 @@ class CoreTests(unittest.TestCase):
     def test_capability_question_reports_real_read_access(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
+        core.tools = type("Registry", (), {
+            "tools": {
+                "read_file": {"capability": "pc"},
+                "desktop": {"capability": "pc"},
+            }
+        })()
 
         self.assertEqual(
             core._direct_capability_answer("can you read files? just say yes or no?"),
@@ -220,6 +226,11 @@ class CoreTests(unittest.TestCase):
     def test_capability_question_reports_os_control(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
+        core.tools = type("Registry", (), {
+            "tools": {
+                "desktop": {"capability": "pc"},
+            }
+        })()
 
         self.assertEqual(
             core._direct_capability_answer("can you use my os?"),
@@ -233,6 +244,11 @@ class CoreTests(unittest.TestCase):
     def test_capability_question_reports_no_when_pc_access_is_disabled(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": False}
+        core.tools = type("Registry", (), {
+            "tools": {
+                "read_file": {"capability": "pc"},
+            }
+        })()
 
         self.assertEqual(
             core._direct_capability_answer("can you read files"),
