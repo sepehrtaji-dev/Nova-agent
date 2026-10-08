@@ -44,6 +44,20 @@ class RouterTests(unittest.TestCase):
         self.tools = FakeTools()
         self.router = ToolRouter(self.brain, self.tools)
 
+    def test_compound_desktop_request_uses_tool_aware_planner(self):
+        brain = FakeBrain(
+            '{"goal":"desktop task","steps":[{"description":"desktop: open notepad"},{"description":"desktop: type HELLO_NOVA_TEST"}]}'
+        )
+        self.tools.get_descriptions = lambda: "- desktop: Control the desktop and GUI"
+        planner = Planner(brain, self.tools)
+
+        plan = planner.create_plan(
+            'open notepad and type "HELLO_NOVA_TEST" in it'
+        )
+
+        self.assertEqual(len(plan["steps"]), 2)
+        self.assertEqual(brain.calls, 1)
+        self.assertIn("desktop:", plan["steps"][0]["description"])
     def test_single_file_creation_gets_one_deterministic_write_step(self):
         planner = Planner(self.brain)
         plan = planner.create_plan(
