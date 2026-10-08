@@ -205,6 +205,18 @@ class RouterTests(unittest.TestCase):
             )
         )
 
+    def test_model_cannot_override_a_planned_tool(self):
+        plan = (
+            "Goal: open Notepad\\n"
+            "1. [pending] desktop: open notepad"
+        )
+        decision = self.router.decide(
+            message="open notepad",
+            task_type="computer",
+            plan=plan,
+            allowed_tools=["desktop", "edit_file"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
     def test_click_gets_real_coordinates_deterministically(self):
         decision = self.router._force_desktop_decision(
             "click at 500, 400"
