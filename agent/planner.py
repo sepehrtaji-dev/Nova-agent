@@ -565,6 +565,12 @@ class Planner:
 
         prompt = f"""You are Nova's task planner.
 
+Think step by step before creating the plan:
+1. What is the user's ultimate goal?
+2. What information or files are needed?
+3. In what order must actions happen?
+4. Which tool performs each action?
+
 Create a concrete step-by-step plan. Each step must map to exactly ONE tool call.
 
 AVAILABLE TOOLS:
@@ -718,6 +724,12 @@ Do not put generated file content in write_file input."""
 
         prompt = f"""
 You are Nova's task planner.
+
+Think step by step before updating the plan:
+1. What does the REAL tool result tell us?
+2. Did the tool succeed or fail?
+3. What still remains to be done?
+4. Does the plan need adjustment?
 
 Update the existing plan using the REAL tool result.
 

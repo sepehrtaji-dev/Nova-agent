@@ -1195,7 +1195,11 @@ class ToolRouter:
 
         prompt = f"""You are a task classifier for Nova, a local AI agent.
 
-Decide if Nova needs to USE TOOLS to respond, or just TALK.
+Think step by step:
+1. Is this a casual/greeting message? → conversation
+2. Is this a follow-up about already-verified information? → conversation
+3. Does the user want Nova to DO something (files, terminal, git, web, desktop)? → computer
+4. Does the user just want Nova to TALK/EXPLAIN? → conversation
 
 Answer "computer" if Nova must actually DO something:
 - Access, read, write, create, delete, or modify files
@@ -1305,7 +1309,14 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
 
         return f"""You are Nova. Choose the next tool to run.
 
-AVAILABLE TOOLS:\n{tools_description}
+Think step by step before answering:
+1. What is the user's goal?
+2. What has been done so far (check TOOL HISTORY)?
+3. What remains to be done?
+4. Which single tool should run next?
+
+AVAILABLE TOOLS:
+{tools_description}
 
 PLAN:
 {plan}
@@ -1322,7 +1333,8 @@ RULES:
 - For write_file: ONLY return path and location. Never include content or code.
 - For terminal: return the command to run.
 - For git: return action and required fields.
-- Keep response under 80 tokens.
+- If a tool already succeeded (VERIFIER_STATUS: CONFIRMED), do NOT run it again.
+- Choose exactly ONE action. Be specific and precise.
 
 Return ONE JSON only:
 {{"action":"tool","task_type":"computer","tool":"TOOL_NAME","input":{{"key":"value"}}}}
@@ -1360,158 +1372,60 @@ screenshot: {{"action":"tool","task_type":"computer","tool":"desktop","input":{{
         return f"""
 You are Nova's action validator.
 
+Think step by step:
+1. What is the user's goal?
+2. What has been done (check TOOL HISTORY)?
+3. What is the next logical action?
+4. Which tool performs it?
+
 Return ONLY valid JSON.
 
-TASK TYPE:
+TASK TYPE: {task_type}
 
-{task_type}
+USER REQUEST: {message}
 
-USER REQUEST:
+REAL TOOL HISTORY: {tool_history}
 
-{message}
+CURRENT PLAN: {plan}
 
-REAL TOOL HISTORY:
-
-{tool_history}
-
-CURRENT PLAN:
-
-{plan}
-
-If the computer task is incomplete,
-choose the next real tool.
+If the computer task is incomplete, choose the next real tool.
 
 Available tools:
-
 {tools_description}
 
 Only the tools listed above are enabled for this request.
 
-IMPORTANT:
-
-If the user explicitly requested a web search
-and no successful web_search result exists,
-YOU MUST choose web_search.
+IMPORTANT: If the user explicitly requested a web search and no successful web_search result exists, YOU MUST choose web_search.
 
 For web_search:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "web_search",
-  "input": {{
-    "query": "search query"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"web_search","input":{{"query":"search query"}}}}
 
 For write_file (ONLY path + location, NO content, NO code):
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "write_file",
-  "input": {{
-    "path": "filename.py",
-    "location": "projects"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"write_file","input":{{"path":"filename.py","location":"projects"}}}}
 
 For edit_file (modify existing file):
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "edit_file",
-  "input": {{
-    "path": "filename",
-    "location": "projects",
-    "old": "text to replace",
-    "new": "replacement text"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"edit_file","input":{{"path":"filename","location":"projects","old":"text to replace","new":"replacement text"}}}}
 
 For delete_file:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "delete_file",
-  "input": {{
-    "path": "filename",
-    "location": "projects"
-  }}
-}}
-
-Do NOT generate file content in the
-decision JSON.
+{{"action":"tool","task_type":"computer","tool":"delete_file","input":{{"path":"filename","location":"projects"}}}}
 
 For read_file:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "read_file",
-  "input": {{
-    "path": "filename",
-    "location": "projects"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"read_file","input":{{"path":"filename","location":"projects"}}}}
 
 For list_files:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "list_files",
-  "input": {{
-    "path": ".",
-    "location": "projects"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"list_files","input":{{"path":".","location":"projects"}}}}
 
 For create_directory:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "create_directory",
-  "input": {{
-    "path": "directory_name",
-    "location": "projects"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"create_directory","input":{{"path":"directory_name","location":"projects"}}}}
 
 For terminal:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "terminal",
-  "input": {{
-    "command": "command",
-    "location": "projects"
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"terminal","input":{{"command":"command","location":"projects"}}}}
 
 For git:
-
-{{
-  "action": "tool",
-  "task_type": "computer",
-  "tool": "git",
-  "input": {{
-    "action": "clone",
-    "url": "https://github.com/..."
-  }}
-}}
+{{"action":"tool","task_type":"computer","tool":"git","input":{{"action":"clone","url":"https://github.com/..."}}}}
 
 If the entire task is completed:
-
-{{
-  "action": "respond",
-  "task_type": "computer",
-  "goal_complete": true
-}}
+{{"action":"respond","task_type":"computer","goal_complete":true}}
 
 Return JSON only.
 """
@@ -1633,7 +1547,9 @@ Return JSON only.
             raw = self.brain.generate(
                 prompt,
                 system_prompt=(
-                    f"You are a code generator. Return only valid raw {language} source code."
+                    f"You are an expert {language} code generator. "
+                    "Think step by step about the implementation, then return only valid raw "
+                    f"{language} source code. No placeholders, no TODOs, no ellipsis."
                 ),
                 json_mode=False,
                 options={
@@ -2169,7 +2085,7 @@ Return JSON only.
         try:
             raw = self.brain.generate(
                 prompt,
-                system_prompt="Return ONLY valid JSON. No explanation. No extra text."
+                system_prompt="You are Nova, a precise AI agent. Think step by step internally, then return ONLY valid JSON. No explanation. No extra text."
             )
         except Exception:
             raw = ""

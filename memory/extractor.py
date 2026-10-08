@@ -157,6 +157,11 @@ class MemoryExtractor:
         prompt = f"""
 You are Nova's long-term memory extraction system.
 
+Think step by step:
+1. What did the user explicitly state about themselves?
+2. Is this information durable and useful for future conversations?
+3. Is it explicitly stated (not inferred or assumed)?
+
 Analyze ONLY the user's current message.
 
 Extract useful information that should remain available
