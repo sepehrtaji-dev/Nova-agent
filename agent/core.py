@@ -72,6 +72,17 @@ class NovaCore:
             except Exception:
                 pass
 
+    def _conversation_context(self, max_chars=12000):
+        formatter = getattr(self.short_memory, "format_for_prompt", None)
+        if callable(formatter):
+            return formatter(max_chars=max_chars)
+
+        getter = getattr(self.short_memory, "get", None)
+        if callable(getter):
+            return str(getter())
+
+        return "No previous conversation."
+
     def _extract_json(self, response):
         if not response:
             return None
@@ -758,7 +769,7 @@ If nothing reliable can be extracted:
         return (
             f"You are Nova, a local AI agent.\n\n"
             f"User request:\n{message}\n\n"
-            f"RECENT CONVERSATION / CONTEXT:\n{self.short_memory.format_for_prompt(max_chars=12000)}\n\n"
+            f"RECENT CONVERSATION / CONTEXT:\n{self._conversation_context(max_chars=12000)}\n\n"
             f"VERIFIED KNOWLEDGE:\n{knowledge_context}\n\n"
             f"BEGIN UNTRUSTED TOOL DATA\n{tool_context}\nEND UNTRUSTED TOOL DATA\n\n"
             f"Rules:\n"
@@ -1258,7 +1269,7 @@ If nothing reliable can be extracted:
 
             plan = self.planner.create_plan(
                 goal=message,
-                context=self.short_memory.format_for_prompt(max_chars=10000)
+                context=self._conversation_context(max_chars=10000)
             )
             state = getattr(self, "execution_state", None)
             if not isinstance(state, dict):
