@@ -1021,6 +1021,53 @@ class ToolRouter:
             )
         )
 
+    def _is_verified_followup(self, message, conversation):
+        if not isinstance(message, str) or not isinstance(conversation, str):
+            return False
+
+        text = re.sub(r"\s+", " ", message.strip().casefold())
+        context = conversation.casefold()
+        if not text or not context:
+            return False
+
+        question = bool(re.match(
+            r"^(?:what|which|who|where|when|why|how|tell|explain|show|describe)\b",
+            text,
+        ))
+        if not question:
+            return False
+
+        filename = self._extract_filename(message)
+        if filename and filename.casefold() in context:
+            return True
+
+        return bool(
+            re.search(r"\b(?:what exactly|what is inside|show me the contents?)\b", text)
+            and re.search(r"\b(?:verified|tool|file|content|result)\b", context)
+        )
+
+    def _is_concept_question(self, message):
+        if not isinstance(message, str):
+            return False
+
+        text = re.sub(r"\s+", " ", message.strip().casefold())
+        if not text:
+            return False
+
+        if re.search(
+            r"\b(?:file|folder|directory|terminal|shell|command|git|github|"
+            r"web|internet|mouse|keyboard|screen|window|application|app|"
+            r"computer|pc|screenshot|code file)\b",
+            text,
+        ):
+            return False
+
+        return bool(re.match(
+            r"^(?:explain|define|describe|what is|what are|why does|how does|"
+            r"how do|tell me about)\b",
+            text,
+        ))
+
     def _is_obviously_conversational(self, message):
         """Fast-path greetings and casual chat so they never enter tool execution."""
         if not isinstance(message, str):
@@ -1135,6 +1182,12 @@ class ToolRouter:
     def classify_task(self, message, conversation=""):
 
         if self._is_obviously_conversational(message):
+            return "conversation"
+
+        if self._is_verified_followup(message, conversation):
+            return "conversation"
+
+        if self._is_concept_question(message):
             return "conversation"
 
         if self._has_explicit_computer_intent(message):
