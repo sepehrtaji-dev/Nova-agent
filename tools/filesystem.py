@@ -181,6 +181,93 @@ class FileSystemTool:
         except Exception as e:
             return f"Filesystem error: {e}"
 
+    # ── find_files ─────────────────────────────────────────────────────────────
+
+    def find_files(self, input_data):
+        """Find files recursively with optional name/time filters."""
+        try:
+            if isinstance(input_data, str):
+                data = json.loads(input_data)
+            else:
+                data = input_data
+
+            if not isinstance(data, dict):
+                return "find_files requires a JSON object."
+
+            path = data.get("path", ".")
+            location = data.get("location", "projects")
+            pattern = str(data.get("pattern", "*")).strip() or "*"
+            recursive = bool(data.get("recursive", True))
+
+            created_within = data.get("created_within_hours")
+            modified_within = data.get("modified_within_hours")
+
+            full_path = self._resolve_path(path, location)
+            if not os.path.isdir(full_path):
+                return f"Not a directory: {full_path}"
+
+            now = __import__("time").time()
+            created_cutoff = None
+            modified_cutoff = None
+
+            if created_within is not None:
+                created_cutoff = now - max(0.0, float(created_within)) * 3600.0
+            if modified_within is not None:
+                modified_cutoff = now - max(0.0, float(modified_within)) * 3600.0
+
+            import fnmatch
+            import datetime as _dt
+
+            iterator = os.walk(full_path) if recursive else [(full_path, [], os.listdir(full_path))]
+            matches = []
+
+            for root, directories, filenames in iterator:
+                directories[:] = sorted(directories)
+                for filename in sorted(filenames):
+                    if not fnmatch.fnmatch(filename, pattern):
+                        continue
+
+                    candidate = os.path.join(root, filename)
+                    try:
+                        stat_result = os.stat(candidate)
+                    except OSError:
+                        continue
+
+                    created_time = getattr(stat_result, "st_birthtime", None)
+                    if created_time is None and os.name == "nt":
+                        created_time = stat_result.st_ctime
+
+                    if created_cutoff is not None:
+                        if created_time is None or created_time < created_cutoff:
+                            continue
+
+                    if modified_cutoff is not None and stat_result.st_mtime < modified_cutoff:
+                        continue
+
+                    created_label = (
+                        _dt.datetime.fromtimestamp(created_time).isoformat(timespec="seconds")
+                        if created_time is not None
+                        else "unavailable"
+                    )
+                    modified_label = _dt.datetime.fromtimestamp(stat_result.st_mtime).isoformat(timespec="seconds")
+                    matches.append(
+                        f"{candidate} | created={created_label} | modified={modified_label}"
+                    )
+
+            return (
+                "STATUS: SUCCESS\n"
+                f"Location: {full_path}\n"
+                f"Match count: {len(matches)}\n"
+                + ("\n".join(matches) if matches else "No matching files found.")
+            )
+
+        except (TypeError, ValueError) as exc:
+            return f"FILESYSTEM ERROR: Invalid find_files filter: {exc}"
+        except PermissionError as exc:
+            return f"Permission denied: {exc}"
+        except Exception as exc:
+            return f"Filesystem error: {type(exc).__name__}: {exc}"
+
     # ── read_file ─────────────────────────────────────────────────────────────
 
     def read_file(self, input_data):
