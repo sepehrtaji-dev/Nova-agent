@@ -714,6 +714,8 @@ class ToolRouter:
         r"\b(?:"
         r"screenshot|take\s+a\s+screenshot|capture\s+screen"
         r"|open\s+(?:app|application)\b|launch\s+(?:app|application)\b"
+        r"|open\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}"
+        r"|launch\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}"
         r"|close\s+(?:app|application)\b"
         r"|click\s+(?:on\s+)?(?:the\s+)?"
         r"|move\s+(?:the\s+)?mouse"
@@ -811,7 +813,7 @@ class ToolRouter:
         if _re.search(r"\b(?:type|write)\b", msg):
             raw_message = str(message or "").strip()
             text_match = _re.search(
-                r"""\b(?:type|write)\s+(?:this\s+)?(?:text\s+)?["'](.+?)["']\s*$""",
+                r"""\b(?:type|write)\s+(?:this\s+)?(?:text\s+)?["'](.+?)["'](?:\s+(?:here|there|in\s+it|into\s+.+|in\s+.+|on\s+.+))?\s*$""",
                 raw_message,
                 flags=_re.IGNORECASE,
             )
@@ -1016,6 +1018,17 @@ class ToolRouter:
 
             if re.search(
                 r"\b(?:type|write)\b\s+[\"'][^\"']+[\"']",
+                text,
+                re.IGNORECASE,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:open|launch|close)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
+                text,
+                re.IGNORECASE,
+            ) and not re.search(
+                r"\b(?:file|folder|directory)\b|\.[a-z0-9]{1,6}\b",
                 text,
                 re.IGNORECASE,
             ):
