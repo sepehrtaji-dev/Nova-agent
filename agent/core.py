@@ -899,7 +899,7 @@ If nothing reliable can be extracted:
         if asks_path:
             paths = []
             for entry in search_entries:
-                for line in entry.splitlines():
+                for line in entry.replace("\\n", "\n").splitlines():
                     value = None
                     if line.startswith("Path:"):
                         value = line.split(":", 1)[1].strip()
