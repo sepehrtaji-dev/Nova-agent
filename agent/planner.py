@@ -325,6 +325,10 @@ Rules:
 - Each step = one tool call. Be specific about which tool and its exact input fields.
 - Use only tools present in AVAILABLE TOOLS.
 - For compound requests, create one step per real action in execution order.
+- Preserve the user's requested target application, file, folder, website, or resource.
+- When the user explicitly asks to operate an application or GUI, use the available desktop/GUI capability for those interactions instead of substituting a different tool.
+- Do not invent intermediate actions that are not required to fulfill the user's goal.
+- A follow-up question that asks only about a previous verified result should not create a new action.
 - If the task needs a GitHub token and none is in the context, first step must be: "ask user for GitHub PAT token"
 - For GitHub repo creation the steps must be in order:
   1. ask for token (if not already provided)
