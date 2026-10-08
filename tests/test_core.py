@@ -156,7 +156,7 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(
             core._direct_identity_answer("who are you developed by?"),
-            "Nova is developed by the Taji-Soft team.",
+            "I'm Nova, a local AI assistant. I'm developed by the Taji-Soft team.",
         )
         self.assertEqual(
             core._direct_identity_answer("are you sure you are developed by Taji-soft team?"),
