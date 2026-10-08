@@ -717,7 +717,7 @@ class ToolRouter:
         r"|close\s+(?:app|application)\b"
         r"|click\s+(?:on\s+)?(?:the\s+)?"
         r"|move\s+(?:the\s+)?mouse"
-        r"|type\s+(?:into|in|on)"
+        r"|type(?:\s+(?:into|in|on))?\b"
         r"|press\s+(?:key|ctrl|alt|enter|escape)"
         r"|scroll\s+(?:up|down)"
         r"|list\s+(?:open\s+)?windows"
@@ -809,19 +809,33 @@ class ToolRouter:
 
         # Keyboard text input
         if _re.search(r"\b(?:type|write)\b", msg):
+            raw_message = str(message or "").strip()
             text_match = _re.search(
                 r"""\b(?:type|write)\s+(?:this\s+)?(?:text\s+)?["'](.+?)["']\s*$""",
-                str(message or "").strip(),
+                raw_message,
                 flags=_re.IGNORECASE,
             )
             if text_match:
+                typed_text = text_match.group(1)
+            else:
+                plain_match = _re.search(
+                    r"\b(?:type|write)\s+(.+?)\s*$",
+                    raw_message,
+                    flags=_re.IGNORECASE,
+                )
+                if not plain_match:
+                    return None
+                typed_text = plain_match.group(1).strip()
+                typed_text = _re.sub(r"\s+(?:here|there)$", "", typed_text, flags=_re.IGNORECASE).strip()
+
+            if typed_text:
                 return {
                     "action": "tool",
                     "task_type": "computer",
                     "tool": "desktop",
                     "input": json.dumps({
                         "action": "type",
-                        "text": text_match.group(1),
+                        "text": typed_text,
                     }, ensure_ascii=False),
                 }
 
