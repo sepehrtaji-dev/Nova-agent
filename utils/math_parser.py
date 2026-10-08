@@ -22,7 +22,9 @@ _SUPER_MAP = str.maketrans(
     "0123456789+-=()abcdefghijklmnopqrstuvwxyz",
     "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁼⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
 )
-_SUB_MAP = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₋₊₌₍₎")def _group(text, start):
+_SUB_MAP = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₋₊₌₍₎")
+
+def _group(text, start):
     if start >= len(text) or text[start] != "{":
         return None, start
     depth = 0
