@@ -319,6 +319,39 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(self.router.classify_task(message), "computer")
         self.assertEqual(self.brain.calls, 0)
 
+    def test_app_launch_synonyms_are_computer_intent(self):
+        for message in (
+            "please open firefox",
+            "please launch firefox",
+            "please run my firefox",
+            "please start firefox",
+        ):
+            self.assertTrue(
+                self.router._has_explicit_computer_intent(message),
+                message,
+            )
+            self.assertEqual(
+                self.router.classify_task(message),
+                "computer",
+                message,
+            )
+        self.assertEqual(self.brain.calls, 0)
+
+    def test_generic_app_launch_does_not_depend_on_app_name(self):
+        planner = Planner(self.brain, self.tools)
+        for message in (
+            "please run my firefox",
+            "please launch calculator",
+            "please start the browser",
+        ):
+            plan = planner.create_plan(message)
+            self.assertEqual(len(plan["steps"]), 1, message)
+            self.assertTrue(
+                plan["steps"][0]["description"].startswith("desktop:"),
+                message,
+            )
+
+
     def test_plan_preserves_filename_case(self):
         plan = (
             "Goal: create file\n"
