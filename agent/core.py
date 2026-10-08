@@ -1342,7 +1342,7 @@ If nothing reliable can be extracted:
             conversation_prompt = (
                 "You are Nova, a helpful local AI assistant.\\n\\n"
                 f"User message: {message}\\n\\n"
-                f"Recent conversation: {self.short_memory.get()}\\n\\n"
+                f"Recent conversation:\\n{self._conversation_context(max_chars=8000)}\\n\\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\\n\\n"
                 f"Relevant saved user memory:\\n{self.long_memory.get_relevant_context(message)}\\n\\n"
                 "Answer the user's actual question or statement directly. "
