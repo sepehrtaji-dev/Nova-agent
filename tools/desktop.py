@@ -25,6 +25,7 @@ so Nova can verify what happened.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -327,56 +328,142 @@ class DesktopTool:
             result += f"\nScreenshot: {screenshot_path}"
         return result
 
+    def _get_windows_start_apps(self):
+        script = r"""
+Get-StartApps | Select-Object Name, AppID | ForEach-Object {
+    "$($_.Name)|||$($_.AppID)"
+}
+"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except Exception:
+            return []
+
+        apps = []
+        for line in result.stdout.splitlines():
+            parts = line.strip().split("|||", 1)
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                apps.append((parts[0].strip(), parts[1].strip()))
+        return apps
+
+    def _resolve_windows_app(self, app):
+        """Resolve an installed Windows application without hardcoded names."""
+        import difflib
+        import shutil
+
+        candidate = str(app or "").strip()
+        if not candidate:
+            return None, None, "Application name is required."
+
+        if os.path.isfile(candidate):
+            return candidate, candidate, None
+
+        command_path = shutil.which(candidate)
+        if command_path:
+            return candidate, command_path, None
+
+        apps = self._get_windows_start_apps()
+        target = re.sub(r"\s+", " ", candidate).strip().casefold()
+        matches = []
+
+        for name, app_id in apps:
+            normalized = re.sub(r"\s+", " ", name).strip().casefold()
+            if normalized == target or target in normalized or normalized in target:
+                matches.append((name, app_id))
+
+        if len(matches) == 1:
+            return matches[0][0], matches[0][1], None
+
+        if len(matches) > 1:
+            names = ", ".join(name for name, _ in matches[:8])
+            suffix = " ..." if len(matches) > 8 else ""
+            return None, None, (
+                f"Multiple installed applications match '{candidate}': "
+                f"{names}{suffix}. Please specify the application more precisely."
+            )
+
+        all_names = [name for name, _ in apps]
+        suggestions = difflib.get_close_matches(
+            candidate, all_names, n=3, cutoff=0.55
+        )
+        if suggestions:
+            joined = ", ".join(suggestions)
+            return None, None, (
+                f"No installed application matches '{candidate}'. "
+                f"Possible matches: {joined}"
+            )
+
+        return None, None, f"No installed application matches '{candidate}'."
+
     def _action_open_app(self, data):
         app = str(data.get("app", "")).strip()
         if not app:
             return "DESKTOP ERROR: open_app requires 'app'."
 
         is_windows = sys.platform.startswith("win")
-        is_mac     = sys.platform == "darwin"
+        is_mac = sys.platform == "darwin"
 
         try:
             if is_windows:
-                subprocess.Popen(
-                    ["start", app],
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+                resolved_name, target, error = self._resolve_windows_app(app)
+                if error:
+                    return f"STATUS: ERROR\n{error}"
+
+                if os.path.isfile(str(target)):
+                    subprocess.Popen(
+                        [str(target)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                elif target:
+                    subprocess.Popen(
+                        ["explorer.exe", f"shell:AppsFolder\\{target}"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    return f"STATUS: ERROR\nCould not resolve '{app}'."
+
             elif is_mac:
-                subprocess.Popen(
+                result = subprocess.run(
                     ["open", "-a", app],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    capture_output=True,
+                    text=True,
                 )
+                if result.returncode != 0:
+                    message = result.stderr.strip() or f"No application named '{app}' was found."
+                    return f"STATUS: ERROR\n{message}"
+                resolved_name = app
+
             else:
-                # Linux — try direct exec, fallback to xdg-open
-                try:
-                    subprocess.Popen(
-                        app.split(),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                except FileNotFoundError:
-                    subprocess.Popen(
-                        ["xdg-open", app],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
+                import shutil
+                command = shutil.which(app)
+                if not command:
+                    return f"STATUS: ERROR\nNo executable named '{app}' was found on PATH."
+                subprocess.Popen(
+                    [command],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                resolved_name = app
 
-            time.sleep(1.5)  # Give app time to open
-            path, _ = self._screenshot("after_open_app")
+            time.sleep(1.5)
+            path, screenshot_error = self._screenshot("after_open_app")
 
-            result = (
-                f"STATUS: SUCCESS\n"
-                f"Opened: {app}"
-            )
+            result = "STATUS: SUCCESS\nOpened: " + str(resolved_name or app)
             if path:
                 result += f"\nScreenshot: {path}"
+            elif screenshot_error:
+                result += f"\nScreenshot unavailable: {screenshot_error}"
             return result
 
         except Exception as e:
-            return f"DESKTOP ERROR: Failed to open '{app}': {e}"
+            return f"STATUS: ERROR\nFailed to open '{app}': {type(e).__name__}: {e}"
 
     def _action_close_app(self, data):
         title = str(data.get("title", "")).strip()
