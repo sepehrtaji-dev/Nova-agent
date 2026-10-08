@@ -147,9 +147,9 @@ class NovaCore:
             return False
 
         return re.search(
-            r"Verification:\s*CONFIRMED",
+            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
             text.replace("\\n", "\n"),
-            flags=re.IGNORECASE
+            flags=re.IGNORECASE | re.MULTILINE,
         ) is not None
 
     def _has_successful_tool(self, tool_history):
