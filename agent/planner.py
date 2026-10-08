@@ -345,12 +345,16 @@ class Planner:
             "steps": [
                 {
                     "id": 1,
+                    "tool": "web_search",
+                    "input": {"query": query},
                     "description": f"web_search: search for {query}",
                     "status": "pending",
                     "result": None,
                 },
                 {
                     "id": 2,
+                    "tool": "write_file",
+                    "input": {"path": filename, "location": location},
                     "description": f"write_file: create {filename} in {location}",
                     "status": "pending",
                     "result": None,
@@ -421,6 +425,8 @@ class Planner:
             "steps": [
                 {
                     "id": 1,
+                    "tool": "write_file",
+                    "input": {"path": filename, "location": location},
                     "description": f"write_file: create {filename} in {location}",
                     "status": "pending",
                     "result": None,
@@ -468,6 +474,8 @@ class Planner:
             "steps": [
                 {
                     "id": 1,
+                    "tool": "read_file",
+                    "input": {"path": filename, "location": location},
                     "description": f"read_file: read {filename} in {location}",
                     "status": "pending",
                     "result": None,
