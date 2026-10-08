@@ -117,7 +117,7 @@ class Planner:
             flags=re.IGNORECASE,
         ):
             app_control_words = re.search(
-                r"\b(?:open|launch|close)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
+                r"\b(?:open|launch|run|start|execute|close)\s+(?:my\s+|the\s+)?(?:app\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
                 text,
                 flags=re.IGNORECASE,
             )
@@ -204,6 +204,7 @@ class Planner:
             r"press\s+(?:key|ctrl|alt|enter|escape)|"
             r"scroll\s+(?:up|down)|"
             r"open\s+(?:app|application)|launch\s+(?:app|application)|"
+            r"(?:run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?[a-z0-9][a-z0-9 ._-]{1,40}|"
             r"open\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}|"
             r"launch\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}|"
             r"write(?:\s+(?:into|in|on))?\b|"
