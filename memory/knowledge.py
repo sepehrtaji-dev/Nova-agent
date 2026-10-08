@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
 
@@ -30,9 +31,15 @@ class KnowledgeMemory:
                 "r",
                 encoding="utf-8"
             ) as f:
-                self.data = json.load(f)
+                loaded = json.load(f)
 
-        except Exception:
+            self.data = (
+                loaded
+                if isinstance(loaded, list)
+                else []
+            )
+
+        except (OSError, json.JSONDecodeError, TypeError):
             self.data = []
 
     def _save(self):
@@ -63,52 +70,57 @@ class KnowledgeMemory:
                     pass
 
     def search(self, query, limit=8):
-
-        if not query:
+        if not isinstance(query, str) or not query.strip():
             return []
 
-        words = [
-            word.lower()
-            for word in query.split()
+        try:
+            limit = max(0, int(limit))
+        except (TypeError, ValueError):
+            limit = 8
+        if limit == 0:
+            return []
+
+        query_words = set(
+            re.findall(r"\b[\w]+\b", query.lower())
+        )
+        query_words = {
+            word for word in query_words
             if len(word) > 2
-        ]
+        }
+        if not query_words:
+            return []
 
         results = []
-
         now = datetime.utcnow()
 
         for item in self.data:
+            if not isinstance(item, dict):
+                continue
+
             expires_at = item.get("expires_at")
             if expires_at:
                 try:
                     if datetime.fromisoformat(str(expires_at)) <= now:
                         continue
                 except (TypeError, ValueError):
-                    # Malformed expiry metadata must not make stale knowledge
-                    # look authoritative.
                     continue
 
-            text = (
-                str(item.get("topic", "")) + " " +
-                str(item.get("fact", "")) + " " +
-                str(item.get("source", ""))
+            searchable = " ".join(
+                str(item.get(field, ""))
+                for field in ("topic", "fact")
             ).lower()
-
-            score = sum(
-                1
-                for word in words
-                if word in text
+            words = set(
+                re.findall(r"\b[\w]+\b", searchable)
             )
+            overlap = query_words & words
+            if len(overlap) < min(2, len(query_words)):
+                continue
 
-            if score >= 2:
-                results.append(
-                    (score, item)
-                )
+            confidence = float(item.get("confidence", 0.0) or 0.0)
+            score = len(overlap) + max(0.0, min(1.0, confidence)) * 0.25
+            results.append((score, item))
 
-        results.sort(
-            key=lambda x: x[0],
-            reverse=True
-        )
+        results.sort(key=lambda item: item[0], reverse=True)
 
         return [
             item
