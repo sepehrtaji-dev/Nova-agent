@@ -96,7 +96,7 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(all("desktop:" in step["description"] for step in plan["steps"]))
         self.assertIn("open firefox", plan["steps"][0]["description"])
         self.assertIn("press ctrl+l", plan["steps"][1]["description"])
-        self.assertIn('type "about cs2 game"', plan["steps"][2]["description"])
+        self.assertIn('type "cs2 game"', plan["steps"][2]["description"])
         self.assertIn("press enter", plan["steps"][3]["description"])
     def test_single_file_creation_gets_one_deterministic_write_step(self):
         planner = Planner(self.brain)
