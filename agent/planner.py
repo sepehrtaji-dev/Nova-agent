@@ -141,6 +141,56 @@ class Planner:
         if source_language and source_object:
             return None
 
+        search_in_app = re.search(
+            r"^use\s+(?:my\s+|the\s+)?(.+?)\s+to\s+search\s+(?:for|about)?\s*(.+)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if search_in_app:
+            app = search_in_app.group(1).strip()
+            query = search_in_app.group(2).strip()
+            registry_tools = getattr(self.tools, "tools", {})
+            desktop_tool = None
+            if isinstance(registry_tools, dict):
+                for name, data in registry_tools.items():
+                    if not isinstance(data, dict):
+                        continue
+                    description = str(data.get("description", "")).lower()
+                    if "desktop" in description or "gui" in description:
+                        desktop_tool = name
+                        break
+
+            if desktop_tool and desktop_tool in registry_tools:
+                return {
+                    "goal": goal,
+                    "steps": [
+                        {
+                            "id": 1,
+                            "description": f"{desktop_tool}: open {app}",
+                            "status": "pending",
+                            "result": None,
+                        },
+                        {
+                            "id": 2,
+                            "description": f"{desktop_tool}: press ctrl+l",
+                            "status": "pending",
+                            "result": None,
+                        },
+                        {
+                            "id": 3,
+                            "description": f'{desktop_tool}: type "{query}"',
+                            "status": "pending",
+                            "result": None,
+                        },
+                        {
+                            "id": 4,
+                            "description": f"{desktop_tool}: press enter",
+                            "status": "pending",
+                            "result": None,
+                        },
+                    ],
+                }
+
         desktop_action = re.search(
             r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|"
             r"click|double[- ]click|right[- ]click|middle[- ]click|"
