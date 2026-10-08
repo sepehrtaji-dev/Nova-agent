@@ -797,6 +797,48 @@ If nothing reliable can be extracted:
         )
 
 
+    def _direct_identity_answer(self, message):
+        """Answer Nova identity/developer questions without LLM guessing."""
+        if not isinstance(message, str):
+            return None
+
+        text = re.sub(r"\s+", " ", message.strip().lower())
+        if not text:
+            return None
+
+        identity = bool(re.search(
+            r"\b(?:who are you|what are you|introduce yourself|tell me about yourself)\b",
+            text,
+        ))
+        developer = bool(re.search(
+            r"\b(?:who (?:developed|built|created|made) you|who made you|who built you|who created you|developed by|built by|created by|made by)\b",
+            text,
+        ))
+        taji_soft = bool(re.search(r"\btaji[- ]?soft\b", text))
+        anthro = bool(re.search(r"\banthropic\b", text))
+
+        if identity and developer:
+            return (
+                "I'm Nova, a local AI assistant. "
+                "I'm developed by the Taji-Soft team."
+            )
+
+        if developer:
+            if anthro and not taji_soft:
+                return (
+                    "No. Nova is developed by the Taji-Soft team, "
+                    "not by Anthropic."
+                )
+            return "Nova is developed by the Taji-Soft team."
+
+        if taji_soft and re.search(r"\b(?:sure|really|correct|right)\b", text):
+            return "Yes. Nova is developed by the Taji-Soft team."
+
+        if identity:
+            return "I'm Nova, a local AI assistant developed by the Taji-Soft team."
+
+        return None
+
     def _direct_capability_answer(self, message):
         """Answer simple capability questions without asking the LLM to guess."""
         if not isinstance(message, str):
@@ -838,6 +880,12 @@ If nothing reliable can be extracted:
             message = str(message)
 
         message = message.strip()
+
+        direct_identity_answer = self._direct_identity_answer(message)
+        if direct_identity_answer is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_identity_answer)
+            return direct_identity_answer
 
         direct_capability_answer = self._direct_capability_answer(message)
         if direct_capability_answer is not None:
