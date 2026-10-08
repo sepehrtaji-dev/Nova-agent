@@ -1631,12 +1631,40 @@ Return JSON only.
         if not isinstance(tools, dict):
             return None
 
+        structured = re.search(
+            r"\|\s*TOOL=([A-Za-z_][A-Za-z0-9_]*)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if structured:
+            candidate = structured.group(1).strip()
+            return candidate if candidate in tools else None
+
         for name in tools:
             pattern = rf"\[pending\]\s*{re.escape(str(name))}\s*:"
             if re.search(pattern, text, re.IGNORECASE):
                 return str(name)
 
         return None
+
+    def _pending_plan_input(self, plan_line):
+        if not isinstance(plan_line, str):
+            return None
+
+        match = re.search(
+            r"\|\s*INPUT=(\{.*\})\s*$",
+            plan_line.strip(),
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+
+        try:
+            value = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return None
+
+        return value if isinstance(value, dict) else None
 
     def _deterministic_plan_decision(self, message, task_type, plan, tool_history, allowed_tools=None):
         """Return a tool decision for an unambiguous pending plan step.
@@ -1680,6 +1708,18 @@ Return JSON only.
         planned_tool = self._pending_planned_tool(pending)
         if planned_tool is not None and planned_tool not in allowed:
             return None
+
+        planned_input = self._pending_plan_input(pending)
+        if planned_tool is not None and isinstance(planned_input, dict):
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": planned_tool,
+                "input": json.dumps(
+                    planned_input,
+                    ensure_ascii=False,
+                ),
+            }
 
         planned_tool = self._pending_planned_tool(pending)
         if planned_tool in allowed:
