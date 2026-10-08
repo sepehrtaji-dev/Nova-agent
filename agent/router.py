@@ -1003,6 +1003,13 @@ class ToolRouter:
         if not text:
             return False
 
+        # Reuse the deterministic desktop-intent detector for direct GUI
+        # requests such as "open firefox" or "type hello in the address bar".
+        # File opens are intentionally excluded by _has_desktop_intent and are
+        # handled by filesystem-specific patterns below.
+        if self._has_desktop_intent(message):
+            return True
+
         # Questions that explicitly ask Nova to control the PC are computer tasks.
         if re.match(r"^(?:how|what|why|can|could|would)\b", text):
             has_target = re.search(
