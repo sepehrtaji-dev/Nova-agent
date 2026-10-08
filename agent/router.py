@@ -331,15 +331,29 @@ class ToolRouter:
 
         return None
 
+    def _trusted_verifier_status(self, value):
+        if not isinstance(value, str):
+            return None
+
+        normalized = value.replace("\\n", "\n")
+        marker = re.search(
+            r"END_RAW_TOOL_RESULT\s*\n",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        trusted = normalized[marker.end():] if marker else normalized
+
+        match = re.search(
+            r"^VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*$",
+            trusted,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        return match.group(1).lower() if match else None
+
     def _has_successful_tool(self, tool_history):
-        """Only trust Nova's verifier, never raw tool success markers."""
         if not isinstance(tool_history, str) or not tool_history.strip():
             return False
-        return re.search(
-            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
-            tool_history.replace("\\n", "\n"),
-            flags=re.IGNORECASE | re.MULTILINE,
-        ) is not None
+        return self._trusted_verifier_status(tool_history) == "confirmed"
 
     def _get_tool_names(self, allowed_tools=None):
 
