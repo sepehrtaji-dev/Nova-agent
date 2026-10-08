@@ -87,6 +87,17 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["action"], "type")
         self.assertEqual(payload["text"], "HELLO_NOVA_TEST")
+    def test_in_app_search_uses_registered_desktop_capability(self):
+        planner = Planner(self.brain, self.tools)
+        plan = planner.create_plan(
+            'use firefox to search about cs2 game'
+        )
+        self.assertEqual(len(plan["steps"]), 4)
+        self.assertTrue(all("desktop:" in step["description"] for step in plan["steps"]))
+        self.assertIn("open firefox", plan["steps"][0]["description"])
+        self.assertIn("press ctrl+l", plan["steps"][1]["description"])
+        self.assertIn('type "about cs2 game"', plan["steps"][2]["description"])
+        self.assertIn("press enter", plan["steps"][3]["description"])
     def test_single_file_creation_gets_one_deterministic_write_step(self):
         planner = Planner(self.brain)
         plan = planner.create_plan(
