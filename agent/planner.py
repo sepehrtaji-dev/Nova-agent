@@ -128,6 +128,19 @@ class Planner:
             ):
                 return None
 
+        source_language = re.search(
+            r"\b(?:python|c\+\+|cpp|c\s+language|javascript|typescript|rust|java|golang|go)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        source_object = re.search(
+            r"\b(?:file|script|program|source\s+code|code)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if source_language and source_object:
+            return None
+
         desktop_action = re.search(
             r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|"
             r"click|double[- ]click|right[- ]click|middle[- ]click|"
