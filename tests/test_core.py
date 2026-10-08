@@ -223,7 +223,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(role, "tool")
         self.assertIn("Verified tool evidence", content)
         self.assertIn("nova.png", content)
-        self.assertIn("screenshot path observed", content)
+        self.assertIn("screenshot saved", content)
 
     def test_verified_write_completes_without_replan(self):
         core = NovaCore.__new__(NovaCore)
