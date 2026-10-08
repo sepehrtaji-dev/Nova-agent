@@ -150,6 +150,52 @@ class RouterTests(unittest.TestCase):
         self.assertFalse(self.router._has_desktop_intent("open test_model.py"))
         self.assertTrue(self.router._has_explicit_computer_intent("open test_model.py"))
 
+    def test_mouse_and_keyboard_control_is_explicit_computer_intent(self):
+        self.assertTrue(
+            self.router._has_explicit_computer_intent(
+                "can you move the mouse to 500, 400?"
+            )
+        )
+        self.assertTrue(
+            self.router._has_explicit_computer_intent(
+                "can you press ctrl+shift+t?"
+            )
+        )
+
+    def test_click_gets_real_coordinates_deterministically(self):
+        decision = self.router._force_desktop_decision(
+            "click at 500, 400"
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "click")
+        self.assertEqual(payload["x"], 500)
+        self.assertEqual(payload["y"], 400)
+        self.assertEqual(payload["button"], "left")
+        self.assertEqual(payload["clicks"], 1)
+
+    def test_keyboard_shortcut_is_deterministic(self):
+        decision = self.router._force_desktop_decision(
+            "press ctrl+shift+t"
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "key")
+        self.assertEqual(payload["key"], "ctrl+shift+t")
+
+    def test_mouse_move_is_deterministic(self):
+        decision = self.router.decide(
+            message="move the mouse to 300, 250",
+            task_type="computer",
+            plan="Goal: move the mouse\n1. [pending] Move the mouse to 300, 250",
+            allowed_tools=["desktop"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "move")
+        self.assertEqual(payload["x"], 300)
+        self.assertEqual(payload["y"], 250)
+
     def test_explicit_search_is_computer(self):
         self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
 
