@@ -43,9 +43,20 @@ def _fragment(text):
 def parse_math(text):
     if not isinstance(text, str) or not text:
         return text
+    had_explicit_math = bool(
+        re.search(
+            r"(?:\$|\\(?:[A-Za-z]+|[,{}\[\]()]|left|right))",
+            value,
+        )
+    )
     value = text.replace(r"\[", "").replace(r"\]", "")
     value = value.replace(r"\(", "").replace(r"\)", "")
-    value = value.replace("$$", "").replace("$", "")
+    value = value.replace("$", "").replace("$", "")
+
+    # Plain prose, identifiers, and filenames must remain byte-for-byte
+    # stable. Mathematical rewriting is opt-in through LaTeX-like notation.
+    if not had_explicit_math:
+        return value.strip()
 
     frac = re.compile(r"\\frac\s*(\{)")
     while True:
