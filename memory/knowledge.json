@@ -322,5 +322,23 @@
     "learned_at": "2026-10-07T13:35:29.940113",
     "last_verified": "2026-10-07T13:35:29.940113",
     "expires_at": "2026-10-14T13:35:29.940113"
+  },
+  {
+    "topic": "Counter Strike",
+    "fact": "CS2 is the successor to the massively popular and longest-running first-person shooter franchise Counter-Strike.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fcounter%2Dstrike%2D2.en.softonic.com%",
+    "confidence": 0.95,
+    "learned_at": "2026-10-08T07:04:32.164804",
+    "last_verified": "2026-10-08T07:04:32.164804",
+    "expires_at": "2026-10-15T07:04:32.164804"
+  },
+  {
+    "topic": "Steam Store Link for CS 2",
+    "fact": "The game's free upgrade from CS:GO marks a significant technical leap in its history, as indicated on Steam store page.",
+    "source": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fstore.steampowered.com%2Fapp%2F730%2FCounterStrike_2%2F",
+    "confidence": 0.86,
+    "learned_at": "2026-10-08T07:04:32.166634",
+    "last_verified": "2026-10-08T07:04:32.166634",
+    "expires_at": "2026-10-15T07:04:32.166634"
   }
 ]
