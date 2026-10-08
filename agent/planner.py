@@ -120,7 +120,7 @@ class Planner:
             r"open\s+(?:app|application)|launch\s+(?:app|application)|"
             r"open\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}|"
             r"launch\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}|"
-            r"write(?:\s+(?:into|in|on))?\b|
+            r"write(?:\s+(?:into|in|on))?\b|"
             r"close\s+(?:app|application)|list\s+(?:open\s+)?windows|"
             r"focus\s+window|control\s+(?:the\s+)?(?:mouse|keyboard|screen))\b",
             text,
