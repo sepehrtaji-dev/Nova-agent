@@ -196,6 +196,16 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(payload["x"], 300)
         self.assertEqual(payload["y"], 250)
 
+    def test_mouse_control_does_not_call_llm(self):
+        decision = self.router.decide(
+            message="click at 500, 400",
+            task_type="computer",
+            plan="Goal: click at 500, 400",
+            allowed_tools=["desktop"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        self.assertEqual(self.brain.calls, 0)
+
     def test_explicit_search_is_computer(self):
         self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
 
