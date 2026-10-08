@@ -981,7 +981,7 @@ class ToolRouter:
         if not isinstance(message, str):
             return False
 
-        text = re.sub(r"\\s+", " ", message.strip().lower())
+        text = re.sub(r"\s+", " ", message.strip().lower())
         if not text:
             return False
 
