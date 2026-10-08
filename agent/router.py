@@ -699,7 +699,7 @@ class ToolRouter:
             return (
                 isinstance(path, str)
                 and bool(path.strip())
-                and location in {"projects", "desktop"}
+                and location in {"projects", "desktop", "system"}
             )
 
         # Unknown tool — allow through, let the tool handle validation
