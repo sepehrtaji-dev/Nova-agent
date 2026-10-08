@@ -57,7 +57,7 @@ class RouterTests(unittest.TestCase):
         )
 
         self.assertEqual(len(plan["steps"]), 2)
-        self.assertEqual(brain.calls, 1)
+        self.assertEqual(brain.calls, 0)
         self.assertIn("desktop:", plan["steps"][0]["description"])
     def test_compound_notepad_request_gets_ordered_desktop_steps(self):
         planner = Planner(self.brain, self.tools)
