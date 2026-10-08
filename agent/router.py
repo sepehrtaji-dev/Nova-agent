@@ -332,22 +332,14 @@ class ToolRouter:
         return None
 
     def _has_successful_tool(self, tool_history):
-
-        if not tool_history:
+        """Only trust Nova's verifier, never raw tool success markers."""
+        if not isinstance(tool_history, str) or not tool_history.strip():
             return False
-
-        success_markers = [
-            "STATUS: SUCCESS",
-            "FILE_CREATED",
-            "DIRECTORY_CREATED",
-            "Verification: CONFIRMED",
-            "Tool success: True",
-        ]
-
-        return any(
-            marker.lower() in tool_history.lower()
-            for marker in success_markers
-        )
+        return re.search(
+            r"Verification:\s*CONFIRMED\b",
+            tool_history,
+            flags=re.IGNORECASE,
+        ) is not None
 
     def _get_tool_names(self, allowed_tools=None):
 
@@ -534,7 +526,8 @@ class ToolRouter:
 
             if location not in {
                 "projects",
-                "desktop"
+                "desktop",
+                "system"
             }:
                 return False
 
@@ -562,7 +555,8 @@ class ToolRouter:
 
             if location not in {
                 "projects",
-                "desktop"
+                "desktop",
+                "system"
             }:
                 return False
 
@@ -588,7 +582,8 @@ class ToolRouter:
 
             if location not in {
                 "projects",
-                "desktop"
+                "desktop",
+                "system"
             }:
                 return False
 
@@ -627,7 +622,8 @@ class ToolRouter:
 
             if location not in {
                 "projects",
-                "desktop"
+                "desktop",
+                "system"
             }:
                 return False
 
@@ -712,15 +708,16 @@ class ToolRouter:
     # Desktop intent — force desktop tool before model decides
     _desktop_intent = re.compile(
         r"\b(?:"
-        r"take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|\bscreenshot\b"
-        r"|click\s+(?:on\s+)?(?:the\s+)?(?:button|icon|link|checkbox|menu\s+item)"
-        r"|move\s+(?:the\s+)?mouse\s+to"
-        r"|scroll\s+(?:up|down)\s+(?:in|on|the)\s+\w"
+        r"take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|screenshot"
+        r"|click(?:\s+(?:on\s+)?(?:the\s+)?(?:button|icon|link|checkbox|menu\s+item))?"
+        r"|move\s+(?:the\s+)?mouse(?:\s+to|\s+over)?"
+        r"|scroll\s+(?:up|down)(?:\s+(?:in|on|the)\s+\w+)?"
         r"|list\s+open\s+windows|show\s+(?:all\s+)?open\s+windows"
-        r"|focus\s+(?:the\s+)?window\s+\w"
+        r"|focus\s+(?:the\s+)?window\s+\w+"
         r"|press\s+(?:ctrl|alt|shift|win|cmd)\s*\+"
-        r"|open\s+(?:firefox|chrome|safari|edge|notepad|calculator|terminal|vscode|gedit|kate|vlc|spotify|telegram|discord|slack)\b"
-        r")\b",
+        r"|(?:type|write)\s+.+"
+        r"|(?:open|launch|run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?[a-z0-9][a-z0-9 ._-]{1,80}"
+        r")",
         re.IGNORECASE
     )
 
@@ -729,18 +726,41 @@ class ToolRouter:
             return False
 
         text = re.sub(r"\s+", " ", message.strip())
-        match = self._desktop_intent.search(text)
-        if not match:
+        if not text:
             return False
 
+        # File/source requests must stay with filesystem tools even when
+        # wording contains "write" or "open".
         if re.search(
-            r"\b(?:open|launch)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]*\.[a-z0-9]{1,12}\b",
+            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove|read|open)\b"
+            r"[^\n]{0,120}\b(?:file|script|program|source|source\s+code|code)\b",
             text,
             flags=re.IGNORECASE,
         ):
             return False
 
-        return True
+        if re.search(
+            r"\b(?:open|launch|run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?"
+            r"[a-z0-9][a-z0-9 ._-]*\.[a-z0-9]{1,12}\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return False
+
+        # Direct typing into a GUI is a computer action unless the request is
+        # clearly about source/code generation.
+        if re.search(
+            r"\b(?:type|write)\b",
+            text,
+            flags=re.IGNORECASE,
+        ) and not re.search(
+            r"\b(?:code|script|program|source)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
+        return self._desktop_intent.search(text) is not None
 
     def _force_desktop_decision(self, message):
         """Build a deterministic desktop tool decision directly from user text."""
@@ -1445,7 +1465,7 @@ Return JSON only.
                 json_mode=False,
                 options={
                     "temperature": 0.0,
-                    "num_predict": 256,
+                    "num_predict": 2048,
                 },
             )
         except Exception as exc:
@@ -2029,6 +2049,12 @@ Return JSON only.
                     "computer"
                 )
             )
+
+            if tool_decision and pending_tool is not None and tool_decision.get("tool") != pending_tool:
+                tool_decision = None
+
+            if tool_decision and search_requested and tool_decision.get("tool") != "web_search":
+                tool_decision = None
 
             if tool_decision:
 
