@@ -12,7 +12,7 @@ class KnowledgeMemory:
         self.data = []
 
         os.makedirs(
-            os.path.dirname(self.path),
+            os.path.dirname(os.path.abspath(self.path)) or ".",
             exist_ok=True
         )
 
@@ -116,8 +116,15 @@ class KnowledgeMemory:
             if len(overlap) < min(2, len(query_words)):
                 continue
 
-            confidence = float(item.get("confidence", 0.0) or 0.0)
-            score = len(overlap) + max(0.0, min(1.0, confidence)) * 0.25
+            try:
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+
+            score = (
+                len(overlap)
+                + max(0.0, min(1.0, confidence)) * 0.25
+            )
             results.append((score, item))
 
         results.sort(key=lambda item: item[0], reverse=True)
@@ -170,12 +177,14 @@ class KnowledgeMemory:
         existing = None
 
         for old in self.data:
+            if not isinstance(old, dict):
+                continue
 
             if (
-                old.get("topic", "").lower()
+                str(old.get("topic", "")).lower()
                 == topic.lower()
                 and
-                old.get("fact", "").lower()
+                str(old.get("fact", "")).lower()
                 == fact.lower()
             ):
                 existing = old
