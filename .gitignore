@@ -9,3 +9,5 @@ __pycache__/
 .venv/
 venv/
 .env
+memory/*.json
+memory/database/*.json
