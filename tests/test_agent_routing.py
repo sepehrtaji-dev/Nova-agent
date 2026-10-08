@@ -45,6 +45,15 @@ class RouterTests(unittest.TestCase):
         self.tools = FakeTools()
         self.router = ToolRouter(self.brain, self.tools)
 
+    def test_compound_search_and_file_request_preserves_both_steps(self):
+        planner = Planner(self.brain, self.tools)
+        plan = planner.create_plan(
+            "search the web about assembly and write a Python hello world file"
+        )
+        self.assertEqual(len(plan["steps"]), 2)
+        self.assertTrue(plan["steps"][0]["description"].startswith("web_search:"))
+        self.assertTrue(plan["steps"][1]["description"].startswith("write_file:"))
+
     def test_compound_desktop_request_uses_tool_aware_planner(self):
         brain = FakeBrain(
             '{"goal":"desktop task","steps":[{"description":"desktop: open notepad"},{"description":"desktop: type HELLO_NOVA_TEST"}]}'
