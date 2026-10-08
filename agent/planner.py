@@ -91,6 +91,44 @@ class Planner:
 
         return normalized
 
+    def _deterministic_desktop_plan(self, goal):
+        """Build a single-step plan for direct mouse/keyboard/window control."""
+        if not isinstance(goal, str):
+            return None
+
+        text = re.sub(r"\s+", " ", goal.strip())
+        if not text:
+            return None
+
+        desktop_action = re.search(
+            r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|"
+            r"click|double[- ]click|right[- ]click|middle[- ]click|"
+            r"move\s+(?:the\s+)?mouse|"
+            r"type\s+(?:into|in|on)|"
+            r"press\s+(?:key|ctrl|alt|enter|escape)|"
+            r"scroll\s+(?:up|down)|"
+            r"open\s+(?:app|application)|launch\s+(?:app|application)|"
+            r"close\s+(?:app|application)|list\s+(?:open\s+)?windows|"
+            r"focus\s+window|control\s+(?:the\s+)?(?:mouse|keyboard|screen))\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        if not desktop_action:
+            return None
+
+        return {
+            "goal": goal,
+            "steps": [
+                {
+                    "id": 1,
+                    "description": f"desktop: {text}",
+                    "status": "pending",
+                    "result": None,
+                }
+            ],
+        }
+
     def _deterministic_single_file_plan(self, goal):
         """Build a minimal plan for an explicit source-file/script request."""
         if not isinstance(goal, str):
@@ -222,6 +260,10 @@ class Planner:
                 "goal": "",
                 "steps": []
             }
+
+        deterministic_plan = self._deterministic_desktop_plan(goal)
+        if deterministic_plan is not None:
+            return deterministic_plan
 
         deterministic_plan = self._deterministic_single_file_plan(goal)
         if deterministic_plan is not None:
