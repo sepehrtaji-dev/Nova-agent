@@ -180,15 +180,20 @@ class CoreTests(unittest.TestCase):
     def test_follow_up_uses_verified_path_without_new_tool_call(self):
         core = NovaCore.__new__(NovaCore)
         core.short_memory = FakeMemory()
-        core.short_memory.add(
-            "tool",
-            "Verified tool evidence\nTool: desktop\nResult: STATUS: SUCCESS\\nScreenshot saved: C:\\\\Users\\\\Test\\\\nova.png\nEvidence: Screenshot: C:\\\\Users\\\\Test\\\\nova.png"
+        evidence = (
+            "Verified tool evidence\n"
+            "Tool: desktop\n"
+            "Result: STATUS: SUCCESS\n"
+            "Screenshot saved: "
+            r"C:\Users\Test\nova.png"
+            "\nEvidence: Screenshot: "
+            r"C:\Users\Test\nova.png"
         )
+        core.short_memory.add("tool", evidence)
 
         response = core._direct_evidence_answer("give me the exact path")
 
-        self.assertEqual(response, "Exact path: C:\\\\Users\\\\Test\\\\nova.png")
-
+        self.assertEqual(response, r"Exact path: C:\Users\Test\nova.png")
     def test_verified_task_response_never_asks_model_to_explain_missing_capabilities(self):
         core = NovaCore.__new__(NovaCore)
         response = core._build_verified_task_response([
