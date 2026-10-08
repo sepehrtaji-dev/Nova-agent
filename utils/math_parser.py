@@ -46,7 +46,7 @@ def parse_math(text):
     had_explicit_math = bool(
         re.search(
             r"(?:\$|\\(?:[A-Za-z]+|[,{}\[\]()]|left|right))",
-            value,
+            text,
         )
     )
     value = text.replace(r"\[", "").replace(r"\]", "")
