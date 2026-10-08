@@ -25,7 +25,8 @@ class FakeTools:
             "terminal": {"description": "terminal", "function": lambda x: None},
             "web_search": {"description": "web", "function": lambda x: None},
             "generate_image": {"description": "image", "function": lambda x: None},
-            "git": {"description": "git", "function": lambda x: None},
+                        "git": {"description": "git", "function": lambda x: None},
+            "desktop": {"description": "Control the desktop and GUI", "function": lambda x: None},
         }
 
     def exists(self, name):
@@ -58,6 +59,34 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len(plan["steps"]), 2)
         self.assertEqual(brain.calls, 1)
         self.assertIn("desktop:", plan["steps"][0]["description"])
+    def test_compound_notepad_request_gets_ordered_desktop_steps(self):
+        planner = Planner(self.brain, self.tools)
+        plan = planner.create_plan(
+            'open notepad and write "HELLO_NOVA_TEST" in it'
+        )
+
+        self.assertEqual(len(plan["steps"]), 2)
+        self.assertIn("desktop: open notepad", plan["steps"][0]["description"])
+        self.assertIn('desktop: write "HELLO_NOVA_TEST" in it', plan["steps"][1]["description"])
+        self.assertEqual(self.brain.calls, 0)
+
+    def test_pending_desktop_step_is_routed_to_desktop_tool(self):
+        plan = (
+            'Goal: notepad task\n'
+            '1. [completed] desktop: open notepad\n'
+            '2. [pending] desktop: write "HELLO_NOVA_TEST" in it'
+        )
+        decision = self.router.decide(
+            message='open notepad and write "HELLO_NOVA_TEST" in it',
+            task_type="computer",
+            tool_history="Tool: desktop\nVerification: CONFIRMED\nTool success: True",
+            plan=plan,
+            allowed_tools=["desktop"],
+        )
+        self.assertEqual(decision["tool"], "desktop")
+        payload = json.loads(decision["input"])
+        self.assertEqual(payload["action"], "type")
+        self.assertEqual(payload["text"], "HELLO_NOVA_TEST")
     def test_single_file_creation_gets_one_deterministic_write_step(self):
         planner = Planner(self.brain)
         plan = planner.create_plan(
