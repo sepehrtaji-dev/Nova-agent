@@ -730,7 +730,22 @@ class ToolRouter:
     )
 
     def _has_desktop_intent(self, message):
-        return bool(self._desktop_intent.search(message))
+        if not isinstance(message, str):
+            return False
+
+        text = re.sub(r"\s+", " ", message.strip())
+        match = self._desktop_intent.search(text)
+        if not match:
+            return False
+
+        if re.search(
+            r"\b(?:open|launch)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]*\.[a-z0-9]{1,12}\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return False
+
+        return True
 
     def _force_desktop_decision(self, message):
         """Build a deterministic desktop tool decision directly from user text."""
