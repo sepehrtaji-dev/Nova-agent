@@ -394,7 +394,7 @@ class RouterTests(unittest.TestCase):
         brain = RepairBrain()
         router = ToolRouter(brain, self.tools)
         decision = router.decide(
-            message="read notes.txt",
+            message="do the planned task",
             task_type="computer",
             plan="Goal: read notes.txt\n1. [pending] read_file: read notes.txt in projects",
             allowed_tools=["read_file", "terminal"],
