@@ -127,15 +127,30 @@ class Planner:
         if not desktop_action:
             return None
 
-        # Let the model decompose compound requests into multiple tool steps.
-        # Atomic desktop commands can still use the deterministic fast path.
-        if re.search(
-            r"\b(?:and|then|after(?:wards)?|followed\s+by)\b",
+        compound = re.split(
+            r"\s+(?:and then|then|and|after that|afterwards|followed by)\s+",
             text,
             flags=re.IGNORECASE,
-        ):
-            return None
+        )
 
+        if len(compound) > 1:
+            steps = []
+            for index, clause in enumerate(compound, start=1):
+                clause = clause.strip(" ,.")
+                if not clause:
+                    continue
+                steps.append({
+                    "id": index,
+                    "description": "desktop: " + clause,
+                    "status": "pending",
+                    "result": None,
+                })
+
+            if len(steps) > 1:
+                return {
+                    "goal": goal,
+                    "steps": steps,
+                }
         return {
             "goal": goal,
             "steps": [
