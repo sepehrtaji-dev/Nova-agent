@@ -547,6 +547,22 @@ class ToolRouter:
 
             return True
 
+        if tool_name == "find_files":
+            path = tool_input.get("path", ".")
+            location = tool_input.get("location", "projects")
+            if not isinstance(path, str):
+                return False
+            if location not in {"projects", "desktop", "system"}:
+                return False
+            for key in ("created_within_hours", "modified_within_hours"):
+                if key in tool_input and tool_input.get(key) is not None:
+                    try:
+                        if float(tool_input.get(key)) < 0:
+                            return False
+                    except (TypeError, ValueError):
+                        return False
+            return True
+
         if tool_name == "read_file":
 
             path = tool_input.get(
@@ -1843,6 +1859,52 @@ Return JSON only.
         filename = self._extract_filename(
             f"{pending} {message or ''}"
         )
+
+        if planned_tool == "find_files" and "file" in tool_description:
+            combined = f"{pending} {message or ''}"
+
+            age_match = re.search(
+                r"\b(?:last|past)\s+(\d+)\s*(?:hours?|hrs?)\b",
+                combined,
+                flags=re.IGNORECASE,
+            )
+            created_match = re.search(
+                r"\b(?:created|made|created\s+for\s+me)\b",
+                combined,
+                flags=re.IGNORECASE,
+            )
+            modified_match = re.search(
+                r"\b(?:modified|changed|updated)\b",
+                combined,
+                flags=re.IGNORECASE,
+            )
+
+            payload = {
+                "path": ".",
+                "location": (
+                    "desktop"
+                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
+                    else "projects"
+                ),
+                "recursive": True,
+            }
+
+            filename = self._extract_filename(combined)
+            if filename:
+                payload["pattern"] = filename
+            if age_match:
+                hours = int(age_match.group(1))
+                if created_match:
+                    payload["created_within_hours"] = hours
+                elif modified_match:
+                    payload["modified_within_hours"] = hours
+
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": planned_tool,
+                "input": json.dumps(payload, ensure_ascii=False),
+            }
 
         if planned_tool is not None:
             combined = f"{pending} {message or ''}"
