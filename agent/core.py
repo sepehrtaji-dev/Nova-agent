@@ -916,7 +916,7 @@ If nothing reliable can be extracted:
                         value = line.split(":", 1)[1].strip()
 
                     if value and (
-                        re.match(r"^[A-Za-z]:\\", value)
+                        re.match(r"^[A-Za-z]:\\+", value)
                         or value.startswith("/")
                     ):
                         if value not in paths:
