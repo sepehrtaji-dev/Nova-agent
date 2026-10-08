@@ -121,6 +121,22 @@ class MemoryExtractor:
             "memories": valid_memories
         }
 
+    def should_extract(self, text):
+        if not isinstance(text, str):
+            return False
+
+        text = text.strip().lower()
+        if not text:
+            return False
+
+        return bool(re.search(
+            r"\b(?:remember|don't forget|do not forget|call me|my name is|"
+            r"i am|i'm|i use|i prefer|i like|i want you to remember|"
+            r"my project|i am working on|i'm working on|my computer|"
+            r"my pc|my gpu|my cpu|my setup|my workflow|my preference)\b",
+            text,
+        ))
+
     def extract(self, text):
         if not isinstance(text, str):
             return {
