@@ -1870,22 +1870,6 @@ Return JSON only.
                 if isinstance(tool_meta, dict)
                 else ""
             )
-            desktop_step = re.search(
-                r":\s*(.+)$",
-                pending,
-                flags=re.IGNORECASE,
-            )
-            if (
-                desktop_step
-                and ("desktop" in tool_description or "gui" in tool_description)
-            ):
-                desktop_decision = self._force_desktop_decision(
-                    desktop_step.group(1).strip()
-                )
-                if desktop_decision:
-                    desktop_decision["tool"] = planned_tool
-                    return desktop_decision
-
         write_words = ("file", "script", "program", "source", "code")
         write_intent = (
             "write_file" in pending_lower
@@ -2137,13 +2121,6 @@ Return JSON only.
             self._remember_file_generation(deterministic)
             return deterministic
 
-        # Fallback for a direct atomic desktop request when the plan did not
-        # describe a concrete executable step.
-        if self._has_desktop_intent(message) and not has_successful_tool:
-            desktop_decision = self._force_desktop_decision(message)
-            if desktop_decision:
-                if allowed_tools is None or "desktop" in set(allowed_tools):
-                    return desktop_decision
         prompt = self._build_decision_prompt(
             message=message,
             task_type=task_type,
