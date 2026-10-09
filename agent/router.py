@@ -1238,114 +1238,60 @@ class ToolRouter:
         )
 
     def classify_task(self, message, conversation=""):
+        """Classify intent with the language model, not keyword/regex shortcuts.
 
-        if self._is_obviously_conversational(message):
+        Deterministic checks remain appropriate for validation and authorization,
+        but user intent should be interpreted from the full request and context.
+        If the model cannot provide a valid classification, fail closed to
+        conversation rather than accidentally initiating a computer action.
+        """
+        if not isinstance(message, str) or not message.strip():
             return "conversation"
 
-        if self._is_verified_followup(message, conversation):
-            return "conversation"
+        prompt = f"""You are Nova's intent classifier.
+Determine whether the user's current message requires Nova to perform a real
+action using an enabled tool, or whether it is a conversational/informational
+request that can be answered without a tool.
 
-        if self._is_concept_question(message):
-            return "conversation"
+Interpret the full meaning, including negation, hypotheticals, quotations,
+questions about how something works, and prior conversation. Mentioning a tool,
+app, file, terminal, web search, or computer action is NOT by itself a request
+to execute it. If the user asks how to do something, explain it unless they
+clearly ask Nova to do it. If intent is genuinely ambiguous, choose conversation.
 
-        if self._has_explicit_computer_intent(message):
-            return "computer"
+Return only JSON with exactly one field:
+{{"task_type":"computer"}}
+or
+{{"task_type":"conversation"}}
 
-        # BUG 11: Include conversation context in repair prompt
-        repair_prompt = f"""You are Nova's action validator.
+PREVIOUS CONVERSATION:
+{conversation[-6000:] if isinstance(conversation, str) else ""}
 
-Think step by step:
-1. What is the user's goal?
-2. What has been done (check TOOL HISTORY)?
-3. What is the next logical action?
-4. Which tool performs it?
-
-Return ONLY valid JSON.
-
-TASK TYPE: {task_type}
-
-USER REQUEST: {message}
-
-PREVIOUS CONVERSATION: {conversation}
-
-REAL TOOL HISTORY: {tool_history}
-
-CURRENT PLAN: {plan}
-
-If the computer task is incomplete, choose the next real tool.
-
-Available tools:
-{tools_description}
-
-Only the tools listed above are enabled for this request.
-
-IMPORTANT: If the user explicitly requested a web search and no successful web_search result exists, YOU MUST choose web_search.
-
-For web_search:
-{{"action":"tool","task_type":"computer","tool":"web_search","input":{{"query":"search query"}}}}
-
-For write_file (ONLY path + location, NO content, NO code):
-{{"action":"tool","task_type":"computer","tool":"write_file","input":{{"path":"filename.py","location":"projects"}}}}
-
-For edit_file (modify existing file):
-{{"action":"tool","task_type":"computer","tool":"edit_file","input":{{"path":"filename","location":"projects","old":"text to replace","new":"replacement text"}}}}
-
-For delete_file:
-{{"action":"tool","task_type":"computer","tool":"delete_file","input":{{"path":"filename","location":"projects"}}}}
-
-For read_file:
-{{"action":"tool","task_type":"computer","tool":"read_file","input":{{"path":"filename","location":"projects"}}}}
-
-For list_files:
-{{"action":"tool","task_type":"computer","tool":"list_files","input":{{"path":".","location":"projects"}}}}
-
-For create_directory:
-{{"action":"tool","task_type":"computer","tool":"create_directory","input":{{"path":"directory_name","location":"projects"}}}}
-
-For terminal:
-{{"action":"tool","task_type":"computer","tool":"terminal","input":{{"command":"command","location":"projects"}}}}
-
-For git:
-{{"action":"tool","task_type":"computer","tool":"git","input":{{"action":"clone","url":"https://github.com/..."}}}}
-
-If the entire task is completed:
-{{"action":"respond","task_type":"computer","goal_complete":true}}
-
-Return JSON only.
+CURRENT USER MESSAGE:
+{message}
 """
+        for attempt in range(2):
+            try:
+                raw = self.brain.generate(
+                    prompt if attempt == 0 else (
+                        "Classify the intent of this request. Return only JSON: "
+                        '{"task_type":"computer"} or '
+                        '{"task_type":"conversation"}. Do not infer execution '
+                        "intent from mere mentions, hypotheticals, or questions.\n"
+                        f"Conversation: {conversation[-3000:] if isinstance(conversation, str) else ''}\n"
+                        f"Request: {message}"
+                    ),
+                    json_mode=True,
+                )
+            except Exception as exc:
+                logging.warning("Intent classification attempt %s failed: %s", attempt + 1, exc)
+                continue
 
-        try:
-            raw = self.brain.generate(prompt, json_mode=True)
-        except Exception:
-            raw = ""
-
-        data = self._extract_json(raw)
-
-        if isinstance(data, dict):
-            task_type = self._normalize_task_type(data.get("task_type"))
-            if task_type:
-                return task_type
-
-        # Repair pass with even simpler prompt
-        repair_prompt = f"""Does this request require Nova to use tools (files, terminal, git, web)?
-
-Request: {message}
-
-Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
-
-        try:
-            raw = self.brain.generate(repair_prompt, json_mode=True)
-        except Exception as exc:
-            # BUG 42+43: Log before swallowing
-            logging.warning("Repair brain.generate failed: %s", exc)
-            raw = ""
-
-        data = self._extract_json(raw)
-
-        if isinstance(data, dict):
-            task_type = self._normalize_task_type(data.get("task_type"))
-            if task_type:
-                return task_type
+            data = self._extract_json(raw)
+            if isinstance(data, dict):
+                task_type = self._normalize_task_type(data.get("task_type"))
+                if task_type in {"computer", "conversation"}:
+                    return task_type
 
         return "conversation"
 
