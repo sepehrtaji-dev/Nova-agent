@@ -649,35 +649,8 @@ class Planner:
                 "steps": []
             }
 
-        deterministic_plan = self._deterministic_file_history_plan(goal)
-        if deterministic_plan is not None:
-            if self._validate_deterministic_plan(deterministic_plan):
-                return deterministic_plan
-            print("[PLANNER] Deterministic plan rejected: unregistered tool.")
-
-        deterministic_plan = self._deterministic_search_and_file_plan(goal)
-        if deterministic_plan is not None:
-            if self._validate_deterministic_plan(deterministic_plan):
-                return deterministic_plan
-            print("[PLANNER] Deterministic plan rejected: unregistered tool.")
-
-        deterministic_plan = self._deterministic_desktop_plan(goal)
-        if deterministic_plan is not None:
-            if self._validate_deterministic_plan(deterministic_plan):
-                return deterministic_plan
-            print("[PLANNER] Deterministic plan rejected: unregistered tool.")
-
-        deterministic_plan = self._deterministic_single_file_plan(goal)
-        if deterministic_plan is not None:
-            if self._validate_deterministic_plan(deterministic_plan):
-                return deterministic_plan
-            print("[PLANNER] Deterministic plan rejected: unregistered tool.")
-
-        deterministic_plan = self._deterministic_single_file_read_plan(goal)
-        if deterministic_plan is not None:
-            if self._validate_deterministic_plan(deterministic_plan):
-                return deterministic_plan
-            print("[PLANNER] Deterministic plan rejected: unregistered tool.")
+        # The model owns intent and plan construction. Deterministic code below
+        # validates the model's output and registered tool names before execution.
 
         prompt = f"""You are Nova's task planner.
 
