@@ -38,10 +38,14 @@ class FakeBrain:
         elif "open notepad" in low:
             steps = [
                 step("desktop", "desktop: open notepad", {"action": "open_app", "app": "notepad"}),
-                step("desktop", 'desktop: type "HELLO_NOVA_TEST"', {"action": "type", "text": "HELLO_NOVA_TEST"}),
+                step("desktop", 'desktop: write "HELLO_NOVA_TEST" in it', {"action": "type", "text": "HELLO_NOVA_TEST"}),
             ]
-        elif "please run my firefox" in low:
-            steps = [step("desktop", "desktop: open firefox", {"action": "open_app", "app": "firefox"})]
+        elif re.search(r"\b(?:run|launch|start|open)\b", low):
+            app_match = re.search(r"\b(?:run|launch|start|open)\s+(?:my\s+|the\s+)?(?:app\s+)?(.+?)\s*[.!?]*$", goal, re.IGNORECASE)
+            app = app_match.group(1).strip() if app_match else "application"
+            if app.lower() == "the browser":
+                app = "browser"
+            steps = [step("desktop", f"desktop: open {app}", {"action": "open_app", "app": app})]
         elif "write a c++ script" in low or "c++" in low:
             steps = [step("write_file", "write_file: create hello.cpp", {"path": "hello.cpp", "location": "projects"})]
         elif "read hello.cpp" in low:
