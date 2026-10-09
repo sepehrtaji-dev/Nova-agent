@@ -14,7 +14,7 @@ class FakeBrain:
     def _planner_fixture(prompt):
         import re
 
-        match = re.search(r"USER GOAL:\\s*(.*?)\\n\\nCONTEXT:", prompt, re.DOTALL)
+        match = re.search(r"USER GOAL:\s*(.*?)\n\nCONTEXT:", prompt, re.DOTALL)
         goal = match.group(1).strip() if match else ""
         low = goal.lower()
 
