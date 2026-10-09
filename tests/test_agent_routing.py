@@ -158,7 +158,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len(plan["steps"]), 2)
         self.assertIn("desktop: open notepad", plan["steps"][0]["description"])
         self.assertIn('desktop: write "HELLO_NOVA_TEST" in it', plan["steps"][1]["description"])
-        self.assertGreaterEqual(self.brain.calls, 1)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_pending_desktop_step_is_routed_to_desktop_tool(self):
         plan = (
@@ -199,7 +199,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(plan["steps"][0]["status"], "pending")
         self.assertIn("write_file", plan["steps"][0]["description"])
         self.assertIn("test_model.py", plan["steps"][0]["description"])
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_cplusplus_script_request_is_computer(self):
         self.brain.response = '{"task_type":"computer"}'
@@ -345,7 +345,7 @@ class RouterTests(unittest.TestCase):
         decision = self.router.decide(
             message="move the mouse to 300, 250",
             task_type="computer",
-            plan="Goal: move the mouse\n1. [pending] Move the mouse to 300, 250",
+            plan="Goal: move the mouse\n1. [pending] desktop: move the mouse to 300, 250",
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
@@ -380,15 +380,17 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(payload["text"], "hello")
         self.assertEqual(self.brain.calls, 0)
 
-    def test_mouse_control_does_not_call_llm(self):
+    def test_unplanned_mouse_control_uses_model_decision(self):
+        self.brain.response = '{"action":"tool","task_type":"computer","tool":"desktop","input":{"action":"click","x":500,"y":400}}'
         decision = self.router.decide(
             message="click at 500, 400",
             task_type="computer",
-            plan="Goal: click at 500, 400",
+            plan="No plan.",
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(json.loads(decision["input"]), {"action": "click", "x": 500, "y": 400})
+        self.assertEqual(self.brain.calls, 1)
 
     def test_explicit_search_is_computer(self):
         self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
