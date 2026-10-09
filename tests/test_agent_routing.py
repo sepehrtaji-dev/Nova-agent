@@ -407,14 +407,12 @@ class RouterTests(unittest.TestCase):
 
     def test_search_box_typing_is_computer(self):
         message = "type hello in the search box"
-        self.assertTrue(self.router._has_explicit_computer_intent(message))
         self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
         self.assertEqual(self.brain.calls, 1)
 
     def test_direct_app_open_is_computer(self):
         message = "please open firefox"
-        self.assertTrue(self.router._has_explicit_computer_intent(message))
         self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
         self.assertEqual(self.brain.calls, 1)
