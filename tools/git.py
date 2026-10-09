@@ -38,11 +38,15 @@ class GitTool:
         # Absolute path supplied — must be within workspace
         if os.path.isabs(path):
             full = os.path.abspath(path)
-            if os.path.commonpath([root, full]) != root:
-                raise ValueError(
-                    f"Git path escapes projects workspace: {path!r}"
-                )
-            return full
+            try:
+                resolved = os.path.realpath(full)
+                if os.path.commonpath([root, resolved]) != root:
+                    raise ValueError(
+                        f"Git path escapes projects workspace or traverses a symlink: {path!r}"
+                    )
+            except ValueError as exc:
+                raise ValueError(str(exc))
+            return resolved
 
         # Relative paths stay inside Nova's projects workspace.
         full = os.path.abspath(os.path.join(root, path))

@@ -770,64 +770,6 @@ class ToolRouter:
         logging.warning("Unknown tool encountered in validation: %s", tool_name)
         return False
 
-    # Desktop intent — force desktop tool before model decides
-    # BUG 14: Tightened to avoid matching "write a Python script" etc.
-    _desktop_intent = re.compile(
-        r"\b(?:"
-        r"take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|screenshot"
-        r"|click(?:\s+(?:on\s+)?(?:the\s+)?(?:button|icon|link|checkbox|menu\s+item))?"
-        r"|move\s+(?:the\s+)?mouse(?:\s+to|\s+over)?"
-        r"|scroll\s+(?:up|down)(?:\s+(?:in|on|the)\s+\w+)?"
-        r"|list\s+open\s+windows|show\s+(?:all\s+)?open\s+windows"
-        r"|focus\s+(?:the\s+)?window\s+\w+"
-        r"|press\s+(?:ctrl|alt|shift|win|cmd)\s*\+"
-        r"|(?:type|write)\s+(?!.*(?:python|script|code|program|javascript|typescript|java\b|c\+\+|rust|golang|bash|powershell)).+"
-        r"|(?:open|launch|run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?[a-z0-9][a-z0-9 ._-]{1,80}"
-        r")",
-        re.IGNORECASE
-    )
-
-    def _has_desktop_intent(self, message):
-        if not isinstance(message, str):
-            return False
-
-        text = re.sub(r"\s+", " ", message.strip())
-        if not text:
-            return False
-
-        # File/source requests must stay with filesystem tools even when
-        # wording contains "write" or "open".
-        if re.search(
-            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove|read|open)\b"
-            r"[^\n]{0,120}\b(?:file|script|program|source|source\s+code|code)\b",
-            text,
-            flags=re.IGNORECASE,
-        ):
-            return False
-
-        if re.search(
-            r"\b(?:open|launch|run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?"
-            r"[a-z0-9][a-z0-9 ._-]*\.[a-z0-9]{1,12}\b",
-            text,
-            flags=re.IGNORECASE,
-        ):
-            return False
-
-        # Direct typing into a GUI is a computer action unless the request is
-        # clearly about source/code generation.
-        if re.search(
-            r"\b(?:type|write)\b",
-            text,
-            flags=re.IGNORECASE,
-        ) and not re.search(
-            r"\b(?:code|script|program|source)\b",
-            text,
-            flags=re.IGNORECASE,
-        ):
-            return True
-
-        return self._desktop_intent.search(text) is not None
-
     def _force_desktop_decision(self, message):
         """Build a deterministic desktop tool decision directly from user text."""
         import re as _re
@@ -1032,320 +974,61 @@ class ToolRouter:
         return None
 
 
-    _search_intent_pattern = re.compile(
-        r"""
-        \b
-        (?:
-            web\s*search
-            | search\s+(?:the\s+)?(?:web|internet)
-            | search\s+(?:about|for|up)
-            | go\s+and\s+search
-            | google\s+
-            | look\s+up
-            | find\s+(?:about|information\s+about)
-        )
-        \b
-        """,
-        re.IGNORECASE | re.VERBOSE
-    )
-
-    def _has_search_intent(self, message):
-        if not isinstance(
-            message,
-            str
-        ):
-            return False
-
-        return bool(
-            self._search_intent_pattern.search(
-                message
-            )
-        )
-
-    def _is_verified_followup(self, message, conversation):
-        if not isinstance(message, str) or not isinstance(conversation, str):
-            return False
-
-        text = re.sub(r"\s+", " ", message.strip().casefold())
-        context = conversation.casefold()
-        if not text or not context:
-            return False
-
-        question = bool(re.match(
-            r"^(?:what|which|who|where|when|why|how|tell|explain|show|describe)\b",
-            text,
-        ))
-        if not question:
-            return False
-
-        filename = self._extract_filename(message)
-        if filename:
-            # BUG 9: Use word-boundary matching to avoid substring matches
-            if re.search(rf"(?<!\w){re.escape(filename.casefold())}(?!\w)", context):
-                return True
-
-        return bool(
-            re.search(r"\b(?:what exactly|what is inside|show me the contents?)\b", text)
-            and re.search(r"\b(?:verified|tool|file|content|result)\b", context)
-        )
-
-    def _is_concept_question(self, message):
-        if not isinstance(message, str):
-            return False
-
-        text = re.sub(r"\s+", " ", message.strip().casefold())
-        if not text:
-            return False
-
-        if re.search(
-            r"\b(?:file|folder|directory|terminal|shell|command|git|github|"
-            r"web|internet|mouse|keyboard|screen|window|application|app|"
-            r"computer|pc|screenshot|code file)\b",
-            text,
-        ):
-            return False
-
-        return bool(re.match(
-            r"^(?:explain|define|describe|what is|what are|why does|how does|"
-            r"how do|tell me about)\b",
-            text,
-        ))
-
-    def _is_obviously_conversational(self, message):
-        """Fast-path greetings and casual chat so they never enter tool execution."""
-        if not isinstance(message, str):
-            return False
-
-        text = re.sub(r"\s+", " ", message.strip().lower())
-        if not text:
-            return False
-
-        if re.match(
-            r"^(?:how\s+are\s+you|how\s+have\s+you\s+been)(?:\s+(?:today|lately|recently))?[!?.,]*$",
-            text,
-            flags=re.IGNORECASE,
-        ):
-            return True
-
-        casual = {
-            "hi", "hello", "hey", "hey nova", "hi nova", "hello nova",
-            "yo", "sup", "what's up", "whats up",
-            "good morning", "good afternoon", "good evening",
-            "good night", "thanks", "thank you", "thx", "bye", "goodbye"
-        }
-
-        return text in casual
-
-    def _has_explicit_computer_intent(self, message):
-        """Detect direct requests that require real computer/tool actions."""
-        if not isinstance(message, str):
-            return False
-
-        text = re.sub(r"\s+", " ", message.strip().lower())
-        if not text:
-            return False
-
-        # Reuse the deterministic desktop-intent detector for direct GUI
-        # requests such as "open firefox" or "type hello in the address bar".
-        # File opens are intentionally excluded by _has_desktop_intent and are
-        # handled by filesystem-specific patterns below.
-        if self._has_desktop_intent(message):
-            return True
-
-        # Questions that explicitly ask Nova to control the PC are computer tasks.
-        if re.match(r"^(?:how|what|why|can|could|would)\b", text):
-            # BUG 25: Skip questions about files — those are handled by filesystem patterns
-            is_file_question = bool(re.search(
-                r"\b(?:file|files|folder|directory|script|program|source)\b",
-                text,
-                re.IGNORECASE,
-            ))
-
-            if not is_file_question:
-                has_target = re.search(
-                    r"\b(?:mouse|keyboard|screen|window|app|application)\b",
-                    text,
-                )
-                has_action = re.search(
-                    r"\b(?:click|move|type|press|scroll|open|close|focus|control|take|capture)\b",
-                    text,
-                )
-
-                if has_target and has_action:
-                    return True
-
-                if re.search(
-                    r"\b(?:press|hit)\s+(?:the\s+)?(?:key\s+)?[a-z0-9]+(?:\+[a-z0-9]+)+\b",
-                    text,
-                    re.IGNORECASE,
-                ):
-                    return True
-
-                if re.search(
-                    r"\b(?:click|move)\b[^\n]*\b-?\d+\s*[,x]\s*-?\d+\b",
-                    text,
-                    re.IGNORECASE,
-                ):
-                    return True
-
-                if re.search(
-                    r"\b(?:type|write)\b\s+[\"'][^\"']+[\"']",
-                    text,
-                    re.IGNORECASE,
-                ):
-                    return True
-
-                if re.search(
-                    r"\b(?:open|launch|close)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
-                    text,
-                    re.IGNORECASE,
-                ) and not re.search(
-                    r"\b(?:file|folder|directory)\b|\.[a-z0-9]{1,6}\b",
-                    text,
-                    re.IGNORECASE,
-                ):
-                    return True
-
-                return bool(re.search(
-                    r"\b(?:for me|on my (?:pc|computer)|in (?:the )?(?:projects|desktop) folder|to (?:create|write|run|read|edit|delete|modify))\b",
-                    text,
-                ))
-
-            # For file questions, still allow "for me" / "on my computer" style requests
-            return bool(re.search(
-                r"\b(?:for me|on my (?:pc|computer))\b",
-                text,
-                re.IGNORECASE,
-            ))
-
-        patterns = [
-            r"\b(?:what|which|find|list|show)\b[^\n]{0,100}\bfiles?\b[^\n]{0,80}\b(?:created|made|written|saved|modified|changed|updated|edited|last|past|recent|today|yesterday)\b",
-            r"\b(?:create|make|write|save|overwrite|generate|edit|modify|delete|remove|read|open)\b[^\n]{0,80}\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json)\b",
-            r"\b(?:create|make|write|save|generate)\b[^\n]{0,100}\b(?:file|script|program|source|source code|code)\b",
-            r"\b(?:write|create|make|generate)\b[^\n]{0,60}\b(?:python|c\+\+|cpp|javascript|typescript|rust|java|golang)\b",
-            r"\b(?:run|execute)\b[^\n]{0,80}\b(?:command|script|program|python|powershell|shell)\b",
-            r"\b(?:terminal|powershell|cmd|shell)\b",
-            r"\b(?:git|github)\b[^\n]{0,100}\b(?:clone|commit|push|pull|checkout|branch|status|init|add|create repo|repository)\b",
-            r"\buse\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\s+to\s+search\b",
-            r"\b(?:search|look up|find|google)\b[^\n]{0,60}\b(?:web|internet|online)\b",
-            r"\b(?:screenshot|capture (?:the )?screen|open app|launch app|click|move (?:the )?mouse|press (?:key|ctrl|alt|enter|escape)|scroll)\b",
-            r"\b(?:in|inside) (?:the )?(?:projects|desktop) (?:folder|directory)\b",
-        ]
-
-        return any(
-            re.search(pattern, text, re.IGNORECASE)
-            for pattern in patterns
-        )
-
     def classify_task(self, message, conversation=""):
+        """Classify intent with the language model, not keyword/regex shortcuts.
 
-        if self._is_obviously_conversational(message):
+        Deterministic checks remain appropriate for validation and authorization,
+        but user intent should be interpreted from the full request and context.
+        If the model cannot provide a valid classification, fail closed to
+        conversation rather than accidentally initiating a computer action.
+        """
+        if not isinstance(message, str) or not message.strip():
             return "conversation"
 
-        if self._is_verified_followup(message, conversation):
-            return "conversation"
+        prompt = f"""You are Nova's intent classifier.
+Determine whether the user's current message requires Nova to perform a real
+action using an enabled tool, or whether it is a conversational/informational
+request that can be answered without a tool.
 
-        if self._is_concept_question(message):
-            return "conversation"
+Interpret the full meaning, including negation, hypotheticals, quotations,
+questions about how something works, and prior conversation. Mentioning a tool,
+app, file, terminal, web search, or computer action is NOT by itself a request
+to execute it. If the user asks how to do something, explain it unless they
+clearly ask Nova to do it. If intent is genuinely ambiguous, choose conversation.
 
-        if self._has_explicit_computer_intent(message):
-            return "computer"
+Return only JSON with exactly one field:
+{{"task_type":"computer"}}
+or
+{{"task_type":"conversation"}}
 
-        # BUG 11: Include conversation context in repair prompt
-        repair_prompt = f"""You are Nova's action validator.
+PREVIOUS CONVERSATION:
+{conversation[-6000:] if isinstance(conversation, str) else ""}
 
-Think step by step:
-1. What is the user's goal?
-2. What has been done (check TOOL HISTORY)?
-3. What is the next logical action?
-4. Which tool performs it?
-
-Return ONLY valid JSON.
-
-TASK TYPE: {task_type}
-
-USER REQUEST: {message}
-
-PREVIOUS CONVERSATION: {conversation}
-
-REAL TOOL HISTORY: {tool_history}
-
-CURRENT PLAN: {plan}
-
-If the computer task is incomplete, choose the next real tool.
-
-Available tools:
-{tools_description}
-
-Only the tools listed above are enabled for this request.
-
-IMPORTANT: If the user explicitly requested a web search and no successful web_search result exists, YOU MUST choose web_search.
-
-For web_search:
-{{"action":"tool","task_type":"computer","tool":"web_search","input":{{"query":"search query"}}}}
-
-For write_file (ONLY path + location, NO content, NO code):
-{{"action":"tool","task_type":"computer","tool":"write_file","input":{{"path":"filename.py","location":"projects"}}}}
-
-For edit_file (modify existing file):
-{{"action":"tool","task_type":"computer","tool":"edit_file","input":{{"path":"filename","location":"projects","old":"text to replace","new":"replacement text"}}}}
-
-For delete_file:
-{{"action":"tool","task_type":"computer","tool":"delete_file","input":{{"path":"filename","location":"projects"}}}}
-
-For read_file:
-{{"action":"tool","task_type":"computer","tool":"read_file","input":{{"path":"filename","location":"projects"}}}}
-
-For list_files:
-{{"action":"tool","task_type":"computer","tool":"list_files","input":{{"path":".","location":"projects"}}}}
-
-For create_directory:
-{{"action":"tool","task_type":"computer","tool":"create_directory","input":{{"path":"directory_name","location":"projects"}}}}
-
-For terminal:
-{{"action":"tool","task_type":"computer","tool":"terminal","input":{{"command":"command","location":"projects"}}}}
-
-For git:
-{{"action":"tool","task_type":"computer","tool":"git","input":{{"action":"clone","url":"https://github.com/..."}}}}
-
-If the entire task is completed:
-{{"action":"respond","task_type":"computer","goal_complete":true}}
-
-Return JSON only.
+CURRENT USER MESSAGE:
+{message}
 """
+        for attempt in range(2):
+            try:
+                raw = self.brain.generate(
+                    prompt if attempt == 0 else (
+                        "Classify the intent of this request. Return only JSON: "
+                        '{"task_type":"computer"} or '
+                        '{"task_type":"conversation"}. Do not infer execution '
+                        "intent from mere mentions, hypotheticals, or questions.\n"
+                        f"Conversation: {conversation[-3000:] if isinstance(conversation, str) else ''}\n"
+                        f"Request: {message}"
+                    ),
+                    json_mode=True,
+                )
+            except Exception as exc:
+                logging.warning("Intent classification attempt %s failed: %s", attempt + 1, exc)
+                continue
 
-        try:
-            raw = self.brain.generate(prompt, json_mode=True)
-        except Exception:
-            raw = ""
-
-        data = self._extract_json(raw)
-
-        if isinstance(data, dict):
-            task_type = self._normalize_task_type(data.get("task_type"))
-            if task_type:
-                return task_type
-
-        # Repair pass with even simpler prompt
-        repair_prompt = f"""Does this request require Nova to use tools (files, terminal, git, web)?
-
-Request: {message}
-
-Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
-
-        try:
-            raw = self.brain.generate(repair_prompt, json_mode=True)
-        except Exception as exc:
-            # BUG 42+43: Log before swallowing
-            logging.warning("Repair brain.generate failed: %s", exc)
-            raw = ""
-
-        data = self._extract_json(raw)
-
-        if isinstance(data, dict):
-            task_type = self._normalize_task_type(data.get("task_type"))
-            if task_type:
-                return task_type
+            data = self._extract_json(raw)
+            if isinstance(data, dict):
+                task_type = self._normalize_task_type(data.get("task_type"))
+                if task_type in {"computer", "conversation"}:
+                    return task_type
 
         return "conversation"
 
@@ -1924,22 +1607,15 @@ Return JSON only.
                 if isinstance(tool_meta, dict)
                 else ""
             )
-            desktop_step = re.search(
-                r":\s*(.+)$",
-                pending,
-                flags=re.IGNORECASE,
-            )
-            if (
-                desktop_step
-                and ("desktop" in tool_description or "gui" in tool_description)
-            ):
-                desktop_decision = self._force_desktop_decision(
-                    desktop_step.group(1).strip()
-                )
-                if desktop_decision:
-                    desktop_decision["tool"] = planned_tool
-                    return desktop_decision
 
+        # A text-only legacy plan still needs an execution adapter. This does
+        # not infer intent from the user's message: it translates only the
+        # already-selected pending desktop step and remains subject to the
+        # allowed-tools check above.
+        if planned_tool == "desktop" and "desktop" in allowed:
+            desktop_decision = self._force_desktop_decision(action_text)
+            if desktop_decision and desktop_decision.get("tool") == "desktop":
+                return desktop_decision
         write_words = ("file", "script", "program", "source", "code")
         write_intent = (
             "write_file" in pending_lower
@@ -2191,13 +1867,6 @@ Return JSON only.
             self._remember_file_generation(deterministic)
             return deterministic
 
-        # Fallback for a direct atomic desktop request when the plan did not
-        # describe a concrete executable step.
-        if self._has_desktop_intent(message) and not has_successful_tool:
-            desktop_decision = self._force_desktop_decision(message)
-            if desktop_decision:
-                if allowed_tools is None or "desktop" in set(allowed_tools):
-                    return desktop_decision
         prompt = self._build_decision_prompt(
             message=message,
             task_type=task_type,
@@ -2238,13 +1907,6 @@ Return JSON only.
 
         if task_type == "computer":
 
-            search_requested = (
-                self._has_search_intent(
-                    message
-                )
-                and not has_successful_tool
-            )
-
             tool_decision = (
                 self._validate_tool_decision(
                     data,
@@ -2263,15 +1925,6 @@ Return JSON only.
                 tool_decision
                 and pending_tool is not None
                 and tool_decision.get("tool") != pending_tool
-            ):
-                tool_decision = None
-
-            if (
-                tool_decision
-                and search_requested
-                and tool_decision.get(
-                    "tool"
-                ) != "web_search"
             ):
                 tool_decision = None
 

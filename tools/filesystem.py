@@ -124,27 +124,43 @@ class FileSystemTool:
         return full_path
 
     def _check_system_path(self, full_path):
-        """Block dangerous system paths even in system mode."""
-        norm = full_path.replace("\\", "/")
+        """Block protected targets after canonicalizing symlinks and path case."""
+        # Check both the requested path and its resolved target. Otherwise a
+        # harmless-looking symlink can redirect a read/write into a protected
+        # system file.
+        candidates = {
+            os.path.abspath(full_path),
+            os.path.realpath(full_path),
+        }
+        blocked_prefixes = list(self._BLOCKED_PREFIXES) + [
+            "C:/Windows",
+            "C:/ProgramData/Microsoft",
+            "C:/System Volume Information",
+            "C:/$Recycle.Bin",
+        ]
 
-        for blocked in self._BLOCKED_PREFIXES:
-            blocked = blocked.rstrip("/")
-            if norm == blocked or norm.startswith(blocked + "/"):
+        for candidate in candidates:
+            norm = candidate.replace("\\", "/").rstrip("/")
+            folded = norm.casefold()
+
+            for blocked in blocked_prefixes:
+                prefix = blocked.replace("\\", "/").rstrip("/").casefold()
+                if folded == prefix or folded.startswith(prefix + "/"):
+                    raise PermissionError(
+                        f"Access denied: {full_path!r} resolves to a protected system path."
+                    )
+
+            for blocked_sub in self._BLOCKED_SUBSTRINGS:
+                if blocked_sub.casefold() in folded:
+                    raise PermissionError(
+                        f"Access denied: {full_path!r} contains a protected path element."
+                    )
+
+            _, ext = os.path.splitext(candidate)
+            if ext.casefold() in self._BLOCKED_EXTENSIONS:
                 raise PermissionError(
-                    f"Access denied: {full_path!r} is a protected system path."
+                    f"Access denied: cannot read/write binary system files ({ext})."
                 )
-
-        for blocked_sub in self._BLOCKED_SUBSTRINGS:
-            if blocked_sub in norm:
-                raise PermissionError(
-                    f"Access denied: {full_path!r} contains a protected path element."
-                )
-
-        _, ext = os.path.splitext(full_path)
-        if ext.lower() in self._BLOCKED_EXTENSIONS:
-            raise PermissionError(
-                f"Access denied: cannot read/write binary system files ({ext})."
-            )
 
     def _parse_input(self, input_data, default_path="."):
         """Parse JSON or plain string input. Returns (path, location, extra_data)."""

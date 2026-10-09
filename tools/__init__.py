@@ -1,151 +1,42 @@
-from tools.registry import ToolRegistry
+import importlib
+import logging
 
-from tools.terminal import TerminalTool
-from tools.filesystem import FileSystemTool
-from tools.web import WebSearchTool
-from tools.git import GitTool
-from tools.desktop import DesktopTool
-from tools.image_gen import ImageGenTool
+from tools.registry import ToolRegistry
 
 
 def load_tools():
+    """Load tools independently; optional imports and constructors may fail safely."""
     registry = ToolRegistry()
-
-    try:
-        terminal = TerminalTool()
-    except Exception:
-        terminal = None
-    try:
-        filesystem = FileSystemTool()
-    except Exception:
-        filesystem = None
-    try:
-        web = WebSearchTool()
-    except Exception:
-        web = None
-    try:
-        git = GitTool()
-    except Exception:
-        git = None
-    try:
-        image_gen = ImageGenTool()
-    except Exception:
-        image_gen = None
-    try:
-        desktop = DesktopTool()
-    except Exception:
-        desktop = None
-
-    registry.register(
-        "terminal",
-        "Execute safe terminal/shell commands on the user's PC",
-        terminal.run,
-        capability="pc"
+    definitions = (
+        ("terminal", "Execute terminal commands in an allowed workspace.", "tools.terminal", "TerminalTool", "run", "pc"),
+        ("list_files", "List files and directories in the projects folder or desktop.", "tools.filesystem", "FileSystemTool", "list_files", "pc"),
+        ("read_file", "Read a text file from an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "read_file", "pc"),
+        ("find_files", "Find files with optional filename and time filters.", "tools.filesystem", "FileSystemTool", "find_files", "pc"),
+        ("write_file", "Create or overwrite a file in an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "write_file", "pc"),
+        ("edit_file", "Edit an existing file by replacing a specific string.", "tools.filesystem", "FileSystemTool", "edit_file", "pc"),
+        ("delete_file", "Delete a file from an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "delete_file", "pc"),
+        ("create_directory", "Create a directory in an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "create_directory", "pc"),
+        ("web_search", "Search the public web for current information.", "tools.web", "WebSearchTool", "run", "web"),
+        ("git", "Run supported Git operations on a local repository.", "tools.git", "GitTool", "run", "git"),
+        ("desktop", "Control the desktop and GUI using supported desktop actions.", "tools.desktop", "DesktopTool", "run", "pc"),
+        ("generate_image", "Generate images using the configured local image model.", "tools.image_gen", "ImageGenTool", "run", "pc"),
     )
 
-    registry.register(
-        "list_files",
-        "List files and directories in the projects folder or desktop",
-        filesystem.list_files,
-        capability="pc"
-    )
-
-    registry.register(
-        "read_file",
-        "Read the contents of a text file from the projects folder or desktop",
-        filesystem.read_file,
-        capability="pc"
-    )
-
-    registry.register(
-        "find_files",
-        (
-            "Find files recursively with optional filename pattern and "
-            "created/modified time filters. Input: {path, location, pattern, "
-            "recursive, created_within_hours, modified_within_hours}."
-        ),
-        filesystem.find_files,
-        capability="pc"
-    )
-
-    registry.register(
-        "write_file",
-        (
-            "Create or overwrite a file on disk. "
-            "location: 'projects' (default), 'desktop', or 'system' (absolute path). "
-            "For system: path must be absolute e.g. /home/user/file.py"
-        ),
-        filesystem.write_file,
-        capability="pc"
-    )
-
-    registry.register(
-        "edit_file",
-        (
-            "Edit an existing file by replacing a specific string. "
-            "Input: {path, location, old, new, replace_all}. "
-            "Use this to modify existing files instead of rewriting them."
-        ),
-        filesystem.edit_file,
-        capability="pc"
-    )
-
-    registry.register(
-        "delete_file",
-        "Delete a file from disk. Input: {path, location}.",
-        filesystem.delete_file,
-        capability="pc"
-    )
-
-    registry.register(
-        "create_directory",
-        (
-            "Create a directory. "
-            "location: 'projects', 'desktop', or 'system' (absolute path)."
-        ),
-        filesystem.create_directory,
-        capability="pc"
-    )
-
-    registry.register(
-        "web_search",
-        "Search the public web for current information",
-        web.run,
-        capability="web"
-    )
-
-    registry.register(
-        "git",
-        (
-            "Run git operations on a local repository. "
-            "Supports: init, clone, status, add, commit, push, pull, "
-            "log, diff, branch, checkout, create_branch, stash, create_repo. "
-            "Input: {action, path, message, branch, url, files, remote, n, "
-            "name, visibility, description}. "
-            "create_repo creates a new GitHub repository (requires gh CLI)."
-        ),
-        git.run,
-        capability="git"
-    )
-
-    registry.register(
-        "desktop",
-        (
-            "Control the desktop and GUI. Actions: screenshot, click, move, type, key, scroll, open_app, close_app, get_windows, focus_window. Input uses an action field plus the fields required by that action."
-        ),
-        desktop.run,
-        capability="pc"
-    )
-
-    registry.register(
-        "generate_image",
-        (
-            "Generate an image using local Stable Diffusion (SD1.5) model. "
-            "Input: {prompt, negative_prompt, width, height, num_inference_steps, "
-            "guidance_scale, seed, filename}. Output saved to projects/generated_images/."
-        ),
-        image_gen.run,
-        capability="pc"
-    )
-
+    instances = {}
+    for name, description, module_name, class_name, method_name, capability in definitions:
+        key = (module_name, class_name)
+        try:
+            if key not in instances:
+                module = importlib.import_module(module_name)
+                factory = getattr(module, class_name)
+                instances[key] = factory()
+            handler = getattr(instances[key], method_name)
+            registry.register(name, description, handler, capability=capability)
+        except Exception as exc:
+            logging.warning(
+                "Tool '%s' unavailable (%s): %s",
+                name,
+                type(exc).__name__,
+                exc,
+            )
     return registry

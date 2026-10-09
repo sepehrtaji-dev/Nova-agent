@@ -6,13 +6,64 @@ from agent.planner import Planner
 
 
 class FakeBrain:
-    def __init__(self, response='{"task_type":"conversation"}'):
+    def __init__(self, response=None):
         self.response = response
         self.calls = 0
 
-    def generate(self, *args, **kwargs):
+    @staticmethod
+    def _planner_fixture(prompt):
+        import re
+
+        match = re.search(r"USER GOAL:\s*(.*?)\n\nCONTEXT:", prompt, re.DOTALL)
+        goal = match.group(1).strip() if match else ""
+        low = goal.lower()
+
+        def step(tool, description, data):
+            return {"tool": tool, "input": data, "description": description}
+
+        if "what files did you create" in low:
+            steps = [step("find_files", "find_files: files created in last 24 hours", {"path": ".", "location": "projects", "recursive": True, "created_within_hours": 24})]
+        elif "search the web about assembly" in low:
+            steps = [
+                step("web_search", "web_search: search about assembly", {"query": "assembly"}),
+                step("write_file", "write_file: create Python hello world file", {"path": "hello_world.py", "location": "projects"}),
+            ]
+        elif "use firefox to search about cs2 game" in low:
+            steps = [
+                step("desktop", "desktop: open firefox", {"action": "open_app", "app": "firefox"}),
+                step("desktop", "desktop: press ctrl+l", {"action": "key", "key": "ctrl+l"}),
+                step("desktop", 'desktop: type "cs2 game"', {"action": "type", "text": "cs2 game"}),
+                step("desktop", "desktop: press enter", {"action": "key", "key": "enter"}),
+            ]
+        elif "open notepad" in low:
+            steps = [
+                step("desktop", "desktop: open notepad", {"action": "open_app", "app": "notepad"}),
+                step("desktop", 'desktop: write "HELLO_NOVA_TEST" in it', {"action": "type", "text": "HELLO_NOVA_TEST"}),
+            ]
+        elif re.search(r"\b(?:run|launch|start|open)\b", low):
+            app_match = re.search(r"\b(?:run|launch|start|open)\s+(?:my\s+|the\s+)?(?:app\s+)?(.+?)\s*[.!?]*$", goal, re.IGNORECASE)
+            app = app_match.group(1).strip() if app_match else "application"
+            if app.lower() == "the browser":
+                app = "browser"
+            steps = [step("desktop", f"desktop: open {app}", {"action": "open_app", "app": app})]
+        elif "write a c++ script" in low or "c++" in low:
+            steps = [step("write_file", "write_file: create hello.cpp", {"path": "hello.cpp", "location": "projects"})]
+        elif "read hello.cpp" in low:
+            steps = [step("read_file", "read_file: read hello.cpp", {"path": "hello.cpp", "location": "projects"})]
+        elif "create a python file called test_model.py" in low:
+            steps = [step("write_file", "write_file: create test_model.py", {"path": "test_model.py", "location": "projects"})]
+        else:
+            steps = []
+
+        return json.dumps({"goal": goal, "steps": steps})
+
+    def generate(self, prompt, **kwargs):
         self.calls += 1
-        return self.response
+        if self.response is not None:
+            return self.response
+        if "You are Nova's task planner." in prompt:
+            return self._planner_fixture(prompt)
+        return '{"task_type":"conversation"}'
 
 
 class FakeTools:
@@ -100,7 +151,7 @@ class RouterTests(unittest.TestCase):
         )
 
         self.assertEqual(len(plan["steps"]), 2)
-        self.assertEqual(brain.calls, 0)
+        self.assertEqual(brain.calls, 1)
         self.assertIn("desktop:", plan["steps"][0]["description"])
     def test_compound_notepad_request_gets_ordered_desktop_steps(self):
         planner = Planner(self.brain, self.tools)
@@ -111,7 +162,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len(plan["steps"]), 2)
         self.assertIn("desktop: open notepad", plan["steps"][0]["description"])
         self.assertIn('desktop: write "HELLO_NOVA_TEST" in it', plan["steps"][1]["description"])
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_pending_desktop_step_is_routed_to_desktop_tool(self):
         plan = (
@@ -152,14 +203,15 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(plan["steps"][0]["status"], "pending")
         self.assertIn("write_file", plan["steps"][0]["description"])
         self.assertIn("test_model.py", plan["steps"][0]["description"])
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_cplusplus_script_request_is_computer(self):
+        self.brain.response = '{"task_type":"computer"}'
         result = self.router.classify_task(
             "write a c++ script printing hello"
         )
         self.assertEqual(result, "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_cplusplus_script_gets_cpp_filename(self):
         planner = Planner(self.brain)
@@ -178,12 +230,13 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["path"], "hello.cpp")
         self.assertEqual(payload["location"], "projects")
-    def test_explicit_file_request_is_computer_without_llm_classification(self):
+    def test_explicit_file_request_uses_llm_classification(self):
+        self.brain.response = '{"task_type":"computer"}'
         result = self.router.classify_task(
             "create a Python file called test_model.py in the projects folder"
         )
         self.assertEqual(result, "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_explicit_file_read_gets_deterministic_read_step(self):
         planner = Planner(self.brain)
@@ -243,21 +296,19 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["path"], "second.py")
 
-    def test_open_python_file_is_not_forced_to_desktop(self):
-        self.assertFalse(self.router._has_desktop_intent("open test_model.py"))
-        self.assertTrue(self.router._has_explicit_computer_intent("open test_model.py"))
+    def test_file_open_intent_is_decided_by_model(self):
+        self.brain.response = '{"task_type":"computer"}'
+        self.assertEqual(self.router.classify_task("open test_model.py"), "computer")
+        self.assertEqual(self.brain.calls, 1)
 
-    def test_mouse_and_keyboard_control_is_explicit_computer_intent(self):
-        self.assertTrue(
-            self.router._has_explicit_computer_intent(
-                "can you move the mouse to 500, 400?"
-            )
-        )
-        self.assertTrue(
-            self.router._has_explicit_computer_intent(
-                "can you press ctrl+shift+t?"
-            )
-        )
+    def test_mouse_and_keyboard_intent_is_decided_by_model(self):
+        self.brain.response = '{"task_type":"computer"}'
+        for message in (
+            "can you move the mouse to 500, 400?",
+            "can you press ctrl+shift+t?",
+        ):
+            self.assertEqual(self.router.classify_task(message), "computer")
+        self.assertEqual(self.brain.calls, 2)
 
     def test_model_cannot_override_a_planned_tool(self):
         plan = (
@@ -296,7 +347,7 @@ class RouterTests(unittest.TestCase):
         decision = self.router.decide(
             message="move the mouse to 300, 250",
             task_type="computer",
-            plan="Goal: move the mouse\n1. [pending] Move the mouse to 300, 250",
+            plan="Goal: move the mouse\n1. [pending] desktop: move the mouse to 300, 250",
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
@@ -331,54 +382,55 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(payload["text"], "hello")
         self.assertEqual(self.brain.calls, 0)
 
-    def test_mouse_control_does_not_call_llm(self):
+    def test_unplanned_mouse_control_uses_model_decision(self):
+        self.brain.response = '{"action":"tool","task_type":"computer","tool":"desktop","input":{"action":"click","x":500,"y":400}}'
         decision = self.router.decide(
             message="click at 500, 400",
             task_type="computer",
-            plan="Goal: click at 500, 400",
+            plan="No plan.",
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(json.loads(decision["input"]), {"action": "click", "x": 500, "y": 400})
+        self.assertEqual(self.brain.calls, 1)
 
-    def test_explicit_search_is_computer(self):
-        self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
+    def test_search_intent_is_decided_by_model(self):
+        self.brain.response = '{"task_type":"computer"}'
+        self.assertEqual(self.router.classify_task("search the web for Python 3.14 release notes"), "computer")
+        self.assertEqual(self.brain.calls, 1)
 
     def test_address_bar_typing_is_computer(self):
         message = "type cs2 game in the address bar"
-        self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_search_box_typing_is_computer(self):
         message = "type hello in the search box"
-        self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_direct_app_open_is_computer(self):
         message = "please open firefox"
-        self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_app_launch_synonyms_are_computer_intent(self):
+        self.brain.response = '{"task_type":"computer"}'
         for message in (
             "please open firefox",
             "please launch firefox",
             "please run my firefox",
             "please start firefox",
         ):
-            self.assertTrue(
-                self.router._has_explicit_computer_intent(message),
-                message,
-            )
             self.assertEqual(
                 self.router.classify_task(message),
                 "computer",
                 message,
             )
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 4)
 
     def test_run_app_pending_plan_routes_to_open_app(self):
         plan = (
