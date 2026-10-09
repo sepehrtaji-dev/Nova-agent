@@ -1870,6 +1870,15 @@ Return JSON only.
                 if isinstance(tool_meta, dict)
                 else ""
             )
+
+        # A text-only legacy plan still needs an execution adapter. This does
+        # not infer intent from the user's message: it translates only the
+        # already-selected pending desktop step and remains subject to the
+        # allowed-tools check above.
+        if planned_tool == "desktop" and "desktop" in allowed:
+            desktop_decision = self._force_desktop_decision(action_text)
+            if desktop_decision and desktop_decision.get("tool") == "desktop":
+                return desktop_decision
         write_words = ("file", "script", "program", "source", "code")
         write_intent = (
             "write_file" in pending_lower
