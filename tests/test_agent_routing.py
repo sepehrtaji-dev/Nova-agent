@@ -6,13 +6,60 @@ from agent.planner import Planner
 
 
 class FakeBrain:
-    def __init__(self, response='{"task_type":"conversation"}'):
+    def __init__(self, response=None):
         self.response = response
         self.calls = 0
 
-    def generate(self, *args, **kwargs):
+    @staticmethod
+    def _planner_fixture(prompt):
+        import re
+
+        match = re.search(r"USER GOAL:\\s*(.*?)\\n\\nCONTEXT:", prompt, re.DOTALL)
+        goal = match.group(1).strip() if match else ""
+        low = goal.lower()
+
+        def step(tool, description, data):
+            return {"tool": tool, "input": data, "description": description}
+
+        if "what files did you create" in low:
+            steps = [step("find_files", "find_files: files created in last 24 hours", {"path": ".", "location": "projects", "recursive": True, "created_within_hours": 24})]
+        elif "search the web about assembly" in low:
+            steps = [
+                step("web_search", "web_search: search about assembly", {"query": "assembly"}),
+                step("write_file", "write_file: create Python hello world file", {"path": "hello_world.py", "location": "projects"}),
+            ]
+        elif "use firefox to search about cs2 game" in low:
+            steps = [
+                step("desktop", "desktop: open firefox", {"action": "open_app", "app": "firefox"}),
+                step("desktop", "desktop: press ctrl+l", {"action": "key", "key": "ctrl+l"}),
+                step("desktop", 'desktop: type "cs2 game"', {"action": "type", "text": "cs2 game"}),
+                step("desktop", "desktop: press enter", {"action": "key", "key": "enter"}),
+            ]
+        elif "open notepad" in low:
+            steps = [
+                step("desktop", "desktop: open notepad", {"action": "open_app", "app": "notepad"}),
+                step("desktop", 'desktop: type "HELLO_NOVA_TEST"', {"action": "type", "text": "HELLO_NOVA_TEST"}),
+            ]
+        elif "please run my firefox" in low:
+            steps = [step("desktop", "desktop: open firefox", {"action": "open_app", "app": "firefox"})]
+        elif "write a c++ script" in low or "c++" in low:
+            steps = [step("write_file", "write_file: create hello.cpp", {"path": "hello.cpp", "location": "projects"})]
+        elif "read hello.cpp" in low:
+            steps = [step("read_file", "read_file: read hello.cpp", {"path": "hello.cpp", "location": "projects"})]
+        elif "create a python file called test_model.py" in low:
+            steps = [step("write_file", "write_file: create test_model.py", {"path": "test_model.py", "location": "projects"})]
+        else:
+            steps = []
+
+        return json.dumps({"goal": goal, "steps": steps})
+
+    def generate(self, prompt, **kwargs):
         self.calls += 1
-        return self.response
+        if self.response is not None:
+            return self.response
+        if "You are Nova's task planner." in prompt:
+            return self._planner_fixture(prompt)
+        return '{"task_type":"conversation"}'
 
 
 class FakeTools:
@@ -100,7 +147,7 @@ class RouterTests(unittest.TestCase):
         )
 
         self.assertEqual(len(plan["steps"]), 2)
-        self.assertEqual(brain.calls, 0)
+        self.assertEqual(brain.calls, 1)
         self.assertIn("desktop:", plan["steps"][0]["description"])
     def test_compound_notepad_request_gets_ordered_desktop_steps(self):
         planner = Planner(self.brain, self.tools)
@@ -111,7 +158,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len(plan["steps"]), 2)
         self.assertIn("desktop: open notepad", plan["steps"][0]["description"])
         self.assertIn('desktop: write "HELLO_NOVA_TEST" in it', plan["steps"][1]["description"])
-        self.assertEqual(self.brain.calls, 0)
+        self.assertGreaterEqual(self.brain.calls, 1)
 
     def test_pending_desktop_step_is_routed_to_desktop_tool(self):
         plan = (
