@@ -28,6 +28,7 @@ jobs:
         run: >
           python -m unittest
           tests/test_agent_routing.py
+          tests/test_model_intent_classification.py
           tests/test_verifier.py
           tests/test_core.py
           tests/test_math_parser.py
