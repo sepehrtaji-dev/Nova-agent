@@ -1032,36 +1032,6 @@ class ToolRouter:
         return None
 
 
-    _search_intent_pattern = re.compile(
-        r"""
-        \b
-        (?:
-            web\s*search
-            | search\s+(?:the\s+)?(?:web|internet)
-            | search\s+(?:about|for|up)
-            | go\s+and\s+search
-            | google\s+
-            | look\s+up
-            | find\s+(?:about|information\s+about)
-        )
-        \b
-        """,
-        re.IGNORECASE | re.VERBOSE
-    )
-
-    def _has_search_intent(self, message):
-        if not isinstance(
-            message,
-            str
-        ):
-            return False
-
-        return bool(
-            self._search_intent_pattern.search(
-                message
-            )
-        )
-
     def _is_verified_followup(self, message, conversation):
         if not isinstance(message, str) or not isinstance(conversation, str):
             return False
@@ -2170,13 +2140,6 @@ Return JSON only.
 
         if task_type == "computer":
 
-            search_requested = (
-                self._has_search_intent(
-                    message
-                )
-                and not has_successful_tool
-            )
-
             tool_decision = (
                 self._validate_tool_decision(
                     data,
@@ -2195,15 +2158,6 @@ Return JSON only.
                 tool_decision
                 and pending_tool is not None
                 and tool_decision.get("tool") != pending_tool
-            ):
-                tool_decision = None
-
-            if (
-                tool_decision
-                and search_requested
-                and tool_decision.get(
-                    "tool"
-                ) != "web_search"
             ):
                 tool_decision = None
 
