@@ -155,11 +155,12 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(self.brain.calls, 0)
 
     def test_cplusplus_script_request_is_computer(self):
+        self.brain.response = '{"task_type":"computer"}'
         result = self.router.classify_task(
             "write a c++ script printing hello"
         )
         self.assertEqual(result, "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_cplusplus_script_gets_cpp_filename(self):
         planner = Planner(self.brain)
@@ -178,12 +179,13 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["path"], "hello.cpp")
         self.assertEqual(payload["location"], "projects")
-    def test_explicit_file_request_is_computer_without_llm_classification(self):
+    def test_explicit_file_request_uses_llm_classification(self):
+        self.brain.response = '{"task_type":"computer"}'
         result = self.router.classify_task(
             "create a Python file called test_model.py in the projects folder"
         )
         self.assertEqual(result, "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_explicit_file_read_gets_deterministic_read_step(self):
         planner = Planner(self.brain)
@@ -347,22 +349,26 @@ class RouterTests(unittest.TestCase):
     def test_address_bar_typing_is_computer(self):
         message = "type cs2 game in the address bar"
         self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_search_box_typing_is_computer(self):
         message = "type hello in the search box"
         self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_direct_app_open_is_computer(self):
         message = "please open firefox"
         self.assertTrue(self.router._has_explicit_computer_intent(message))
+        self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 1)
 
     def test_app_launch_synonyms_are_computer_intent(self):
+        self.brain.response = '{"task_type":"computer"}'
         for message in (
             "please open firefox",
             "please launch firefox",
@@ -378,7 +384,7 @@ class RouterTests(unittest.TestCase):
                 "computer",
                 message,
             )
-        self.assertEqual(self.brain.calls, 0)
+        self.assertEqual(self.brain.calls, 4)
 
     def test_run_app_pending_plan_routes_to_open_app(self):
         plan = (
