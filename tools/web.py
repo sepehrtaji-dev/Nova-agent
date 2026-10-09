@@ -77,7 +77,7 @@ class WebSearchTool:
             ) as response:
                 raw = response.read().decode(
                     "utf-8",
-                    errors="ignore"
+                    errors="replace"
                 )
 
         except Exception as e:
@@ -103,6 +103,7 @@ class WebSearchTool:
         matches = result_pattern.findall(raw)
 
         if not matches:
+            # Fallback 1: simpler pattern for result links
             fallback_pattern = re.compile(
                 r'<a[^>]+class="result__a"[^>]+'
                 r'href="([^"]+)"[^>]*>'
@@ -118,12 +119,45 @@ class WebSearchTool:
             ]
 
         if not matches:
+            # Fallback 2: generic pattern for any links with result-like classes
+            generic_pattern = re.compile(
+                r'<a[^>]+class="[^"]*result[^"]*"[^>]+'
+                r'href="([^"]+)"[^>]*>'
+                r'(.*?)'
+                r'</a>',
+                re.IGNORECASE | re.DOTALL
+            )
+
+            matches = [
+                (link, title, "")
+                for link, title
+                in generic_pattern.findall(raw)
+            ]
+
+        if not matches:
+            # Fallback 3: try to find any external links in the page
+            any_link_pattern = re.compile(
+                r'<a[^>]+href="(https?://[^"]+)"[^>]*>'
+                r'(.*?)'
+                r'</a>',
+                re.IGNORECASE | re.DOTALL
+            )
+
+            matches = [
+                (link, title, "")
+                for link, title
+                in any_link_pattern.findall(raw)
+                if "duckduckgo" not in link.lower()
+            ]
+
+        if not matches:
             return (
                 "Web search error: "
                 "No web search results found."
             )
 
         results = []
+        base_url = "https://html.duckduckgo.com"
 
         for index, (link, title, snippet) in enumerate(
             matches[:6],
@@ -153,8 +187,13 @@ class WebSearchTool:
                 link
             ).strip()
 
+            # Handle relative URLs by converting to absolute
             if link.startswith("//"):
                 link = "https:" + link
+            elif link.startswith("/"):
+                link = base_url + link
+            elif not link.startswith(("http://", "https://")):
+                link = base_url + "/" + link
 
             results.append(
                 f"[{index}]\n"

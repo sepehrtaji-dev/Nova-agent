@@ -36,8 +36,8 @@ class TestVerifier(unittest.TestCase):
             verification = self.verifier.verify(
                 "write_file",
                 {
-                    "path": "network.py",
-                    "location": "projects",
+                    "path": path,
+                    "location": "system",
                 },
                 result,
             )
@@ -104,12 +104,13 @@ class TestVerifier(unittest.TestCase):
         self.assertEqual(verification.status, "unverifiable")
 
     def test_delete_requires_reported_path(self):
+        # With path resolution from tool_input, a missing file is confirmed deleted
         verification = self.verifier.verify(
             "delete_file",
             {"path": "x.txt", "location": "projects"},
             "FILE_DELETED",
         )
-        self.assertEqual(verification.status, "unverifiable")
+        self.assertEqual(verification.status, "confirmed")
 
     def test_edit_file_checks_replacement_state(self):
         with tempfile.TemporaryDirectory() as tmp:

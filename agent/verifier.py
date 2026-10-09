@@ -96,7 +96,12 @@ class Verifier:
             except (json.JSONDecodeError, TypeError):
                 tool_input = {}
 
-        tool_result = str(tool_result) if tool_result is not None else ""
+        if tool_result is None:
+            tool_result = ""
+        elif isinstance(tool_result, bytes):
+            tool_result = tool_result.decode("utf-8", errors="replace")
+        else:
+            tool_result = str(tool_result)
 
         dispatch = {
             "write_file":       self._verify_write_file,
@@ -124,6 +129,8 @@ class Verifier:
         try:
             return fn(tool_input, tool_result)
         except Exception as exc:
+            import logging
+            logging.exception("Verifier crashed for '%s'", tool_name)
             return VerificationResult(
                 status="unverifiable",
                 evidence=str(exc),
@@ -156,6 +163,21 @@ class Verifier:
                 message="write_file succeeded but reported no concrete path.",
             )
 
+        # BUG 1+2: Validate the reported path matches the requested path
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="write_file could not resolve its requested location safely.",
+            )
+        if os.path.abspath(actual_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
+                message="write_file reported a different path than requested.",
+            )
+
         if not os.path.isfile(actual_path):
             return VerificationResult(
                 status="failed",
@@ -163,7 +185,15 @@ class Verifier:
                 message=f"File does not exist on disk: {actual_path}",
             )
 
-        size = os.path.getsize(actual_path)
+        # BUG 23+28: Wrap getsize in try/except for TOCTOU protection
+        try:
+            size = os.path.getsize(actual_path)
+        except Exception as exc:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=str(exc),
+                message=f"Could not get file size for verification: {actual_path}",
+            )
         if isinstance(expected, str):
             try:
                 with open(actual_path, "r", encoding="utf-8") as handle:
@@ -180,7 +210,8 @@ class Verifier:
                     evidence=f"Expected {len(expected)} chars, found {len(actual)} chars.",
                     message=f"Written file content does not match the requested content: {actual_path}",
                 )
-        elif size == 0:
+        # BUG 19: Check expected is None separately
+        elif expected is None and size == 0:
             return VerificationResult(
                 status="failed",
                 evidence=f"File size = {size} bytes",
@@ -215,8 +246,22 @@ class Verifier:
                 message="find_files result is missing its success/count evidence.",
             )
 
-        match = re.search(r"Match count:\s*(\d+)", tool_result)
+        match = re.search(r"Match count:\s*(-?\d+)", tool_result)
         count = int(match.group(1)) if match else 0
+        # BUG 15: Handle negative values as errors
+        if count < 0:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:900],
+                message=f"find_files returned negative count: {count}."
+            )
+        # BUG 9: Return unverifiable when count is 0
+        if count == 0:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:900],
+                message="find_files returned 0 matches."
+            )
         return VerificationResult(
             status="confirmed",
             evidence=tool_result[:900],
@@ -237,7 +282,7 @@ class Verifier:
             "Path is not a file",
             "File is not a readable text file:",
         )
-        if any(tool_result.startswith(prefix) for prefix in error_prefixes):
+        if any(prefix in tool_result for prefix in error_prefixes):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
@@ -313,7 +358,7 @@ class Verifier:
         path = str(tool_input.get("path", ".")).strip() or "."
         location = str(tool_input.get("location", "projects")).strip().lower()
 
-        if tool_result.startswith(("Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:")):
+        if any(err in tool_result for err in ("Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:")):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
@@ -346,7 +391,7 @@ class Verifier:
 
     def _verify_terminal(self, tool_input, tool_result):
         """Verify terminal success from an explicit zero exit code."""
-        exit_match = re.search(r"^Exit code:\s*(-?\d+)\s*$", tool_result, flags=re.MULTILINE)
+        exit_match = re.search(r"^Exit code:\s*(-?\d+)", tool_result, flags=re.MULTILINE)
         status_error = "STATUS: ERROR" in tool_result
         status_success = "STATUS: SUCCESS" in tool_result
 
@@ -379,10 +424,11 @@ class Verifier:
                 message=f"Terminal command failed with exit code {exit_code}.",
             )
 
+        # BUG 10: Make STDOUT parsing more robust
         stdout = ""
         capture = False
         for line in tool_result.splitlines():
-            if line.startswith("STDOUT:"):
+            if line.startswith("STDOUT:") or line.startswith("Stdout:") or line.startswith("Output:"):
                 capture = True
                 continue
             if capture and (line.startswith("STDERR:") or line.startswith("STATUS:")):
@@ -422,7 +468,7 @@ class Verifier:
                 message=f"git {action} has no STATUS marker.",
             )
 
-        exit_match = re.search(r"^Exit code:\s*(-?\d+)\s*$", tool_result, flags=re.MULTILINE)
+        exit_match = re.search(r"^Exit code:\s*(-?\d+)", tool_result, flags=re.MULTILINE)
         if exit_match is None:
             return VerificationResult(
                 status="unverifiable",
@@ -441,11 +487,18 @@ class Verifier:
             url  = tool_input.get("url", "")
             # Derive expected folder name
             dest = url.rstrip("/").split("/")[-1].replace(".git", "")
-            # Can't check absolute path here easily, so trust STATUS: SUCCESS
+            # BUG 3: Check destination directory exists and contains .git
+            dest_path = os.path.join(os.getcwd(), "projects", dest)
+            if os.path.isdir(dest_path) and os.path.isdir(os.path.join(dest_path, ".git")):
+                return VerificationResult(
+                    status="confirmed",
+                    evidence=tool_result[:300],
+                    message=f"✓ git clone confirmed: {dest}"
+                )
             return VerificationResult(
-                status="confirmed",
+                status="unverifiable",
                 evidence=tool_result[:300],
-                message=f"✓ git clone confirmed: {dest}"
+                message=f"git clone reported success but destination directory not found: {dest_path}"
             )
 
         if action == "commit":
@@ -457,13 +510,22 @@ class Verifier:
                     evidence=tool_result[:300],
                     message=f"✓ git commit confirmed with hash."
                 )
+            # BUG 4: No commit hash found — return unverifiable
             return VerificationResult(
-                status="confirmed",
+                status="unverifiable",
                 evidence=tool_result[:300],
-                message=f"✓ git commit reported success."
+                message=f"git commit reported success but no commit hash found."
             )
 
         if action in {"push", "push_with_token"}:
+            # BUG 5: Parse output for rejection indicators
+            rejection_indicators = ["rejected", "failed", "error", "could not resolve"]
+            if any(indicator in tool_result.lower() for indicator in rejection_indicators):
+                return VerificationResult(
+                    status="failed",
+                    evidence=tool_result[:300],
+                    message=f"git push was rejected."
+                )
             return VerificationResult(
                 status="confirmed",
                 evidence=tool_result[:300],
@@ -477,10 +539,17 @@ class Verifier:
                     if line.startswith("Repository created:"):
                         url_line = line
                         break
+                # BUG 6: Validate URL matches https://github.com/ pattern
+                if "https://github.com/" in url_line:
+                    return VerificationResult(
+                        status="confirmed",
+                        evidence=tool_result[:300],
+                        message=f"✓ GitHub repo created. {url_line}"
+                    )
                 return VerificationResult(
-                    status="confirmed",
+                    status="unverifiable",
                     evidence=tool_result[:300],
-                    message=f"✓ GitHub repo created. {url_line}"
+                    message=f"git create_repo reported success but URL is not a valid GitHub URL."
                 )
 
         return VerificationResult(
@@ -511,7 +580,10 @@ class Verifier:
                 message="edit_file reported success but the target file could not be confirmed on disk.",
             )
 
+        # BUG 20: Handle non-string old_value gracefully
         old_value = tool_input.get("old")
+        if old_value is not None and not isinstance(old_value, str):
+            old_value = str(old_value)
         new_value = tool_input.get("new", "")
         try:
             with open(actual_path, "r", encoding="utf-8", errors="replace") as handle:
@@ -523,7 +595,10 @@ class Verifier:
                 message=f"Could not reread edited file: {actual_path}",
             )
 
+        # BUG 11: Log when global substring match is used
+        import logging
         if isinstance(old_value, str) and old_value in content:
+            logging.warning("edit_file: old_value found as global substring in %s", actual_path)
             return VerificationResult(
                 status="failed",
                 evidence=f"Old text is still present in {actual_path}.",
@@ -531,13 +606,22 @@ class Verifier:
             )
 
         if isinstance(new_value, str) and new_value and new_value not in content:
+            logging.warning("edit_file: new_value not found in %s", actual_path)
             return VerificationResult(
                 status="failed",
                 evidence=f"Replacement text was not found in {actual_path}.",
                 message="edit_file reported success but the replacement text is missing.",
             )
 
-        size = os.path.getsize(actual_path)
+        # BUG 24+28: Wrap getsize in try/except for TOCTOU protection
+        try:
+            size = os.path.getsize(actual_path)
+        except Exception as exc:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=str(exc),
+                message=f"Could not get file size for verification: {actual_path}",
+            )
         return VerificationResult(
             status="confirmed",
             evidence=f"Path: {actual_path}\nSize: {size} bytes",
@@ -553,16 +637,13 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="delete_file did not return FILE_DELETED.",
             )
-        actual_path = None
-        for line in tool_result.splitlines():
-            if line.startswith("Location:"):
-                actual_path = line.replace("Location:", "", 1).strip()
-                break
-        if not actual_path:
+        # BUG 12: Use _resolve_path_for_verification instead of trusting tool-reported path
+        actual_path = self._resolve_path_for_verification(tool_input)
+        if actual_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:300],
-                message="delete_file succeeded but reported no concrete path.",
+                message="delete_file could not resolve its requested location safely.",
             )
         if os.path.exists(actual_path):
             return VerificationResult(
@@ -608,7 +689,15 @@ class Verifier:
                 message=f"Generated image was not found on disk: {saved_path}",
             )
 
-        size = os.path.getsize(saved_path)
+        # BUG 25+28: Wrap getsize in try/except for TOCTOU protection
+        try:
+            size = os.path.getsize(saved_path)
+        except Exception as exc:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=str(exc),
+                message=f"Could not get file size for verification: {saved_path}",
+            )
         if size <= 0:
             return VerificationResult(
                 status="failed",
@@ -646,18 +735,27 @@ class Verifier:
             )
 
         # If a screenshot was saved, confirm it exists on disk
+        # BUG 17: Check "Screenshot saved:" BEFORE "Screenshot:" since "Screenshot saved:" also starts with "Screenshot:"
         screenshot_path = None
         for line in tool_result.splitlines():
-            if line.startswith("Screenshot:"):
-                screenshot_path = line.replace("Screenshot:", "").strip()
-                break
             if line.startswith("Screenshot saved:"):
                 screenshot_path = line.replace("Screenshot saved:", "", 1).strip()
+                break
+            if line.startswith("Screenshot:"):
+                screenshot_path = line.replace("Screenshot:", "").strip()
                 break
 
         if screenshot_path:
             if os.path.isfile(screenshot_path):
-                size = os.path.getsize(screenshot_path)
+                # BUG 26+28: Wrap getsize in try/except for TOCTOU protection
+                try:
+                    size = os.path.getsize(screenshot_path)
+                except Exception as exc:
+                    return VerificationResult(
+                        status="unverifiable",
+                        evidence=str(exc),
+                        message=f"Could not get screenshot size for verification: {screenshot_path}",
+                    )
                 return VerificationResult(
                     status="confirmed",
                     evidence=f"Screenshot: {screenshot_path} ({size:,} bytes)",
@@ -669,6 +767,14 @@ class Verifier:
                     evidence=f"Screenshot path not found: {screenshot_path}",
                     message=f"desktop {action} reported success but screenshot missing."
                 )
+
+        # BUG 7: For non-screenshot actions, check that some output was produced
+        if not tool_result.strip():
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message=f"desktop {action} reported success but produced no output."
+            )
 
         return VerificationResult(
             status="confirmed",
@@ -700,9 +806,19 @@ class Verifier:
                 message="web_search result missing Title/URL markers."
             )
 
+        # BUG 8: Validate that titles and URLs are non-empty
+        titles = re.findall(r"Title:\s*(.*)", tool_result)
+        urls = re.findall(r"URL:\s*(.*)", tool_result)
+        if not any(t.strip() for t in titles) or not any(u.strip() for u in urls):
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="web_search result has empty Title or URL."
+            )
+
         query = tool_input.get("query", "(unknown)")
-        # Count results
-        count = tool_result.count("Title:")
+        # BUG 16: Use regex to count actual result entries
+        count = len(re.findall(r"^Title:", tool_result, flags=re.MULTILINE))
 
         return VerificationResult(
             status="confirmed",

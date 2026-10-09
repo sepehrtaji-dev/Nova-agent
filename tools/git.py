@@ -33,12 +33,18 @@ class GitTool:
 
         path = str(path).strip()
 
-        # Absolute path supplied
+        root = os.path.realpath(self.projects_path)
+
+        # Absolute path supplied — must be within workspace
         if os.path.isabs(path):
-            return os.path.abspath(path)
+            full = os.path.abspath(path)
+            if os.path.commonpath([root, full]) != root:
+                raise ValueError(
+                    f"Git path escapes projects workspace: {path!r}"
+                )
+            return full
 
         # Relative paths stay inside Nova's projects workspace.
-        root = os.path.realpath(self.projects_path)
         full = os.path.abspath(os.path.join(root, path))
 
         try:
@@ -267,6 +273,7 @@ class GitTool:
             import re
             url_match = re.search(r'(https?://github\.com/[^/\s]+/[^/\s]+)', result)
             if not url_match:
+                # Fallback 1: try gh repo view with --json url
                 view_result = self._run_gh(
                     ["repo", "view", name, "--json", "url", "--jq", ".url"],
                     self.projects_path,
@@ -276,9 +283,33 @@ class GitTool:
                     if match:
                         repo_url = match.group(1).strip()
                     else:
-                        return result + "\n\nRepository created, but its clone URL could not be verified."
+                        # Fallback 2: try gh repo view with --json sshUrl
+                        view_result2 = self._run_gh(
+                            ["repo", "view", name, "--json", "sshUrl", "--jq", ".sshUrl"],
+                            self.projects_path,
+                        )
+                        if "STATUS: SUCCESS" in view_result2:
+                            match2 = re.search(r"OUTPUT:\s*\n(git@\S+)", view_result2)
+                            if match2:
+                                repo_url = match2.group(1).strip()
+                            else:
+                                return result + "\n\nRepository created, but its clone URL could not be verified."
+                        else:
+                            return result + "\n\nRepository created, but its clone URL could not be verified."
                 else:
-                    return result + "\n\nRepository created, but its clone URL could not be verified."
+                    # Fallback 3: try gh repo view with plain text output
+                    view_result3 = self._run_gh(
+                        ["repo", "view", name],
+                        self.projects_path,
+                    )
+                    if "STATUS: SUCCESS" in view_result3:
+                        match3 = re.search(r'(https?://\S+)', view_result3)
+                        if match3:
+                            repo_url = match3.group(1).strip()
+                        else:
+                            return result + "\n\nRepository created, but its clone URL could not be verified."
+                    else:
+                        return result + "\n\nRepository created, but its clone URL could not be verified."
             else:
                 repo_url = url_match.group(1)
 
@@ -299,6 +330,14 @@ class GitTool:
             url = data.get("url", "").strip()
             if not url:
                 return "GIT ERROR: 'url' is required for clone."
+
+            # Only allow safe URL schemes
+            allowed_schemes = ("https://", "git://")
+            if not url.lower().startswith(allowed_schemes):
+                return (
+                    "GIT ERROR: clone URL must use https:// or git:// scheme. "
+                    f"Got: {url[:50]!r}"
+                )
 
             dest_name = data.get("dest") or url.rstrip("/").split("/")[-1].replace(".git", "")
             dest_name = os.path.basename(str(dest_name).replace("\\", "/"))

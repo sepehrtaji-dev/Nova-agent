@@ -31,6 +31,17 @@ class FileSystemTool:
         "/etc/shadow",
         "/etc/sudoers",
         "/etc/passwd",
+        "/etc/hosts",
+        "/home",
+        "/root",
+        "/var/log",
+    ]
+
+    _BLOCKED_SUBSTRINGS = [
+        ".ssh",
+        ".bashrc",
+        ".profile",
+        ".gitconfig",
     ]
 
     _BLOCKED_EXTENSIONS = {
@@ -92,6 +103,18 @@ class FileSystemTool:
                     f"Path escapes workspace root through a symlink. "
                     f"Root: {root}  Path: {full_path}"
                 )
+
+            # Check parent directories for symlinks even if the path doesn't exist yet
+            current = parent_real
+            while current and current != root and current != os.path.dirname(current):
+                if os.path.islink(current):
+                    link_target = os.path.realpath(current)
+                    if os.path.commonpath([root, link_target]) != root:
+                        raise ValueError(
+                            f"Path escapes workspace root through a symlink in parent directory. "
+                            f"Root: {root}  Path: {full_path}"
+                        )
+                current = os.path.dirname(current)
         except ValueError:
             raise ValueError(
                 f"Path escapes workspace root. "
@@ -109,6 +132,12 @@ class FileSystemTool:
             if norm == blocked or norm.startswith(blocked + "/"):
                 raise PermissionError(
                     f"Access denied: {full_path!r} is a protected system path."
+                )
+
+        for blocked_sub in self._BLOCKED_SUBSTRINGS:
+            if blocked_sub in norm:
+                raise PermissionError(
+                    f"Access denied: {full_path!r} contains a protected path element."
                 )
 
         _, ext = os.path.splitext(full_path)
@@ -230,11 +259,13 @@ class FileSystemTool:
                     candidate = os.path.join(root, filename)
                     try:
                         stat_result = os.stat(candidate)
+                    except PermissionError:
+                        continue
                     except OSError:
                         continue
 
                     created_time = getattr(stat_result, "st_birthtime", None)
-                    if created_time is None and os.name == "nt":
+                    if created_time is None:
                         created_time = stat_result.st_ctime
 
                     if created_cutoff is not None:
@@ -295,13 +326,12 @@ class FileSystemTool:
                 try:
                     with open(full_path, "r", encoding="latin-1") as f:
                         content = f.read(50000)
-                    content = f"[Warning: file decoded as latin-1]\n{content}"
                 except Exception:
                     return f"File is not a readable text file: {full_path}"
 
             truncated = ""
-            if size > 50000:
-                truncated = f"\n\n[Truncated: showing first 50,000 of {size:,} bytes]"
+            if len(content) >= 50000:
+                truncated = f"\n\n[Truncated: showing first 50,000 characters]"
 
             return content + truncated
 
@@ -406,8 +436,24 @@ class FileSystemTool:
             if not os.path.isfile(full_path):
                 return f"File does not exist: {full_path}"
 
-            with open(full_path, "r", encoding="utf-8") as f:
-                original = f.read()
+            # Size limit for edit_file: 500KB
+            file_size = os.path.getsize(full_path)
+            if file_size > 500 * 1024:
+                return (
+                    f"File is too large to edit: {file_size:,} bytes. "
+                    f"Maximum allowed: 512,000 bytes (500KB)."
+                )
+
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    original = f.read()
+            except UnicodeDecodeError:
+                # Try latin-1 as fallback
+                try:
+                    with open(full_path, "r", encoding="latin-1") as f:
+                        original = f.read()
+                except Exception:
+                    return f"File is not a readable text file: {full_path}"
 
             if old_str not in original:
                 return (

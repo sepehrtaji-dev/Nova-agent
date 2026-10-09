@@ -11,12 +11,30 @@ from tools.image_gen import ImageGenTool
 def load_tools():
     registry = ToolRegistry()
 
-    terminal = TerminalTool()
-    filesystem = FileSystemTool()
-    web = WebSearchTool()
-    git = GitTool()
-    image_gen = ImageGenTool()
-    desktop = DesktopTool()
+    try:
+        terminal = TerminalTool()
+    except Exception:
+        terminal = None
+    try:
+        filesystem = FileSystemTool()
+    except Exception:
+        filesystem = None
+    try:
+        web = WebSearchTool()
+    except Exception:
+        web = None
+    try:
+        git = GitTool()
+    except Exception:
+        git = None
+    try:
+        image_gen = ImageGenTool()
+    except Exception:
+        image_gen = None
+    try:
+        desktop = DesktopTool()
+    except Exception:
+        desktop = None
 
     registry.register(
         "terminal",

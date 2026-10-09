@@ -1,8 +1,12 @@
 import json
+import logging
 import os
 import re
+import shutil
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeMemory:
@@ -39,7 +43,15 @@ class KnowledgeMemory:
                 else []
             )
 
-        except (OSError, json.JSONDecodeError, TypeError):
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            logger.warning(
+                "Knowledge file corrupted (%s), creating backup", exc
+            )
+            backup_path = self.path + ".corrupted"
+            try:
+                shutil.copy2(self.path, backup_path)
+            except OSError:
+                pass
             self.data = []
 
     def _save(self):
@@ -91,7 +103,7 @@ class KnowledgeMemory:
             return []
 
         results = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for item in self.data:
             if not isinstance(item, dict):
@@ -143,13 +155,13 @@ class KnowledgeMemory:
         freshness="stable"
     ):
 
-        topic = str(topic).strip()
-        fact = str(fact).strip()
+        topic = str(topic).strip().replace("\n", " ").replace("\r", " ")
+        fact = str(fact).strip().replace("\n", " ").replace("\r", " ")
 
         if not topic or not fact:
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if freshness == "volatile":
             expires = now + timedelta(days=7)

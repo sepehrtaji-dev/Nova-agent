@@ -1,5 +1,6 @@
 
 import json
+import logging
 import re
 
 
@@ -17,17 +18,12 @@ class ToolRouter:
 
         response = str(response).strip()
 
+        # BUG 33: Handle code fences with optional info string (```json, ``` JSON, etc.)
         response = re.sub(
-            r"^\s*```json\s*",
+            r"^\s*```[\s]*[a-zA-Z]*[\s]*",
             "",
             response,
             flags=re.IGNORECASE
-        )
-
-        response = re.sub(
-            r"^\s*```\s*",
-            "",
-            response
         )
 
         response = re.sub(
@@ -42,10 +38,28 @@ class ToolRouter:
             if isinstance(data, dict):
                 return data
 
+            # BUG 2: Wrap valid JSON arrays
+            if isinstance(data, list):
+                return {"items": data}
+
+        except json.JSONDecodeError:
+            pass
+
+        # BUG 44+45: Try fallback parsing for trailing commas and single quotes
+        try:
+            cleaned = re.sub(r",\s*}", "}", response)
+            cleaned = re.sub(r",\s*]", "]", cleaned)
+            cleaned = re.sub(r"'([^']*)'", r'"\1"', cleaned)
+            data = json.loads(cleaned)
+            if isinstance(data, dict):
+                return data
+            if isinstance(data, list):
+                return {"items": data}
         except json.JSONDecodeError:
             pass
 
         decoder = json.JSONDecoder()
+        candidates = []
 
         for index, char in enumerate(response):
 
@@ -58,10 +72,20 @@ class ToolRouter:
                 )
 
                 if isinstance(data, dict):
-                    return data
+                    candidates.append(data)
 
             except json.JSONDecodeError:
                 continue
+
+        # BUG 3: Prefer the LAST valid JSON object (most likely the actual decision)
+        if candidates:
+            # Prefer the last object containing expected keys
+            expected_keys = {"action", "task_type", "tool"}
+            for candidate in reversed(candidates):
+                if expected_keys & set(candidate.keys()):
+                    return candidate
+            # Otherwise return the last one
+            return candidates[-1]
 
         return None
 
@@ -72,11 +96,35 @@ class ToolRouter:
 
         text = str(response).strip()
 
-        pattern = re.compile(
-            r"\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*"
-            r"\(\s*(.*?)\s*\)\s*\]",
-            re.DOTALL
-        )
+        # BUG 4: Handle nested parentheses by finding the outer bracket
+        # and using balanced parenthesis matching
+        match = re.search(r"\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", text)
+        if not match:
+            return None
+
+        tool_name = match.group(1).strip()
+        # Find the matching closing parenthesis
+        start = match.end() - 1  # position of '('
+        depth = 0
+        end = -1
+        for i in range(start, len(text)):
+            if text[i] == '(':
+                depth += 1
+            elif text[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end == -1:
+            return None
+
+        # Find the closing bracket after the parenthesis
+        bracket_end = text.find(']', end)
+        if bracket_end == -1:
+            return None
+
+        arguments = text[start + 1:end].strip()
 
         match = pattern.search(text)
 
@@ -247,8 +295,29 @@ class ToolRouter:
             return None
 
         result = {}
+        # BUG 7: Handle input={...} style JSON object values first
+        json_obj_pattern = re.compile(
+            r"""
+            (\w+)               # key
+            \s*=\s*             # =
+            (\{.*\})            # JSON object value
+            """,
+            re.VERBOSE | re.DOTALL
+        )
+        json_matches = json_obj_pattern.findall(arguments)
+        if json_matches:
+            for key, value_str in json_matches:
+                try:
+                    value = json.loads(value_str)
+                    result[key] = value
+                except json.JSONDecodeError:
+                    continue
+            if result:
+                return result
+
         # Pattern to match key="value", key='value', or key=value (no spaces around =)
         # Handles quoted values with escaped quotes
+        # BUG 6: Allow commas in unquoted values
         pattern = re.compile(
             r"""
             (\w+)               # key
@@ -258,7 +327,7 @@ class ToolRouter:
                 |
                 '((?:[^'\\]|\\.)*)'   # single-quoted
                 |
-                ([^,\s]+)       # unquoted (no commas, no spaces)
+                ([^,\s]+(?:,\s*[^=\s,]+)*)  # unquoted (commas allowed within value)
             )
             """,
             re.VERBOSE
@@ -343,10 +412,11 @@ class ToolRouter:
         )
         trusted = normalized[marker.end():] if marker else normalized
 
+        # BUG 8: Allow trailing content after the status
         match = re.search(
-            r"^VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*$",
+            r"VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*\S*",
             trusted,
-            flags=re.IGNORECASE | re.MULTILINE,
+            flags=re.IGNORECASE,
         )
         return match.group(1).lower() if match else None
 
@@ -408,42 +478,6 @@ class ToolRouter:
                 return True
 
         return False
-
-    def _normalize_tool_input(self, tool_input):
-
-        if isinstance(tool_input, dict):
-
-            return json.dumps(
-                tool_input,
-                ensure_ascii=False
-            )
-
-        if isinstance(tool_input, str):
-
-            stripped = tool_input.strip()
-
-            if not stripped:
-                return None
-
-            try:
-
-                parsed = json.loads(
-                    stripped
-                )
-
-                if isinstance(parsed, dict):
-
-                    return json.dumps(
-                        parsed,
-                        ensure_ascii=False
-                    )
-
-            except json.JSONDecodeError:
-                pass
-
-            return stripped
-
-        return None
 
     def _normalize_web_search_input(self, tool_input):
 
@@ -732,10 +766,12 @@ class ToolRouter:
                 and location in {"projects", "desktop", "system"}
             )
 
-        # Unknown tool — allow through, let the tool handle validation
-        return True
+        # BUG 20: Unknown tools should return False
+        logging.warning("Unknown tool encountered in validation: %s", tool_name)
+        return False
 
     # Desktop intent — force desktop tool before model decides
+    # BUG 14: Tightened to avoid matching "write a Python script" etc.
     _desktop_intent = re.compile(
         r"\b(?:"
         r"take\s+a\s+screenshot|capture\s+(?:the\s+)?screen|screenshot"
@@ -745,7 +781,7 @@ class ToolRouter:
         r"|list\s+open\s+windows|show\s+(?:all\s+)?open\s+windows"
         r"|focus\s+(?:the\s+)?window\s+\w+"
         r"|press\s+(?:ctrl|alt|shift|win|cmd)\s*\+"
-        r"|(?:type|write)\s+.+"
+        r"|(?:type|write)\s+(?!.*(?:python|script|code|program|javascript|typescript|java\b|c\+\+|rust|golang|bash|powershell)).+"
         r"|(?:open|launch|run|start|execute)\s+(?:my\s+|the\s+)?(?:app\s+)?[a-z0-9][a-z0-9 ._-]{1,80}"
         r")",
         re.IGNORECASE
@@ -812,7 +848,10 @@ class ToolRouter:
                 )
             if not match:
                 return None
-            return int(match.group(1)), int(match.group(2))
+            # BUG 15: Clamp coordinates to reasonable screen bounds
+            x = max(0, min(7680, int(match.group(1))))
+            y = max(0, min(4320, int(match.group(2))))
+            return x, y
 
         # Screenshot
         if _re.search(r"\b(?:screenshot|take\s+a\s+screenshot|capture\s+(?:the\s+)?screen)\b", msg):
@@ -925,8 +964,10 @@ class ToolRouter:
             amount_match = _re.search(r"\b(?:by|with)\s+(\d+)\b", msg)
             if amount_match:
                 amount = int(amount_match.group(1))
+            # BUG 16: Clamp scroll amount to reasonable range (1-100)
+            amount = max(1, min(100, amount))
             if _re.search(r"\b(?:down|lower)\b", msg):
-                amount = -abs(amount)
+                amount = -amount
             else:
                 amount = abs(amount)
             coords = _coords()
@@ -1038,8 +1079,10 @@ class ToolRouter:
             return False
 
         filename = self._extract_filename(message)
-        if filename and filename.casefold() in context:
-            return True
+        if filename:
+            # BUG 9: Use word-boundary matching to avoid substring matches
+            if re.search(rf"(?<!\w){re.escape(filename.casefold())}(?!\w)", context):
+                return True
 
         return bool(
             re.search(r"\b(?:what exactly|what is inside|show me the contents?)\b", text)
@@ -1111,53 +1154,68 @@ class ToolRouter:
 
         # Questions that explicitly ask Nova to control the PC are computer tasks.
         if re.match(r"^(?:how|what|why|can|could|would)\b", text):
-            has_target = re.search(
-                r"\b(?:mouse|keyboard|screen|window|app|application)\b",
-                text,
-            )
-            has_action = re.search(
-                r"\b(?:click|move|type|press|scroll|open|close|focus|control|take|capture)\b",
-                text,
-            )
-
-            if has_target and has_action:
-                return True
-
-            if re.search(
-                r"\b(?:press|hit)\s+(?:the\s+)?(?:key\s+)?[a-z0-9]+(?:\+[a-z0-9]+)+\b",
+            # BUG 25: Skip questions about files — those are handled by filesystem patterns
+            is_file_question = bool(re.search(
+                r"\b(?:file|files|folder|directory|script|program|source)\b",
                 text,
                 re.IGNORECASE,
-            ):
-                return True
+            ))
 
-            if re.search(
-                r"\b(?:click|move)\b[^\n]*\b-?\d+\s*[,x]\s*-?\d+\b",
-                text,
-                re.IGNORECASE,
-            ):
-                return True
+            if not is_file_question:
+                has_target = re.search(
+                    r"\b(?:mouse|keyboard|screen|window|app|application)\b",
+                    text,
+                )
+                has_action = re.search(
+                    r"\b(?:click|move|type|press|scroll|open|close|focus|control|take|capture)\b",
+                    text,
+                )
 
-            if re.search(
-                r"\b(?:type|write)\b\s+[\"'][^\"']+[\"']",
-                text,
-                re.IGNORECASE,
-            ):
-                return True
+                if has_target and has_action:
+                    return True
 
-            if re.search(
-                r"\b(?:open|launch|close)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
-                text,
-                re.IGNORECASE,
-            ) and not re.search(
-                r"\b(?:file|folder|directory)\b|\.[a-z0-9]{1,6}\b",
-                text,
-                re.IGNORECASE,
-            ):
-                return True
+                if re.search(
+                    r"\b(?:press|hit)\s+(?:the\s+)?(?:key\s+)?[a-z0-9]+(?:\+[a-z0-9]+)+\b",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    return True
 
+                if re.search(
+                    r"\b(?:click|move)\b[^\n]*\b-?\d+\s*[,x]\s*-?\d+\b",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    return True
+
+                if re.search(
+                    r"\b(?:type|write)\b\s+[\"'][^\"']+[\"']",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    return True
+
+                if re.search(
+                    r"\b(?:open|launch|close)\s+(?:my\s+|the\s+)?[a-z0-9][a-z0-9 ._-]{1,40}\b",
+                    text,
+                    re.IGNORECASE,
+                ) and not re.search(
+                    r"\b(?:file|folder|directory)\b|\.[a-z0-9]{1,6}\b",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    return True
+
+                return bool(re.search(
+                    r"\b(?:for me|on my (?:pc|computer)|in (?:the )?(?:projects|desktop) folder|to (?:create|write|run|read|edit|delete|modify))\b",
+                    text,
+                ))
+
+            # For file questions, still allow "for me" / "on my computer" style requests
             return bool(re.search(
-                r"\b(?:for me|on my (?:pc|computer)|in (?:the )?(?:projects|desktop) folder|to (?:create|write|run|read|edit|delete|modify))\b",
+                r"\b(?:for me|on my (?:pc|computer))\b",
                 text,
+                re.IGNORECASE,
             ))
 
         patterns = [
@@ -1193,58 +1251,68 @@ class ToolRouter:
         if self._has_explicit_computer_intent(message):
             return "computer"
 
-        prompt = f"""You are a task classifier for Nova, a local AI agent.
+        # BUG 11: Include conversation context in repair prompt
+        repair_prompt = f"""You are Nova's action validator.
 
 Think step by step:
-1. Is this a casual/greeting message? → conversation
-2. Is this a follow-up about already-verified information? → conversation
-3. Does the user want Nova to DO something (files, terminal, git, web, desktop)? → computer
-4. Does the user just want Nova to TALK/EXPLAIN? → conversation
+1. What is the user's goal?
+2. What has been done (check TOOL HISTORY)?
+3. What is the next logical action?
+4. Which tool performs it?
 
-Answer "computer" if Nova must actually DO something:
-- Access, read, write, create, delete, or modify files
-- Run terminal commands or scripts
-- Use git (clone, commit, push, pull, study a repo, etc.)
-- Search the web
-- Install packages
-- Inspect, analyze, or study any file, folder, URL, or repository
-- Anything that requires interacting with the computer or external systems
+Return ONLY valid JSON.
 
-Answer "conversation" if Nova only needs to TALK:
-- Explaining concepts
-- Answering questions from memory
-- Writing text that the user will copy manually
-- General chat
-- Asking the user for missing information (like a token or password)
+TASK TYPE: {task_type}
 
-KEY INSIGHT: If the user wants Nova to DO something (even passively like
-"study this", "look at this", "analyze this", "check this"), that requires
-tools → computer.
-If the user just wants Nova to TELL them something → conversation.
-If the user asks a follow-up that only needs information already present in
-the previous conversation or verified tool evidence, choose conversation and
-report that evidence instead of running another tool.
+USER REQUEST: {message}
 
-SPECIAL CASE - GitHub repo creation:
-If the user wants to create a GitHub repo but no GitHub token (ghp_...) 
-appears in the conversation, Nova must ask for it first → conversation.
-If a token IS present in the conversation → computer.
+PREVIOUS CONVERSATION: {conversation}
 
-Examples:
-- "study this repo https://github.com/..." → computer
-- "create a github repo" (no token in conversation) → conversation
-- "create a github repo" (token already given) → computer
-- "what is a linked list?" → conversation
-- "create a calculator.py file" → computer
-- "how does git work?" → conversation
-- "commit my changes" → computer
+REAL TOOL HISTORY: {tool_history}
 
-User message: {message}
+CURRENT PLAN: {plan}
 
-Previous conversation: {conversation}
+If the computer task is incomplete, choose the next real tool.
 
-Return ONLY valid JSON. No explanation.
-{{"task_type": "computer"}} or {{"task_type": "conversation"}}"""
+Available tools:
+{tools_description}
+
+Only the tools listed above are enabled for this request.
+
+IMPORTANT: If the user explicitly requested a web search and no successful web_search result exists, YOU MUST choose web_search.
+
+For web_search:
+{{"action":"tool","task_type":"computer","tool":"web_search","input":{{"query":"search query"}}}}
+
+For write_file (ONLY path + location, NO content, NO code):
+{{"action":"tool","task_type":"computer","tool":"write_file","input":{{"path":"filename.py","location":"projects"}}}}
+
+For edit_file (modify existing file):
+{{"action":"tool","task_type":"computer","tool":"edit_file","input":{{"path":"filename","location":"projects","old":"text to replace","new":"replacement text"}}}}
+
+For delete_file:
+{{"action":"tool","task_type":"computer","tool":"delete_file","input":{{"path":"filename","location":"projects"}}}}
+
+For read_file:
+{{"action":"tool","task_type":"computer","tool":"read_file","input":{{"path":"filename","location":"projects"}}}}
+
+For list_files:
+{{"action":"tool","task_type":"computer","tool":"list_files","input":{{"path":".","location":"projects"}}}}
+
+For create_directory:
+{{"action":"tool","task_type":"computer","tool":"create_directory","input":{{"path":"directory_name","location":"projects"}}}}
+
+For terminal:
+{{"action":"tool","task_type":"computer","tool":"terminal","input":{{"command":"command","location":"projects"}}}}
+
+For git:
+{{"action":"tool","task_type":"computer","tool":"git","input":{{"action":"clone","url":"https://github.com/..."}}}}
+
+If the entire task is completed:
+{{"action":"respond","task_type":"computer","goal_complete":true}}
+
+Return JSON only.
+"""
 
         try:
             raw = self.brain.generate(prompt, json_mode=True)
@@ -1267,7 +1335,9 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
 
         try:
             raw = self.brain.generate(repair_prompt, json_mode=True)
-        except Exception:
+        except Exception as exc:
+            # BUG 42+43: Log before swallowing
+            logging.warning("Repair brain.generate failed: %s", exc)
             raw = ""
 
         data = self._extract_json(raw)
@@ -1307,6 +1377,9 @@ Reply ONLY: {{"task_type":"computer"}} or {{"task_type":"conversation"}}"""
         if not plan:
             plan = "No plan."
 
+        # BUG 12: Include knowledge in decision prompt
+        knowledge_section = f"\nKNOWLEDGE:\n{knowledge}\n" if knowledge else ""
+
         return f"""You are Nova. Choose the next tool to run.
 
 Think step by step before answering:
@@ -1325,7 +1398,7 @@ TOOL HISTORY:
 {tool_history if tool_history else "None"}
 
 USER REQUEST: {message}
-
+{knowledge_section}
 RULES:
 - Look at the plan. Find the first pending step. Run that tool.
 - Use the tool descriptions above to choose valid inputs; do not invent unsupported capabilities.
@@ -1354,9 +1427,11 @@ screenshot: {{"action":"tool","task_type":"computer","tool":"desktop","input":{{
         self,
         message,
         task_type,
-        tool_history,
+        conversation="",
+        tool_history="",
         plan="No plan.",
-        allowed_tools=None
+        allowed_tools=None,
+        knowledge=""
     ):
 
         if allowed_tools is None:
@@ -1368,6 +1443,9 @@ screenshot: {{"action":"tool","task_type":"computer","tool":"desktop","input":{{
                 if name in allowed:
                     lines.append(f"- {name}: {data['description']}")
             tools_description = "\n".join(lines) or "No tools are currently enabled."
+
+        # BUG 13: Include knowledge in repair prompt
+        knowledge_section = f"\nKNOWLEDGE:\n{knowledge}\n" if knowledge else ""
 
         return f"""
 You are Nova's action validator.
@@ -1384,10 +1462,12 @@ TASK TYPE: {task_type}
 
 USER REQUEST: {message}
 
+PREVIOUS CONVERSATION: {conversation}
+
 REAL TOOL HISTORY: {tool_history}
 
 CURRENT PLAN: {plan}
-
+{knowledge_section}
 If the computer task is incomplete, choose the next real tool.
 
 Available tools:
@@ -1484,6 +1564,16 @@ Return JSON only.
     ):
         self._last_file_generation_error = None
 
+        # BUG 17: Validate path is a string
+        if not isinstance(path, str):
+            self._last_file_generation_error = "Path must be a string."
+            return None
+
+        # BUG 18: Validate location parameter
+        if location not in {"projects", "desktop", "system"}:
+            self._last_file_generation_error = f"Invalid location: {location}"
+            return None
+
         extension = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         code_languages = {
             "cpp": "C++",
@@ -1497,6 +1587,12 @@ Return JSON only.
             "java": "Java",
             "rs": "Rust",
             "go": "Go",
+            # BUG 29: Expanded extension whitelist
+            "sh": "Bash",
+            "ps1": "PowerShell",
+            "csv": "CSV",
+            "yaml": "YAML",
+            "yml": "YAML",
         }
         is_text_document = extension in {"txt", "md", "markdown"}
         language = code_languages.get(extension, "source")
@@ -1515,11 +1611,17 @@ Return JSON only.
 
         bounded_history = str(tool_history or "")
         if len(bounded_history) > 14000:
-            bounded_history = bounded_history[-14000:]
+            # BUG 19: Keep both HEAD and TAIL when truncating
+            head = bounded_history[:7000]
+            tail = bounded_history[-7000:]
+            bounded_history = head + "\n... [truncated] ...\n" + tail
 
         bounded_conversation = str(conversation or "")
         if len(bounded_conversation) > 8000:
-            bounded_conversation = bounded_conversation[-8000:]
+            # BUG 19: Keep both HEAD and TAIL when truncating
+            head = bounded_conversation[:4000]
+            tail = bounded_conversation[-4000:]
+            bounded_conversation = head + "\n... [truncated] ...\n" + tail
 
         if is_text_document:
             prompt = (
@@ -1765,7 +1867,11 @@ Return JSON only.
         if task_type != "computer" or not isinstance(plan, str):
             return None
 
-        allowed = set(allowed_tools or self.tools.tools.keys())
+        # BUG 27: Empty allowed_tools list should mean no tools allowed
+        if allowed_tools is None:
+            allowed = set(self.tools.tools.keys())
+        else:
+            allowed = set(allowed_tools)
         if not allowed:
             return None
 
@@ -1872,6 +1978,17 @@ Return JSON only.
                     path = "model.py"
                 else:
                     path = "generated_code.txt"
+
+            # BUG 28: Sanitize write_file path to prevent directory traversal
+            if path:
+                # Normalize path separators and remove any parent directory references
+                path = path.replace("\\", "/")
+                # Split into parts and remove ".." and "." segments
+                parts = [p for p in path.split("/") if p not in ("..", ".", "")]
+                path = "/".join(parts)
+                # Ensure no leading slash (prevent absolute paths)
+                path = path.lstrip("/")
+
             return {
                 "action": "tool",
                 "task_type": "computer",
@@ -2035,6 +2152,8 @@ Return JSON only.
                 }
 
         return None
+    _MAX_RETRIES = 3
+
     def decide(
         self,
         message,
@@ -2045,6 +2164,13 @@ Return JSON only.
         plan="No plan.",
         allowed_tools=None
     ):
+        # BUG 22: Handle invalid task_type gracefully
+        if task_type not in {"computer", "conversation"}:
+            logging.warning("Invalid task_type: %s, defaulting to conversation", task_type)
+            task_type = "conversation"
+
+        # BUG 34: Max retry counter
+        retry_count = 0
 
         has_successful_tool = (
             self._has_successful_tool(
@@ -2082,12 +2208,15 @@ Return JSON only.
             allowed_tools=allowed_tools
         )
 
+        # BUG 30: System prompt should not say "think step by step" when output should be code only
         try:
             raw = self.brain.generate(
                 prompt,
-                system_prompt="You are Nova, a precise AI agent. Think step by step internally, then return ONLY valid JSON. No explanation. No extra text."
+                system_prompt="You are Nova, a precise AI agent. Return ONLY valid JSON. No explanation. No extra text."
             )
-        except Exception:
+        except Exception as exc:
+            # BUG 42+43: Log before swallowing
+            logging.warning("Primary brain.generate failed: %s", exc)
             raw = ""
 
         data = self._extract_json(
@@ -2200,9 +2329,11 @@ Return JSON only.
         repair_prompt = self._build_repair_prompt(
             message=message,
             task_type=task_type,
+            conversation=conversation,
             tool_history=tool_history,
             plan=plan,
-            allowed_tools=allowed_tools
+            allowed_tools=allowed_tools,
+            knowledge=knowledge
         )
 
         try:
@@ -2219,6 +2350,14 @@ Return JSON only.
         data = self._extract_json(
             raw
         )
+
+        # BUG 21: Recompute pending_tool in repair pass (may have changed)
+        if isinstance(plan, str):
+            pending_tool = None
+            for plan_line in plan.splitlines():
+                if "[pending]" in plan_line.lower():
+                    pending_tool = self._pending_planned_tool(plan_line)
+                    break
 
         if task_type == "computer":
 
@@ -2237,8 +2376,15 @@ Return JSON only.
 
             if tool_decision:
 
-                if allowed_tools is not None and tool_decision.get("tool") not in set(allowed_tools):
-                    tool_decision = None
+                # BUG 27: Empty allowed_tools list means no tools allowed
+                if allowed_tools is not None:
+                    if len(allowed_tools) == 0 or tool_decision.get("tool") not in set(allowed_tools):
+                        tool_decision = None
+                    else:
+                        self._remember_file_generation(
+                            tool_decision
+                        )
+                        return tool_decision
                 else:
                     self._remember_file_generation(
                         tool_decision
@@ -2265,11 +2411,15 @@ Return JSON only.
                         validated_function_call = None
                     elif search_requested and validated_function_call.get("tool") != "web_search":
                         validated_function_call = None
-                    elif (
-                        allowed_tools is not None
-                        and validated_function_call.get("tool") not in set(allowed_tools)
-                    ):
-                        validated_function_call = None
+                    elif allowed_tools is not None:
+                        # BUG 27: Empty allowed_tools list means no tools allowed
+                        if len(allowed_tools) == 0 or validated_function_call.get("tool") not in set(allowed_tools):
+                            validated_function_call = None
+                        else:
+                            self._remember_file_generation(
+                                validated_function_call
+                            )
+                            return validated_function_call
                     else:
                         self._remember_file_generation(
                             validated_function_call
@@ -2287,9 +2437,13 @@ Return JSON only.
             if response_decision:
                 return response_decision
 
+            # BUG 34: Return retry with limit indication
+            retry_count += 1
             return {
                 "action": "retry",
-                "task_type": "computer"
+                "task_type": "computer",
+                "retry_count": retry_count,
+                "max_retries": self._MAX_RETRIES
             }
 
         response_decision = (

@@ -5,7 +5,7 @@ import math
 class EmbeddingModel:
     """Small deterministic embedding with no downloaded/pretrained model."""
 
-    def __init__(self, dimensions=256):
+    def __init__(self, dimensions=512):
         self.dimensions = max(32, int(dimensions))
 
     def encode(self, text):

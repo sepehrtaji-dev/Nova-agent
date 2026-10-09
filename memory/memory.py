@@ -1,6 +1,10 @@
 import json
+import logging
 import os
+import shutil
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 
 class LongTermMemory:
@@ -24,7 +28,15 @@ class LongTermMemory:
         try:
             with open(self.path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
-        except (OSError, json.JSONDecodeError, TypeError):
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            logger.warning(
+                "Long-term memory file corrupted (%s), creating backup", exc
+            )
+            backup_path = self.path + ".corrupted"
+            try:
+                shutil.copy2(self.path, backup_path)
+            except OSError:
+                pass
             data = None
 
         if not isinstance(data, dict):

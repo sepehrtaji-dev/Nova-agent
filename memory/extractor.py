@@ -1,6 +1,9 @@
 
 import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryExtractor:
@@ -43,6 +46,7 @@ class MemoryExtractor:
             pass
 
         decoder = json.JSONDecoder()
+        candidates = []
 
         for index, char in enumerate(response):
             if char != "{":
@@ -54,12 +58,21 @@ class MemoryExtractor:
                 )
 
                 if isinstance(data, dict):
-                    return data
+                    candidates.append(data)
 
             except json.JSONDecodeError:
                 continue
 
-        return None
+        if not candidates:
+            return None
+
+        # Prefer the last valid JSON object (most likely the intended result)
+        # or one with expected keys like "memories".
+        for candidate in reversed(candidates):
+            if "memories" in candidate:
+                return candidate
+
+        return candidates[-1]
 
     def _normalize_memory(self, item):
         if not isinstance(item, dict):
@@ -137,7 +150,12 @@ class MemoryExtractor:
             r"\b(?:remember|don't forget|do not forget|call me|my name is|"
             r"i am|i'm|i use|i prefer|i like|i want you to remember|"
             r"my project|i am working on|i'm working on|my computer|"
-            r"my pc|my gpu|my cpu|my setup|my workflow|my preference)\b",
+            r"my pc|my gpu|my cpu|my setup|my workflow|my preference|"
+            r"i have|i live|my favorite|my dog|my cat|my car|"
+            r"my job|my work|my school|my university|my team|"
+            r"my company|my boss|my colleague|my friend|my family|"
+            r"my wife|my husband|my son|my daughter|my parent|"
+            r"my mother|my father|my brother|my sister)\b",
             text,
         ))
 
@@ -224,7 +242,8 @@ USER MESSAGE:
 
             return self._validate(data, source_text=text)
 
-        except Exception:
+        except Exception as exc:
+            logger.warning("Memory extraction failed: %s", exc)
             return {
                 "memories": []
             }

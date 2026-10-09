@@ -61,7 +61,12 @@ class ShortTermMemory:
             # Never cut a user/assistant message in the middle unless the
             # single message itself exceeds the entire remaining budget.
             if remaining > 80:
-                chunks.append(chunk[:remaining])
+                # Try to truncate at a word boundary.
+                truncated = chunk[:remaining]
+                last_space = truncated.rfind(" ")
+                if last_space > remaining * 0.5:
+                    truncated = truncated[:last_space]
+                chunks.append(truncated)
             break
 
         return "\n\n".join(chunks) if chunks else "No previous conversation."

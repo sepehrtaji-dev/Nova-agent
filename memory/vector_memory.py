@@ -1,8 +1,12 @@
 import json
+import logging
 import math
 import os
+import tempfile
 
 from memory.embeddings import EmbeddingModel
+
+logger = logging.getLogger(__name__)
 
 
 class VectorMemory:
@@ -15,8 +19,25 @@ class VectorMemory:
         self.memories = self.load()
 
     def _write(self, data):
-        with open(self.path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
+        directory = os.path.dirname(self.path) or "."
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".nova-vector-",
+            suffix=".json",
+            dir=directory,
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self.path)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
     def load(self):
         try:
@@ -37,6 +58,9 @@ class VectorMemory:
             "text": text,
             "vector": self.embedder.encode(text),
         })
+        # Limit to last 1000 memories to prevent unbounded growth.
+        if len(self.memories) > 1000:
+            self.memories = self.memories[-1000:]
         self.save()
 
     @staticmethod

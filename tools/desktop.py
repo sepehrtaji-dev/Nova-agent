@@ -84,7 +84,7 @@ class DesktopTool:
         if not pyautogui:
             return None, err
 
-        ts   = int(time.time())
+        ts   = int(time.time() * 1000)  # milliseconds for uniqueness
         path = os.path.join(
             self.SCREENSHOTS_DIR,
             f"nova_{label}_{ts}.png"
@@ -208,6 +208,14 @@ class DesktopTool:
 
         x, y = int(x), int(y)
 
+        # Validate coordinates are within screen bounds
+        screen_w, screen_h = pyautogui.size()
+        if x < 0 or x >= screen_w or y < 0 or y >= screen_h:
+            return (
+                f"DESKTOP ERROR: coordinates ({x}, {y}) are outside screen bounds "
+                f"(screen size: {screen_w}x{screen_h})."
+            )
+
         if button not in {"left", "right", "middle"}:
             button = "left"
 
@@ -237,7 +245,17 @@ class DesktopTool:
         if x is None or y is None:
             return "DESKTOP ERROR: move requires 'x' and 'y'."
 
-        pyautogui.moveTo(int(x), int(y), duration=duration)
+        x, y = int(x), int(y)
+
+        # Validate coordinates are within screen bounds
+        screen_w, screen_h = pyautogui.size()
+        if x < 0 or x >= screen_w or y < 0 or y >= screen_h:
+            return (
+                f"DESKTOP ERROR: coordinates ({x}, {y}) are outside screen bounds "
+                f"(screen size: {screen_w}x{screen_h})."
+            )
+
+        pyautogui.moveTo(x, y, duration=duration)
         actual_x, actual_y = pyautogui.position()
 
         status = "SUCCESS" if (
@@ -262,6 +280,10 @@ class DesktopTool:
         if not isinstance(text, str) or not text:
             return "DESKTOP ERROR: type requires 'text'."
 
+        # Limit text length to 10000 characters
+        if len(text) > 10000:
+            return "DESKTOP ERROR: text exceeds maximum length of 10,000 characters."
+
         pyautogui.typewrite(text, interval=interval)
         time.sleep(0.2)
         screenshot_path, _ = self._screenshot("after_type")
@@ -283,6 +305,19 @@ class DesktopTool:
 
         if not key:
             return "DESKTOP ERROR: key requires 'key' field."
+
+        # Block dangerous key combinations
+        dangerous_combos = [
+            "ctrl+alt+delete",
+            "ctrl+alt+del",
+            "ctrl+shift+esc",
+            "ctrl+alt+f4",
+            "alt+f4",
+        ]
+        key_lower = key.lower().replace(" ", "")
+        for combo in dangerous_combos:
+            if combo in key_lower:
+                return f"DESKTOP ERROR: dangerous key combination '{key}' is blocked."
 
         # Support combos like "ctrl+c", "ctrl+shift+t"
         if "+" in key:
@@ -482,7 +517,26 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
 
         try:
             if is_windows:
-                escaped_title = title.replace('"', '\"')
+                # Escape special characters for PowerShell filter
+                escaped_title = (
+                    title
+                    .replace('"', '\"')
+                    .replace("'", "\'")
+                    .replace("`", "``")
+                    .replace("$", "`$")
+                    .replace("(", "`(")
+                    .replace(")", "`)")
+                    .replace("[", "`[")
+                    .replace("]", "`]")
+                    .replace("{", "`{")
+                    .replace("}", "`}")
+                    .replace("|", "`|")
+                    .replace("&", "`&")
+                    .replace("<", "`<")
+                    .replace(">", "`>")
+                    .replace("*", "`*")
+                    .replace("?", "`?")
+                )
                 filter_value = f'WINDOWTITLE eq *{escaped_title}*'
                 result = subprocess.run(
                     ["taskkill", "/F", "/FI", filter_value],
@@ -538,6 +592,9 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
                      "Select-Object Name, MainWindowTitle | Format-Table -AutoSize"],
                     capture_output=True, text=True, timeout=10
                 )
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip() or "Unknown PowerShell error"
+                    return f"STATUS: ERROR\nFailed to list windows: {error_msg}"
                 windows = result.stdout.strip()
             elif is_mac:
                 result = subprocess.run(
@@ -546,6 +603,9 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
                      'whose visible is true'],
                     capture_output=True, text=True, timeout=10
                 )
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip() or "Unknown osascript error"
+                    return f"STATUS: ERROR\nFailed to list windows: {error_msg}"
                 windows = result.stdout.strip()
             else:
                 # Linux — wmctrl
@@ -561,6 +621,9 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
                         ["xdotool", "search", "--name", ""],
                         capture_output=True, text=True, timeout=10
                     )
+                    if result.returncode != 0:
+                        error_msg = result.stderr.strip() or "Unknown xdotool error"
+                        return f"STATUS: ERROR\nFailed to list windows: {error_msg}"
                     windows = result.stdout.strip()
 
             if not windows:
@@ -644,6 +707,7 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
             return f"DESKTOP ERROR: {err}"
 
         image = data.get("image", "").strip()
+        text = data.get("text", "").strip()
 
         if image:
             if not os.path.isfile(image):
@@ -666,4 +730,59 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
             except Exception as e:
                 return f"DESKTOP ERROR: find_on_screen failed: {e}"
 
-        return "DESKTOP ERROR: find_on_screen requires 'image' path."
+        if text:
+            # OCR-based text search using pytesseract
+            try:
+                import pytesseract
+                from PIL import Image
+            except ImportError:
+                return (
+                    "DESKTOP ERROR: pytesseract is required for text search.\n"
+                    "Install it with: pip install pytesseract\n"
+                    "Also install Tesseract OCR: https://github.com/tesseract-ocr/tesseract"
+                )
+
+            try:
+                screenshot = pyautogui.screenshot()
+                # Use pytesseract to get word boxes
+                ocr_data = pytesseract.image_to_data(
+                    screenshot, output_type=pytesseract.Output.DICT
+                )
+
+                text_lower = text.lower()
+                matches = []
+                n_boxes = len(ocr_data['text'])
+                for i in range(n_boxes):
+                    word = ocr_data['text'][i].strip()
+                    if not word:
+                        continue
+                    conf = int(ocr_data['conf'][i]) if ocr_data['conf'][i] != '-1' else 0
+                    if conf < 30:
+                        continue
+                    if text_lower in word.lower():
+                        x = ocr_data['left'][i]
+                        y = ocr_data['top'][i]
+                        w = ocr_data['width'][i]
+                        h = ocr_data['height'][i]
+                        center_x = x + w // 2
+                        center_y = y + h // 2
+                        matches.append((center_x, center_y, word, conf))
+
+                if matches:
+                    # Return the best match (highest confidence)
+                    best = max(matches, key=lambda m: m[3])
+                    return (
+                        f"STATUS: SUCCESS\n"
+                        f"Found text '{best[2]}' at: x={best[0]}, y={best[1]}\n"
+                        f"Confidence: {best[3]}%\n"
+                        f"Total matches: {len(matches)}"
+                    )
+                else:
+                    return (
+                        f"STATUS: ERROR\n"
+                        f"Text not found on screen: {text!r}"
+                    )
+            except Exception as e:
+                return f"DESKTOP ERROR: OCR text search failed: {e}"
+
+        return "DESKTOP ERROR: find_on_screen requires 'image' or 'text' field."

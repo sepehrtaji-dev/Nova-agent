@@ -31,7 +31,7 @@ class ImageGenTool:
         self.pipe = None
         self.device = (
             "cuda"
-            if torch is not None and torch.cuda.is_available()
+            if torch is not None and hasattr(torch, 'cuda') and torch.cuda.is_available()
             else "cpu"
         )
 
@@ -158,7 +158,7 @@ class ImageGenTool:
             if not filename:
                 import uuid
                 filename = f"generated_{uuid.uuid4().hex[:8]}.png"
-            elif not filename.lower().endswith((".png", ".jpg", ".jpeg")):
+            elif not filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")):
                 filename += ".png"
 
             output_path = self.output_dir / filename

@@ -19,6 +19,12 @@ class MemoryManager:
         value
     ):
 
+        if not isinstance(category, str):
+            raise TypeError("category must be a string.")
+
+        if not isinstance(key, str):
+            raise TypeError("key must be a string.")
+
         if category not in self.data:
 
             self.data[category] = {}

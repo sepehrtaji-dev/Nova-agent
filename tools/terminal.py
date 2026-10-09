@@ -1,6 +1,7 @@
 import subprocess
 import os
 import json
+import shlex
 
 
 class TerminalTool:
@@ -120,9 +121,26 @@ class TerminalTool:
                 "location": location,
                 "input_provided": stdin_data is not None
             })
+            # Limit history to last 100 entries
+            if len(self.history) > 100:
+                self.history = self.history[-100:]
+
+            # Reject shell operators for safety
+            shell_operators = ['|', '&&', ';', '>', '<', '`', '$(']
+            for op in shell_operators:
+                if op in command:
+                    return (
+                        f"Terminal error: shell operators ({op!r}) are not allowed. "
+                        "Use a simple command without pipes, redirects, or chaining."
+                    )
+
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError as e:
+                return f"Terminal error: invalid command syntax: {e}"
 
             run_kwargs = {
-                "shell": True,
+                "shell": False,
                 "cwd": cwd,
                 "capture_output": True,
                 "text": True,
@@ -135,7 +153,7 @@ class TerminalTool:
                 run_kwargs["input"] = stdin_data
 
             result = subprocess.run(
-                command,
+                cmd_args,
                 **run_kwargs
             )
 
