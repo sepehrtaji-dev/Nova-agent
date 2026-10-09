@@ -296,21 +296,19 @@ class RouterTests(unittest.TestCase):
         payload = json.loads(decision["input"])
         self.assertEqual(payload["path"], "second.py")
 
-    def test_open_python_file_is_not_forced_to_desktop(self):
-        self.assertFalse(self.router._has_desktop_intent("open test_model.py"))
-        self.assertTrue(self.router._has_explicit_computer_intent("open test_model.py"))
+    def test_file_open_intent_is_decided_by_model(self):
+        self.brain.response = '{"task_type":"computer"}'
+        self.assertEqual(self.router.classify_task("open test_model.py"), "computer")
+        self.assertEqual(self.brain.calls, 1)
 
-    def test_mouse_and_keyboard_control_is_explicit_computer_intent(self):
-        self.assertTrue(
-            self.router._has_explicit_computer_intent(
-                "can you move the mouse to 500, 400?"
-            )
-        )
-        self.assertTrue(
-            self.router._has_explicit_computer_intent(
-                "can you press ctrl+shift+t?"
-            )
-        )
+    def test_mouse_and_keyboard_intent_is_decided_by_model(self):
+        self.brain.response = '{"task_type":"computer"}'
+        for message in (
+            "can you move the mouse to 500, 400?",
+            "can you press ctrl+shift+t?",
+        ):
+            self.assertEqual(self.router.classify_task(message), "computer")
+        self.assertEqual(self.brain.calls, 2)
 
     def test_model_cannot_override_a_planned_tool(self):
         plan = (
@@ -396,12 +394,13 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(json.loads(decision["input"]), {"action": "click", "x": 500, "y": 400})
         self.assertEqual(self.brain.calls, 1)
 
-    def test_explicit_search_is_computer(self):
-        self.assertTrue(self.router._has_explicit_computer_intent("search the web for Python 3.14 release notes"))
+    def test_search_intent_is_decided_by_model(self):
+        self.brain.response = '{"task_type":"computer"}'
+        self.assertEqual(self.router.classify_task("search the web for Python 3.14 release notes"), "computer")
+        self.assertEqual(self.brain.calls, 1)
 
     def test_address_bar_typing_is_computer(self):
         message = "type cs2 game in the address bar"
-        self.assertTrue(self.router._has_explicit_computer_intent(message))
         self.brain.response = '{"task_type":"computer"}'
         self.assertEqual(self.router.classify_task(message), "computer")
         self.assertEqual(self.brain.calls, 1)
@@ -428,10 +427,6 @@ class RouterTests(unittest.TestCase):
             "please run my firefox",
             "please start firefox",
         ):
-            self.assertTrue(
-                self.router._has_explicit_computer_intent(message),
-                message,
-            )
             self.assertEqual(
                 self.router.classify_task(message),
                 "computer",
