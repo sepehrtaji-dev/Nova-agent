@@ -73,12 +73,14 @@ class Verifier:
         if root is None:
             return None
 
+        root = os.path.realpath(root)
         actual_path = os.path.abspath(os.path.join(root, path))
+        resolved_path = os.path.realpath(actual_path)
         try:
-            common = os.path.commonpath([root, actual_path])
+            common = os.path.commonpath([root, resolved_path])
         except ValueError:
             return None
-        return actual_path if common == root else None
+        return resolved_path if common == root else None
 
 
     def verify(self, tool_name, tool_input_str, tool_result):
