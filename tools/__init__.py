@@ -1,37 +1,36 @@
+import importlib
 import logging
 
 from tools.registry import ToolRegistry
-from tools.terminal import TerminalTool
-from tools.filesystem import FileSystemTool
-from tools.web import WebSearchTool
-from tools.git import GitTool
-from tools.desktop import DesktopTool
-from tools.image_gen import ImageGenTool
 
 
 def load_tools():
-    """Load each tool independently so an optional dependency cannot crash startup."""
+    """Load tools independently; optional imports and constructors may fail safely."""
     registry = ToolRegistry()
     definitions = (
-        ("terminal", "Execute safe terminal/shell commands on the user's PC", TerminalTool, "run", "pc"),
-        ("list_files", "List files and directories in the projects folder or desktop", FileSystemTool, "list_files", "pc"),
-        ("read_file", "Read the contents of a text file from the projects folder or desktop", FileSystemTool, "read_file", "pc"),
-        ("find_files", "Find files recursively with optional filename and created/modified time filters.", FileSystemTool, "find_files", "pc"),
-        ("write_file", "Create or overwrite a file in the allowed filesystem locations.", FileSystemTool, "write_file", "pc"),
-        ("edit_file", "Edit an existing file by replacing a specific string.", FileSystemTool, "edit_file", "pc"),
-        ("delete_file", "Delete a file from an allowed filesystem location.", FileSystemTool, "delete_file", "pc"),
-        ("create_directory", "Create a directory in an allowed filesystem location.", FileSystemTool, "create_directory", "pc"),
-        ("web_search", "Search the public web for current information", WebSearchTool, "run", "web"),
-        ("git", "Run supported Git operations on a local repository.", GitTool, "run", "git"),
-        ("desktop", "Control the desktop and GUI. Actions include screenshot, click, move, type, key, scroll, open_app, close_app, get_windows, and focus_window.", DesktopTool, "run", "pc"),
-        ("generate_image", "Generate an image using the configured local image model.", ImageGenTool, "run", "pc"),
+        ("terminal", "Execute terminal commands in an allowed workspace.", "tools.terminal", "TerminalTool", "run", "pc"),
+        ("list_files", "List files and directories in the projects folder or desktop.", "tools.filesystem", "FileSystemTool", "list_files", "pc"),
+        ("read_file", "Read a text file from an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "read_file", "pc"),
+        ("find_files", "Find files with optional filename and time filters.", "tools.filesystem", "FileSystemTool", "find_files", "pc"),
+        ("write_file", "Create or overwrite a file in an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "write_file", "pc"),
+        ("edit_file", "Edit an existing file by replacing a specific string.", "tools.filesystem", "FileSystemTool", "edit_file", "pc"),
+        ("delete_file", "Delete a file from an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "delete_file", "pc"),
+        ("create_directory", "Create a directory in an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "create_directory", "pc"),
+        ("web_search", "Search the public web for current information.", "tools.web", "WebSearchTool", "run", "web"),
+        ("git", "Run supported Git operations on a local repository.", "tools.git", "GitTool", "run", "git"),
+        ("desktop", "Control the desktop and GUI using supported desktop actions.", "tools.desktop", "DesktopTool", "run", "pc"),
+        ("generate_image", "Generate images using the configured local image model.", "tools.image_gen", "ImageGenTool", "run", "pc"),
     )
+
     instances = {}
-    for name, description, factory, method_name, capability in definitions:
+    for name, description, module_name, class_name, method_name, capability in definitions:
+        key = (module_name, class_name)
         try:
-            if factory not in instances:
-                instances[factory] = factory()
-            handler = getattr(instances[factory], method_name)
+            if key not in instances:
+                module = importlib.import_module(module_name)
+                factory = getattr(module, class_name)
+                instances[key] = factory()
+            handler = getattr(instances[key], method_name)
             registry.register(name, description, handler, capability=capability)
         except Exception as exc:
             logging.warning(
