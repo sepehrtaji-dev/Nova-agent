@@ -13,6 +13,7 @@ from agent.verifier import Verifier
 from tools import load_tools
 from agent.self_knowledge import SelfKnowledge
 from agent.diagnostics import RuntimeDiagnostics
+from agent.self_reflection import SelfReflection
 
 
 class NovaCore:
@@ -2133,6 +2134,21 @@ Nova must choose another useful action.
 
         if task_type == "computer" and self.planner.is_complete(plan):
             completed = True
+
+        # Audit the final claim against plan state and this run's verifier records.
+        # A router's early "done" decision is not enough to establish completion.
+        reflection = SelfReflection().evaluate(
+            goal=message,
+            plan=plan,
+            tool_history=tool_history,
+            reported_complete=completed,
+        )
+        state = getattr(self, "execution_state", None)
+        if isinstance(state, dict):
+            state["last_reflection"] = reflection
+        if task_type == "computer" and completed and not reflection["complete"]:
+            completed = False
+            self._status("Reflection found unfinished or insufficiently verified work...")
 
         knowledge_context = (
             self.knowledge.get_context(
