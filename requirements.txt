@@ -1,12 +1,4 @@
 ollama
 rich
-pyautogui
-pillow
-pytesseract
-numpy
-torch
-PySide6
-diffusers
-safetensors
 textual
 prompt_toolkit
