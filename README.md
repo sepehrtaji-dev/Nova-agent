@@ -96,7 +96,7 @@ Tools are registered with capability metadata. Nova derives the enabled tool set
 Example inputs:
 
 ```json
-{"action": "web_fetch", "url": "https://example.com"}
+{"url": "https://example.com"}
 {"action": "pr_list", "repo": "owner/repository", "state": "open", "limit": 5}
 ```
 
