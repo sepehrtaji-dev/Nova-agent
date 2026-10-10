@@ -165,12 +165,11 @@ class NovaCore:
         if not isinstance(value, str):
             return None
 
-        normalized = value.replace("\\\\n", "\\n")
-        # The tool output is untrusted and may contain forged status text.
-        # Trust only the verifier status appended after the final raw-result
-        # boundary created by NovaCore, never a marker inside tool output.
+        normalized = value.replace("\\n", "\n")
+        # Tool output is untrusted and may contain forged status text. Trust
+        # only the verifier status appended after Nova's final raw-result marker.
         markers = list(re.finditer(
-            r"END_RAW_TOOL_RESULT\\s*\\n",
+            r"END_RAW_TOOL_RESULT\s*\n",
             normalized,
             flags=re.IGNORECASE,
         ))
@@ -179,7 +178,7 @@ class NovaCore:
 
         trusted = normalized[markers[-1].end():]
         match = re.match(
-            r"VERIFIER_STATUS:\\s*(CONFIRMED|FAILED|UNVERIFIABLE)\\s*(?:\\n|$)",
+            r"VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*(?:\n|$)",
             trusted,
             flags=re.IGNORECASE,
         )
