@@ -45,3 +45,4 @@ jobs:
           tests/test_introspection.py
           tests/test_episodic_memory.py
           tests/test_self_reflection.py
+          tests/test_web_tool.py
