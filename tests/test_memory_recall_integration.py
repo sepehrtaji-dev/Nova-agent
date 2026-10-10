@@ -53,7 +53,7 @@ class MemoryRecallIntegrationTests(unittest.TestCase):
         class FakeLongMemory:
             def relevant(self, query, limit=3):
                 return [
-                    {"key": "profile.gpu", "value": "RTX 3060", "score": 1}
+                    {"key": "profile.gpu", "value": "Unknown", "score": 1}
                 ]
 
         core = NovaCore.__new__(NovaCore)
