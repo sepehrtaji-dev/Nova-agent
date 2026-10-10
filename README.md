@@ -190,6 +190,10 @@ Example:
 
 The UI is designed to show **what Nova is doing**, rather than exposing private model reasoning.
 
+### Long-term memory controls
+
+Nova stores selected long-term user memories locally in `memory/long_term.json`. Use `/memory` to inspect saved entries and `/forget <category> <key>` to remove one entry (for example, `/forget profile gpu`). These commands are available in both terminal interfaces. The memory extractor also rejects credential-like values such as labeled passwords, API keys, bearer tokens, and private-key blocks; do not use Nova's memory as a secret store.
+
 ### Launch modes
 
 - `python main.py` — full-screen Textual UI (default)

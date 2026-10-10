@@ -171,8 +171,30 @@ class NovaTextualApp(App):
             self.query_one("#transcript", RichLog).write(Panel(
                 "/self  runtime + Ollama metadata\n/model  model metadata\n/status  local status\n"
                 "/tools  tool registry\n/permissions  capability toggles\n/web, /git, /pc  toggle access\n"
-                "/doctor  local health diagnostics\n/clear  clear conversation\n/reset  restart core\n/exit  quit",
+                "/doctor  local health diagnostics\n/memory  list saved long-term memory\n"
+                "/forget <category> <key>  remove one saved memory\n"
+                "/clear  clear conversation\n/reset  restart core\n/exit  quit",
                 title="COMMANDS", border_style="cyan"))
+        elif name == "/memory":
+            entries = self.core.long_memory.entries()
+            lines = [f"{item['key']}: {item['value']}" for item in entries]
+            body = "\n".join(lines) if lines else "No saved long-term memories."
+            self.query_one("#transcript", RichLog).write(
+                Panel(body, title=f"SAVED MEMORY · {len(entries)} entries", border_style="cyan")
+            )
+        elif name == "/forget":
+            parts = command.split(maxsplit=2)
+            if len(parts) != 3:
+                self.query_one("#transcript", RichLog).write(Panel(
+                    "Usage: /forget <category> <key>\nExample: /forget profile gpu",
+                    title="MEMORY COMMAND", border_style="yellow"))
+            elif self.core.long_memory.forget(parts[1], parts[2]):
+                self.query_one("#transcript", RichLog).write(Panel(
+                    f"Forgot {parts[1]}.{parts[2]}.", title="MEMORY UPDATED", border_style="green"))
+            else:
+                self.query_one("#transcript", RichLog).write(Panel(
+                    f"No saved memory found for {parts[1]}.{parts[2]}.",
+                    title="MEMORY NOT FOUND", border_style="yellow"))
         elif name == "/clear":
             self.query_one("#transcript", RichLog).clear()
         elif name == "/status":

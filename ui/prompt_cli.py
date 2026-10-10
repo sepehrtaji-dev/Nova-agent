@@ -14,7 +14,7 @@ from agent.introspection import inspect_model, runtime_profile
 
 COMMANDS = [
     "/help", "/self", "/model", "/status", "/tools", "/permissions",
-    "/web", "/git", "/pc", "/doctor", "/clear", "/reset", "/exit",
+    "/web", "/git", "/pc", "/doctor", "/memory", "/forget", "/clear", "/reset", "/exit",
 ]
 console = Console()
 STYLE = Style.from_dict({"prompt": "#22d3ee bold", "": "ansidefault"})
@@ -37,6 +37,18 @@ def main() -> None:
             break
         if command == "/help":
             console.print("  " + "  ".join(COMMANDS))
+        elif command == "/memory":
+            entries = core.long_memory.entries()
+            body = "\n".join(f"{item['key']}: {item['value']}" for item in entries)
+            console.print(Panel(body or "No saved long-term memories.", title=f"Saved memory · {len(entries)} entries", border_style="cyan"))
+        elif command == "/forget":
+            parts = message.split(maxsplit=2)
+            if len(parts) != 3:
+                console.print("Usage: /forget <category> <key>  (example: /forget profile gpu)")
+            elif core.long_memory.forget(parts[1], parts[2]):
+                console.print(f"Forgot {parts[1]}.{parts[2]}.")
+            else:
+                console.print(f"No saved memory found for {parts[1]}.{parts[2]}.")
         elif command == "/clear":
             console.clear()
         elif command in {"/web", "/git", "/pc"}:
