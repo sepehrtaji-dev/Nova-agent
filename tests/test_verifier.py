@@ -126,6 +126,33 @@ class TestVerifier(unittest.TestCase):
             )
             self.assertTrue(verification.confirmed())
 
+    def test_edit_file_allows_old_text_inside_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "note.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("concatenate")
+
+            result = f"FILE_EDITED\\nLocation: {path}\\nReplacements: 1\\nBytes: 11"
+            verification = self.verifier.verify(
+                "edit_file",
+                {"old": "cat", "new": "concatenate"},
+                result,
+            )
+            self.assertTrue(verification.confirmed())
+
+    def test_edit_file_requires_replacement_count_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "note.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("new value")
+            result = f"FILE_EDITED\\nLocation: {path}\\nBytes: 9"
+            verification = self.verifier.verify(
+                "edit_file",
+                {"old": "old value", "new": "new value"},
+                result,
+            )
+            self.assertEqual(verification.status, "failed")
+
     def test_write_file_verifies_exact_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "note.txt")
