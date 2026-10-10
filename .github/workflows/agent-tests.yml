@@ -39,5 +39,6 @@ jobs:
           tests/test_terminal_security.py
           tests/test_self_knowledge.py
           tests/test_diagnostics.py
+          tests/test_introspection.py
           tests/test_episodic_memory.py
           tests/test_self_reflection.py
