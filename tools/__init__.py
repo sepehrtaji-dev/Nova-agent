@@ -19,6 +19,7 @@ def load_tools():
         ("web_search", "Search the public web for current information.", "tools.web", "WebSearchTool", "run", "web"),
         ("web_fetch", "Fetch readable text from a public HTTP/HTTPS webpage.", "tools.web", "WebSearchTool", "fetch", "web"),
         ("git", "Run supported Git operations on a local repository.", "tools.git", "GitTool", "run", "git"),
+        ("github", "Read GitHub repository metadata, issues, pull requests, workflows, releases, and code search.", "tools.github", "GitHubTool", "run", "git"),
         ("desktop", "Control the desktop and GUI using supported desktop actions.", "tools.desktop", "DesktopTool", "run", "pc"),
         ("generate_image", "Generate images using the configured local image model.", "tools.image_gen", "ImageGenTool", "run", "pc"),
     )
