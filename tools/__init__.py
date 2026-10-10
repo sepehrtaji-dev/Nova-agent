@@ -17,6 +17,7 @@ def load_tools():
         ("delete_file", "Delete a file from an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "delete_file", "pc"),
         ("create_directory", "Create a directory in an allowed filesystem location.", "tools.filesystem", "FileSystemTool", "create_directory", "pc"),
         ("web_search", "Search the public web for current information.", "tools.web", "WebSearchTool", "run", "web"),
+        ("web_fetch", "Fetch readable text from a public HTTP/HTTPS webpage.", "tools.web", "WebSearchTool", "fetch", "web"),
         ("git", "Run supported Git operations on a local repository.", "tools.git", "GitTool", "run", "git"),
         ("desktop", "Control the desktop and GUI using supported desktop actions.", "tools.desktop", "DesktopTool", "run", "pc"),
         ("generate_image", "Generate images using the configured local image model.", "tools.image_gen", "ImageGenTool", "run", "pc"),
