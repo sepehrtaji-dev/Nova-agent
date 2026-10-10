@@ -240,7 +240,7 @@ class Verifier:
         )
 
     def _verify_find_files(self, tool_input, tool_result):
-        if "STATUS: ERROR" in tool_result or "FILESYSTEM ERROR" in tool_result:
+        if "STATUS: ERROR" in tool_result or "FILESYSTEM ERROR" in tool_result or "Permission denied:" in tool_result:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:400],
@@ -254,21 +254,56 @@ class Verifier:
                 message="find_files result is missing its success/count evidence.",
             )
 
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="find_files could not resolve its requested location safely.",
+            )
+        reported_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+        if not reported_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="find_files did not report the searched directory.",
+            )
+        if os.path.abspath(reported_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {reported_path}, Expected: {requested_path}",
+                message="find_files reported a different directory than requested.",
+            )
+        if not os.path.isdir(requested_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"Directory does not exist: {requested_path}",
+                message="find_files searched a directory that cannot be confirmed.",
+            )
+
         match = re.search(r"Match count:\s*(-?\d+)", tool_result)
-        count = int(match.group(1)) if match else 0
-        # BUG 15: Handle negative values as errors
+        if not match:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:400],
+                message="find_files did not report a valid match count.",
+            )
+        count = int(match.group(1))
         if count < 0:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:900],
-                message=f"find_files returned negative count: {count}."
+                message=f"find_files returned negative count: {count}.",
             )
-        # BUG 9: Return unverifiable when count is 0
         if count == 0:
             return VerificationResult(
-                status="unverifiable",
-                evidence=tool_result[:900],
-                message="find_files returned 0 matches."
+                status="confirmed",
+                evidence=f"Directory: {requested_path}\nMatch count: 0",
+                message=f"✓ File search completed: no matching files in {requested_path}.",
             )
         return VerificationResult(
             status="confirmed",
@@ -376,38 +411,55 @@ class Verifier:
     # ── list_files ────────────────────────────────────────────────────────────
 
     def _verify_list_files(self, tool_input, tool_result):
-        """Verify the requested directory exists and is actually a directory."""
-        path = str(tool_input.get("path", ".")).strip() or "."
-        location = str(tool_input.get("location", "projects")).strip().lower()
-
-        if any(err in tool_result for err in ("Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:")):
+        """Confirm the requested directory was the one actually listed."""
+        if any(err in tool_result for err in (
+            "Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:"
+        )):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
                 message=f"list_files failed: {tool_result[:120]}",
             )
 
-        actual_path = self._resolve_path_for_verification(tool_input)
-        if actual_path is None:
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:200],
                 message="list_files could not resolve its requested location safely.",
             )
 
-        if not os.path.isdir(actual_path):
+        reported_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+            if line.startswith("Directory is empty:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+        if not reported_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="list_files did not report the listed directory.",
+            )
+        if os.path.abspath(reported_path) != requested_path:
             return VerificationResult(
                 status="failed",
-                evidence=f"os.path.isdir({actual_path!r}) = False",
-                message=f"Directory could not be confirmed on disk: {actual_path}",
+                evidence=f"Tool reported: {reported_path}, Expected: {requested_path}",
+                message="list_files reported a different directory than requested.",
             )
-
+        if not os.path.isdir(requested_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"os.path.isdir({requested_path!r}) = False",
+                message=f"Directory could not be confirmed on disk: {requested_path}",
+            )
         return VerificationResult(
             status="confirmed",
-            evidence=f"Directory: {actual_path}",
-            message=f"✓ Directory listing confirmed: {actual_path}",
+            evidence=f"Directory: {requested_path}",
+            message=f"✓ Directory listing confirmed: {requested_path}",
         )
-
 
     # ── terminal ──────────────────────────────────────────────────────────────
 
