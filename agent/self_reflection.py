@@ -45,7 +45,7 @@ class SelfReflection:
         # Raw tool output is untrusted and may contain text that imitates a
         # verifier marker. Count only markers emitted after the raw-result block.
         trusted_history = re.sub(
-            r"BEGIN_RAW_TOOL_RESULT\\s*.*?END_RAW_TOOL_RESULT",
+            r"BEGIN_RAW_TOOL_RESULT\s*.*?END_RAW_TOOL_RESULT",
             "",
             history_text,
             flags=re.IGNORECASE | re.DOTALL,
