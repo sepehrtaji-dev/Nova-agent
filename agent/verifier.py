@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import re
+from urllib.parse import urlsplit
 
 
 class VerificationResult:
@@ -80,7 +81,10 @@ class Verifier:
             common = os.path.commonpath([root, resolved_path])
         except ValueError:
             return None
-        return resolved_path if common == root else None
+        # Keep the lexical absolute path returned by FileSystemTool so the
+        # verifier compares the same path the tool reports. The canonical path
+        # above is still used to reject symlink escapes.
+        return actual_path if common == root else None
 
 
     def verify(self, tool_name, tool_input_str, tool_result):
@@ -116,6 +120,8 @@ class Verifier:
             "terminal":         self._verify_terminal,
             "git":              self._verify_git,
             "web_search":       self._verify_web_search,
+            "web_fetch":        self._verify_web_fetch,
+            "github":            self._verify_github,
             "generate_image":   self._verify_generate_image,
             "desktop":          self._verify_desktop,
         }
@@ -234,7 +240,7 @@ class Verifier:
         )
 
     def _verify_find_files(self, tool_input, tool_result):
-        if "STATUS: ERROR" in tool_result or "FILESYSTEM ERROR" in tool_result:
+        if "STATUS: ERROR" in tool_result or "FILESYSTEM ERROR" in tool_result or "Permission denied:" in tool_result:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:400],
@@ -248,21 +254,56 @@ class Verifier:
                 message="find_files result is missing its success/count evidence.",
             )
 
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="find_files could not resolve its requested location safely.",
+            )
+        reported_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+        if not reported_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="find_files did not report the searched directory.",
+            )
+        if os.path.abspath(reported_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {reported_path}, Expected: {requested_path}",
+                message="find_files reported a different directory than requested.",
+            )
+        if not os.path.isdir(requested_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"Directory does not exist: {requested_path}",
+                message="find_files searched a directory that cannot be confirmed.",
+            )
+
         match = re.search(r"Match count:\s*(-?\d+)", tool_result)
-        count = int(match.group(1)) if match else 0
-        # BUG 15: Handle negative values as errors
+        if not match:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:400],
+                message="find_files did not report a valid match count.",
+            )
+        count = int(match.group(1))
         if count < 0:
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:900],
-                message=f"find_files returned negative count: {count}."
+                message=f"find_files returned negative count: {count}.",
             )
-        # BUG 9: Return unverifiable when count is 0
         if count == 0:
             return VerificationResult(
-                status="unverifiable",
-                evidence=tool_result[:900],
-                message="find_files returned 0 matches."
+                status="confirmed",
+                evidence=f"Directory: {requested_path}\nMatch count: 0",
+                message=f"✓ File search completed: no matching files in {requested_path}.",
             )
         return VerificationResult(
             status="confirmed",
@@ -340,6 +381,20 @@ class Verifier:
                 message="create_directory succeeded but path not found in result."
             )
 
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="create_directory could not resolve its requested location safely.",
+            )
+        if os.path.abspath(actual_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
+                message="create_directory reported a different path than requested.",
+            )
+
         if not os.path.isdir(actual_path):
             return VerificationResult(
                 status="failed",
@@ -356,38 +411,55 @@ class Verifier:
     # ── list_files ────────────────────────────────────────────────────────────
 
     def _verify_list_files(self, tool_input, tool_result):
-        """Verify the requested directory exists and is actually a directory."""
-        path = str(tool_input.get("path", ".")).strip() or "."
-        location = str(tool_input.get("location", "projects")).strip().lower()
-
-        if any(err in tool_result for err in ("Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:")):
+        """Confirm the requested directory was the one actually listed."""
+        if any(err in tool_result for err in (
+            "Filesystem error:", "Permission denied:", "Path does not exist:", "Not a directory:"
+        )):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
                 message=f"list_files failed: {tool_result[:120]}",
             )
 
-        actual_path = self._resolve_path_for_verification(tool_input)
-        if actual_path is None:
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:200],
                 message="list_files could not resolve its requested location safely.",
             )
 
-        if not os.path.isdir(actual_path):
+        reported_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+            if line.startswith("Directory is empty:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+        if not reported_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="list_files did not report the listed directory.",
+            )
+        if os.path.abspath(reported_path) != requested_path:
             return VerificationResult(
                 status="failed",
-                evidence=f"os.path.isdir({actual_path!r}) = False",
-                message=f"Directory could not be confirmed on disk: {actual_path}",
+                evidence=f"Tool reported: {reported_path}, Expected: {requested_path}",
+                message="list_files reported a different directory than requested.",
             )
-
+        if not os.path.isdir(requested_path):
+            return VerificationResult(
+                status="failed",
+                evidence=f"os.path.isdir({requested_path!r}) = False",
+                message=f"Directory could not be confirmed on disk: {requested_path}",
+            )
         return VerificationResult(
             status="confirmed",
-            evidence=f"Directory: {actual_path}",
-            message=f"✓ Directory listing confirmed: {actual_path}",
+            evidence=f"Directory: {requested_path}",
+            message=f"✓ Directory listing confirmed: {requested_path}",
         )
-
 
     # ── terminal ──────────────────────────────────────────────────────────────
 
@@ -570,12 +642,50 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="edit_file did not return FILE_EDITED.",
             )
+        # Require the edit tool's explicit replacement count. Avoid false
+        # failures when the old text legitimately remains inside the replacement
+        # (for example, replacing "cat" with "concatenate").
+        replacements = None
+        for line in tool_result.splitlines():
+            if line.startswith("Replacements:"):
+                try:
+                    replacements = int(line.split(":", 1)[1].strip())
+                except (TypeError, ValueError):
+                    replacements = None
+                break
+        if replacements is None or replacements < 1:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="edit_file did not report a valid positive replacement count.",
+            )
+
         actual_path = None
         for line in tool_result.splitlines():
             if line.startswith("Location:"):
                 actual_path = line.replace("Location:", "", 1).strip()
                 break
-        if not actual_path or not os.path.isfile(actual_path):
+        if not actual_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="edit_file reported success but did not provide a concrete path.",
+            )
+
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="edit_file could not resolve its requested location safely.",
+            )
+        if os.path.abspath(actual_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
+                message="edit_file reported a different path than requested.",
+            )
+        if not os.path.isfile(actual_path):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
@@ -597,23 +707,7 @@ class Verifier:
                 message=f"Could not reread edited file: {actual_path}",
             )
 
-        # Require the edit tool's explicit replacement count. Avoid false
-        # failures when the old text legitimately remains inside the replacement
-        # (for example, replacing "cat" with "concatenate").
-        replacements = None
-        for line in tool_result.splitlines():
-            if line.startswith("Replacements:"):
-                try:
-                    replacements = int(line.split(":", 1)[1].strip())
-                except (TypeError, ValueError):
-                    replacements = None
-                break
-        if replacements is None or replacements < 1:
-            return VerificationResult(
-                status="failed",
-                evidence=tool_result[:300],
-                message="edit_file did not report a valid positive replacement count.",
-            )
+
 
         if (
             isinstance(old_value, str)
@@ -659,13 +753,32 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="delete_file did not return FILE_DELETED.",
             )
-        # BUG 12: Use _resolve_path_for_verification instead of trusting tool-reported path
+        # Require a concrete reported path as well as independent filesystem
+        # evidence; a bare FILE_DELETED marker is not enough to confirm an action.
+        reported_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+        if not reported_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="delete_file reported no concrete path.",
+            )
+
         actual_path = self._resolve_path_for_verification(tool_input)
         if actual_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:300],
                 message="delete_file could not resolve its requested location safely.",
+            )
+        if os.path.abspath(reported_path) != actual_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {reported_path}, Expected: {actual_path}",
+                message="delete_file reported a different path than requested.",
             )
         if os.path.exists(actual_path):
             return VerificationResult(
@@ -828,22 +941,136 @@ class Verifier:
                 message="web_search result missing Title/URL markers."
             )
 
-        # BUG 8: Validate that titles and URLs are non-empty
-        titles = re.findall(r"Title:\s*(.*)", tool_result)
-        urls = re.findall(r"URL:\s*(.*)", tool_result)
-        if not any(t.strip() for t in titles) or not any(u.strip() for u in urls):
+        # Every result entry must contain a non-empty title and a public
+        # HTTP(S) URL. Do not treat arbitrary strings or javascript: links as
+        # evidence that a real search result was returned.
+        titles = [value.strip() for value in re.findall(r"^Title:\s*(.*)$", tool_result, flags=re.MULTILINE)]
+        urls = [value.strip() for value in re.findall(r"^URL:\s*(.*)$", tool_result, flags=re.MULTILINE)]
+        if not titles or not urls or len(titles) != len(urls):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
-                message="web_search result has empty Title or URL."
+                message="web_search result has missing or mismatched Title/URL entries."
+            )
+        if any(not title for title in titles):
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="web_search result contains an empty title."
             )
 
-        query = tool_input.get("query", "(unknown)")
-        # BUG 16: Use regex to count actual result entries
-        count = len(re.findall(r"^Title:", tool_result, flags=re.MULTILINE))
+        for url in urls:
+            try:
+                parsed = urlsplit(url)
+                valid_url = parsed.scheme.lower() in {"http", "https"} and bool(parsed.hostname)
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                return VerificationResult(
+                    status="failed",
+                    evidence=f"Invalid result URL: {url[:160]}",
+                    message="web_search returned a result with an invalid or unsafe URL.",
+                )
 
+        query = str(tool_input.get("query", "(unknown)"))
+        count = len(titles)
         return VerificationResult(
             status="confirmed",
             evidence=tool_result[:400],
             message=f"✓ Web search confirmed: {count} result(s) for '{query[:60]}'"
+        )
+
+
+    def _verify_web_fetch(self, tool_input, tool_result):
+        """Verify a bounded webpage fetch returned a public URL and page text."""
+        if tool_result.startswith("WEB_FETCH_ERROR:"):
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message="web_fetch returned an error.",
+            )
+        if "WEB_FETCH_SUCCESS" not in tool_result:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="web_fetch result is missing its success marker.",
+            )
+
+        fetched_url = None
+        for line in tool_result.splitlines():
+            if line.startswith("URL:"):
+                fetched_url = line.split(":", 1)[1].strip()
+                break
+        if not fetched_url:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="web_fetch did not report the final URL.",
+            )
+        try:
+            parsed = urlsplit(fetched_url)
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                raise ValueError("unsafe URL")
+        except ValueError:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Invalid URL: {fetched_url[:160]}",
+                message="web_fetch reported an invalid URL.",
+            )
+
+        begin = tool_result.rfind("BEGIN_PAGE_TEXT")
+        end = tool_result.rfind("END_PAGE_TEXT")
+        if begin < 0 or end <= begin:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="web_fetch result has no complete page-text block.",
+            )
+        page_text = tool_result[begin + len("BEGIN_PAGE_TEXT"):end].strip()
+        if not page_text:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="web_fetch returned an empty page-text block.",
+            )
+        return VerificationResult(
+            status="confirmed",
+            evidence=f"URL: {fetched_url}\nCharacters observed: {len(page_text)}",
+            message=f"✓ Webpage text fetched from {fetched_url}",
+        )
+
+
+    def _verify_github(self, tool_input, tool_result):
+        """Require the GitHub CLI's explicit successful exit status."""
+        if "GITHUB_STATUS: ERROR" in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message="GitHub CLI reported an error.",
+            )
+        if "GITHUB_STATUS: SUCCESS" not in tool_result:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="GitHub result is missing its success marker.",
+            )
+        match = re.search(r"^Exit code:\s*(-?\d+)\s*$", tool_result, flags=re.MULTILINE)
+        if not match:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="GitHub result did not include an exit code.",
+            )
+        if int(match.group(1)) != 0:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message=f"GitHub CLI exited with code {match.group(1)}.",
+            )
+        action = str(tool_input.get("action", "query"))
+        repo = str(tool_input.get("repo", "unknown repository"))
+        return VerificationResult(
+            status="confirmed",
+            evidence=tool_result[:800],
+            message=f"✓ GitHub {action} query completed for {repo}.",
         )

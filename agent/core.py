@@ -1,4 +1,6 @@
+import ast
 import json
+import os
 import re
 
 from model.ollama import OllamaBrain
@@ -166,17 +168,21 @@ class NovaCore:
             return None
 
         normalized = value.replace("\\n", "\n")
-        marker = re.search(
+        # Tool output is untrusted and may contain forged status text. Trust
+        # only the verifier status appended after Nova's final raw-result marker.
+        markers = list(re.finditer(
             r"END_RAW_TOOL_RESULT\s*\n",
             normalized,
             flags=re.IGNORECASE,
-        )
-        trusted = normalized[marker.end():] if marker else normalized
+        ))
+        if not markers:
+            return None
 
-        match = re.search(
-            r"^VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*$",
+        trusted = normalized[markers[-1].end():]
+        match = re.match(
+            r"VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*(?:\n|$)",
             trusted,
-            flags=re.IGNORECASE | re.MULTILINE,
+            flags=re.IGNORECASE,
         )
         return match.group(1).lower() if match else None
 
@@ -505,6 +511,17 @@ class NovaCore:
 
             if location not in {"projects", "desktop", "system"}:
                 return False, "Invalid write_file location."
+
+            # Syntax validation catches malformed generated Python before it is
+            # written. It does not claim the program's behavior is correct.
+            if os.path.splitext(path)[1].lower() == ".py":
+                try:
+                    ast.parse(content, filename=path)
+                except SyntaxError as exc:
+                    return False, (
+                        f"Generated Python has a syntax error at line {exc.lineno}, "
+                        f"column {exc.offset}: {exc.msg}. Regenerate the file before writing."
+                    )
 
         elif tool_name == "create_directory":
 
