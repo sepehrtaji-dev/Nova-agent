@@ -121,7 +121,7 @@ class TestVerifier(unittest.TestCase):
             verification = self.verifier.verify(
                 "delete_file",
                 {"path": requested, "location": "system"},
-                f"FILE_DELETED\\nLocation: {reported}",
+                f"FILE_DELETED\nLocation: {reported}",
             )
             self.assertEqual(verification.status, "failed")
             self.assertTrue(os.path.isfile(reported))
@@ -134,7 +134,7 @@ class TestVerifier(unittest.TestCase):
             verification = self.verifier.verify(
                 "create_directory",
                 {"path": requested, "location": "system"},
-                f"DIRECTORY_CREATED\\nLocation: {reported}",
+                f"DIRECTORY_CREATED\nLocation: {reported}",
             )
             self.assertEqual(verification.status, "failed")
 
@@ -147,7 +147,7 @@ class TestVerifier(unittest.TestCase):
             verification = self.verifier.verify(
                 "edit_file",
                 {"path": requested, "location": "system", "old": "old", "new": "new value"},
-                f"FILE_EDITED\\nLocation: {reported}\\nReplacements: 1",
+                f"FILE_EDITED\nLocation: {reported}\nReplacements: 1",
             )
             self.assertEqual(verification.status, "failed")
 
@@ -205,6 +205,21 @@ class TestVerifier(unittest.TestCase):
                 result,
             )
             self.assertEqual(verification.status, "failed")
+
+    def test_web_search_rejects_unsafe_url(self):
+        result = "Title: Example\\nURL: javascript:alert(1)\\nSnippet: unsafe"
+        verification = self.verifier.verify("web_search", {"query": "example"}, result)
+        self.assertEqual(verification.status, "failed")
+
+    def test_web_search_requires_matching_title_and_url_entries(self):
+        result = "Title: First\\nURL: https://example.com\\nTitle: Second"
+        verification = self.verifier.verify("web_search", {"query": "example"}, result)
+        self.assertEqual(verification.status, "failed")
+
+    def test_web_search_confirms_http_result(self):
+        result = "Title: Example\\nURL: https://example.com/page\\nSnippet: sample"
+        verification = self.verifier.verify("web_search", {"query": "example"}, result)
+        self.assertTrue(verification.confirmed())
 
     def test_unknown_tool_is_not_success(self):
         verification = self.verifier.verify(
