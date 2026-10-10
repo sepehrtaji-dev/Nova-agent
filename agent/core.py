@@ -11,6 +11,7 @@ from agent.planner import Planner
 from agent.verifier import Verifier
 from tools import load_tools
 from agent.self_knowledge import SelfKnowledge
+from agent.diagnostics import RuntimeDiagnostics
 
 
 class NovaCore:
@@ -19,6 +20,7 @@ class NovaCore:
         self.status_callback = status_callback
         self.brain = OllamaBrain()
         self.self_knowledge = SelfKnowledge()
+        self.diagnostics = RuntimeDiagnostics()
         self.long_memory = MemoryManager()
         self.short_memory = ShortTermMemory()
         self.knowledge = KnowledgeMemory()
@@ -866,10 +868,12 @@ If nothing reliable can be extracted:
             knowledge_context = "No stored knowledge."
 
         self_knowledge_context = SelfKnowledge().context(self)
+        diagnostics_context = RuntimeDiagnostics().context(self)
 
         return (
             f"You are Nova, a local AI agent.\n\n"
             f"RUNTIME SELF-KNOWLEDGE (source of truth for identity, configured model, registered tools, and enabled permissions):\n{self_knowledge_context}\n\n"
+            f"RUNTIME DIAGNOSTICS AND CAPABILITY MAP:\n{diagnostics_context}\n\n"
             f"User request:\n{message}\n\n"
             f"RECENT CONVERSATION / CONTEXT:\n{self._conversation_context(max_chars=12000)}\n\n"
             f"STORED KNOWLEDGE (SECONDARY, MODEL-DERIVED):\n{knowledge_context}\n\n"
@@ -935,6 +939,13 @@ If nothing reliable can be extracted:
             return "I'm Nova, a local AI assistant developed by the Taji-Soft team."
 
         return None
+
+    def _direct_self_diagnostics_answer(self, message):
+        """Run explicit local health checks from observable runtime state."""
+        diagnostics = getattr(self, "diagnostics", None)
+        if diagnostics is None:
+            diagnostics = RuntimeDiagnostics()
+        return diagnostics.answer(message, self)
 
     def _direct_self_knowledge_answer(self, message):
         """Answer self-knowledge questions from live runtime facts, not model guesses."""
@@ -1269,6 +1280,12 @@ If nothing reliable can be extracted:
             self._status("Done")
             self.short_memory.add("assistant", direct_identity_answer)
             return direct_identity_answer
+
+        direct_diagnostics_answer = self._direct_self_diagnostics_answer(message)
+        if direct_diagnostics_answer is not None:
+            self._status("Done")
+            self.short_memory.add("assistant", direct_diagnostics_answer)
+            return direct_diagnostics_answer
 
         direct_self_knowledge_answer = self._direct_self_knowledge_answer(message)
         if direct_self_knowledge_answer is not None:

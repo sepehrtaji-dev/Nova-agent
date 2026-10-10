@@ -39,3 +39,4 @@ jobs:
           tests/test_filesystem_security.py
           tests/test_terminal_security.py
           tests/test_self_knowledge.py
+          tests/test_diagnostics.py
