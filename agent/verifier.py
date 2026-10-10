@@ -121,6 +121,7 @@ class Verifier:
             "git":              self._verify_git,
             "web_search":       self._verify_web_search,
             "web_fetch":        self._verify_web_fetch,
+            "github":            self._verify_github,
             "generate_image":   self._verify_generate_image,
             "desktop":          self._verify_desktop,
         }
@@ -982,4 +983,40 @@ class Verifier:
             status="confirmed",
             evidence=f"URL: {fetched_url}\nCharacters observed: {len(page_text)}",
             message=f"✓ Webpage text fetched from {fetched_url}",
+        )
+
+
+    def _verify_github(self, tool_input, tool_result):
+        """Require the GitHub CLI's explicit successful exit status."""
+        if "GITHUB_STATUS: ERROR" in tool_result:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message="GitHub CLI reported an error.",
+            )
+        if "GITHUB_STATUS: SUCCESS" not in tool_result:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="GitHub result is missing its success marker.",
+            )
+        match = re.search(r"^Exit code:\s*(-?\d+)\s*$", tool_result, flags=re.MULTILINE)
+        if not match:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="GitHub result did not include an exit code.",
+            )
+        if int(match.group(1)) != 0:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message=f"GitHub CLI exited with code {match.group(1)}.",
+            )
+        action = str(tool_input.get("action", "query"))
+        repo = str(tool_input.get("repo", "unknown repository"))
+        return VerificationResult(
+            status="confirmed",
+            evidence=tool_result[:800],
+            message=f"✓ GitHub {action} query completed for {repo}.",
         )
