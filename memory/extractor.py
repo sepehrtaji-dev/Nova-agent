@@ -111,7 +111,7 @@ class MemoryExtractor:
             if not value or value.casefold() not in source:
                 continue
             # Credential values should never be persisted as long-term memory.
-            if any(value.casefold() in secret for secret in secret_values):
+            if any(value.casefold() in secret or secret in value.casefold() for secret in secret_values):
                 continue
             valid_memories.append(normalized)
         return {"memories": valid_memories}
