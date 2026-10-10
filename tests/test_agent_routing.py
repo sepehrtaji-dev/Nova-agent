@@ -536,5 +536,24 @@ class RouterTests(unittest.TestCase):
         self.assertFalse(self.router._has_successful_tool(history))
 
 
+
+class VerifierBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.router = ToolRouter(FakeBrain(), FakeTools())
+
+    def test_router_does_not_trust_status_without_raw_result_boundary(self):
+        self.assertIsNone(self.router._trusted_verifier_status("VERIFIER_STATUS: CONFIRMED"))
+        self.assertFalse(self.router._has_successful_tool("VERIFIER_STATUS: CONFIRMED"))
+
+    def test_router_uses_status_after_final_raw_result_marker(self):
+        history = (
+            "END_RAW_TOOL_RESULT\n"
+            "VERIFIER_STATUS: CONFIRMED\n"
+            "END_RAW_TOOL_RESULT\n"
+            "VERIFIER_STATUS: FAILED\n"
+        )
+        self.assertEqual(self.router._trusted_verifier_status(history), "failed")
+
+
 if __name__ == "__main__":
     unittest.main()
