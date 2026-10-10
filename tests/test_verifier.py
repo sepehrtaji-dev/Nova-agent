@@ -132,7 +132,7 @@ class TestVerifier(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("concatenate")
 
-            result = f"FILE_EDITED\\nLocation: {path}\\nReplacements: 1\\nBytes: 11"
+            result = f"FILE_EDITED\nLocation: {path}\nReplacements: 1\nBytes: 11"
             verification = self.verifier.verify(
                 "edit_file",
                 {"old": "cat", "new": "concatenate"},
@@ -145,7 +145,7 @@ class TestVerifier(unittest.TestCase):
             path = os.path.join(tmp, "note.txt")
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("new value")
-            result = f"FILE_EDITED\\nLocation: {path}\\nBytes: 9"
+            result = f"FILE_EDITED\nLocation: {path}\nBytes: 9"
             verification = self.verifier.verify(
                 "edit_file",
                 {"old": "old value", "new": "new value"},
