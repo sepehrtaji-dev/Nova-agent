@@ -41,3 +41,4 @@ jobs:
           tests/test_self_knowledge.py
           tests/test_diagnostics.py
           tests/test_episodic_memory.py
+          tests/test_self_reflection.py
