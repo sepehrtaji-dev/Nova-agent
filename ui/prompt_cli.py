@@ -14,7 +14,7 @@ from agent.introspection import inspect_model, runtime_profile
 
 COMMANDS = [
     "/help", "/self", "/model", "/status", "/tools", "/permissions",
-    "/web", "/git", "/pc", "/clear", "/reset", "/exit",
+    "/web", "/git", "/pc", "/doctor", "/clear", "/reset", "/exit",
 ]
 console = Console()
 STYLE = Style.from_dict({"prompt": "#22d3ee bold", "": "ansidefault"})
@@ -56,6 +56,14 @@ def main() -> None:
                 f"Architecture: {model['architecture']}\nQuantization: {model['quantization']}\n"
                 f"Evidence: {model['detail']}",
                 title="Nova self-inspection", border_style="cyan"))
+        elif command == "/doctor":
+            report = core.diagnostics.snapshot(core, probe_model=True)
+            lines = [
+                f"{item['name']}: {item['status']} — {item['detail']}"
+                for item in report["checks"]
+            ]
+            lines.append("A listed model does not prove text generation works.")
+            console.print(Panel("\n".join(lines), title="Nova diagnostics", border_style="yellow"))
         elif command == "/tools":
             profile = runtime_profile(core)
             for tool in profile["tools"]:
