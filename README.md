@@ -346,6 +346,24 @@ This makes Nova closer to an agent than a traditional chatbot.
 
 ---
 
+# ✦ Evidence-Based Self-Reflection
+
+After a run, Nova audits the requested goal against the plan's final state and the current run's verifier records. The reflection report tracks:
+
+- Whether the runtime claimed completion
+- Planned steps marked completed versus steps still pending
+- Confirmed, failed, and unverifiable tool outcomes
+- A short explanation for why full completion is or is not supported
+- Follow-up candidates when work remains
+
+A computer task is not treated as complete merely because the router says it is done: every planned step must be marked complete and have corresponding confirmed verifier evidence. The latest audit is available in the runtime execution state as `last_reflection`.
+
+Self-reflection does not blindly replay failed actions. Failed or unverifiable calls are already passed to Nova's bounded re-planning loop; any retry must be selected by the planner and pass the normal permission, input-validation, and verification checks. This avoids repeating potentially destructive operations just to make a task appear complete.
+
+The reflection is based on observable state, not a free-form model claim, and it does not expose private model reasoning.
+
+---
+
 # ✦ Memory
 
 Nova includes a memory extraction component.
