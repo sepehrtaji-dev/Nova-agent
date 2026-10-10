@@ -133,7 +133,7 @@ Fix / continue
 
 # ✦ Terminal UI
 
-Nova includes a Rich-based terminal interface designed to make agent activity visible without exposing internal chain-of-thought.
+Nova includes a full-screen Textual terminal interface, with Rich-rendered panels and activity output. A prompt_toolkit CLI is also available as a lightweight fallback. The interface is designed to make agent activity visible without exposing internal chain-of-thought.
 
 The interface reports high-level agent activity such as:
 
@@ -174,6 +174,14 @@ Example:
 ```
 
 The UI is designed to show **what Nova is doing**, rather than exposing private model reasoning.
+
+### Launch modes
+
+- `python main.py` — full-screen Textual UI (default)
+- `python main.py --prompt-toolkit` — prompt_toolkit input with slash-command completion
+- `python main.py --rich` — legacy Rich prompt interface
+
+The Textual UI keeps agent execution in a worker so a slow local model does not freeze the interface. `prompt_toolkit` is an alternate CLI, not embedded inside Textual; both front ends use the same Nova core.
 
 ---
 
