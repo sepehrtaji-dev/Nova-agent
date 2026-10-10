@@ -86,7 +86,7 @@ class MemoryExtractor:
         secrets = []
         for pattern in _SECRET_VALUE_PATTERNS:
             for match in pattern.finditer(source):
-                candidate = match.group(1).strip().strip("'\\"")
+                candidate = match.group(1).strip().strip("'").strip('"')
                 if candidate:
                     secrets.append(candidate.casefold())
         for match in _PRIVATE_KEY_PATTERN.finditer(source):
