@@ -124,15 +124,9 @@ class ToolRouter:
         if bracket_end == -1:
             return None
 
+        # The balanced-parenthesis scan above already extracted the call.
+        # Do not run a second regex against an undefined pattern variable.
         arguments = text[start + 1:end].strip()
-
-        match = pattern.search(text)
-
-        if not match:
-            return None
-
-        tool_name = match.group(1).strip()
-        arguments = match.group(2).strip()
 
         if not self.tools.exists(tool_name):
             return None
