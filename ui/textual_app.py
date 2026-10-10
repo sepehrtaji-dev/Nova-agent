@@ -171,7 +171,7 @@ class NovaTextualApp(App):
             self.query_one("#transcript", RichLog).write(Panel(
                 "/self  runtime + Ollama metadata\n/model  model metadata\n/status  local status\n"
                 "/tools  tool registry\n/permissions  capability toggles\n/web, /git, /pc  toggle access\n"
-                "/clear  clear conversation\n/reset  restart core\n/exit  quit",
+                "/doctor  local health diagnostics\n/clear  clear conversation\n/reset  restart core\n/exit  quit",
                 title="COMMANDS", border_style="cyan"))
         elif name == "/clear":
             self.query_one("#transcript", RichLog).clear()
@@ -188,6 +188,11 @@ class NovaTextualApp(App):
             self.query_one("#prompt", Input).disabled = True
             self._set_status("Reading local Ollama metadata…")
             self.run_worker(lambda: self._inspect(name), thread=True, exclusive=True)
+        elif name == "/doctor":
+            self.busy = True
+            self.query_one("#prompt", Input).disabled = True
+            self._set_status("Running local diagnostics…")
+            self.run_worker(self._diagnose, thread=True, exclusive=True)
         elif name == "/tools":
             profile = runtime_profile(self.core)
             table = Table(title="Tool registry", expand=True)
@@ -214,6 +219,38 @@ class NovaTextualApp(App):
             self.run_worker(self._reset_core, thread=True, exclusive=True)
         else:
             self._set_status(f"Unknown command: {name} · try /help")
+
+    def _diagnose(self) -> None:
+        if self.core is None:
+            self.call_from_thread(self._finish_error, "Nova core is not initialized.")
+            return
+        try:
+            report = self.core.diagnostics.snapshot(self.core, probe_model=True)
+            lines = [
+                f"{item['name']}: {item['status']} — {item['detail']}"
+                for item in report["checks"]
+            ]
+            summary = report["summary"]
+            lines.append(
+                f"Tools: {summary['registered_tools']} registered · "
+                f"{summary['verified_tools']} recently verified · "
+                f"{summary['failed_tools']} failed · "
+                f"{summary['untested_tools']} untested · "
+                f"{summary['disabled_tools']} disabled"
+            )
+            lines.append("A model appearing in Ollama metadata does not prove generation works.")
+            self.call_from_thread(self._finish_diagnose, "\n".join(lines))
+        except Exception as exc:
+            self.call_from_thread(self._finish_error, f"{type(exc).__name__}: {exc}")
+
+    def _finish_diagnose(self, report: str) -> None:
+        self.query_one("#transcript", RichLog).write(
+            Panel(report, title="NOVA DIAGNOSTICS", border_style="yellow")
+        )
+        self.busy = False
+        self.query_one("#prompt", Input).disabled = False
+        self.query_one("#prompt", Input).focus()
+        self._set_status("Diagnostics complete · generation not tested")
 
     def _inspect(self, command: str) -> None:
         if self.core is None:
