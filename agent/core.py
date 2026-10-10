@@ -1,4 +1,6 @@
+import ast
 import json
+import os
 import re
 
 from model.ollama import OllamaBrain
@@ -509,6 +511,17 @@ class NovaCore:
 
             if location not in {"projects", "desktop", "system"}:
                 return False, "Invalid write_file location."
+
+            # Syntax validation catches malformed generated Python before it is
+            # written. It does not claim the program's behavior is correct.
+            if os.path.splitext(path)[1].lower() == ".py":
+                try:
+                    ast.parse(content, filename=path)
+                except SyntaxError as exc:
+                    return False, (
+                        f"Generated Python has a syntax error at line {exc.lineno}, "
+                        f"column {exc.offset}: {exc.msg}. Regenerate the file before writing."
+                    )
 
         elif tool_name == "create_directory":
 
