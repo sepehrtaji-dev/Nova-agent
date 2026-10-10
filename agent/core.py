@@ -6,6 +6,7 @@ from memory.manager import MemoryManager
 from memory.extractor import MemoryExtractor
 from memory.short_term import ShortTermMemory
 from memory.knowledge import KnowledgeMemory
+from memory.episodic import EpisodicMemory
 from agent.router import ToolRouter
 from agent.planner import Planner
 from agent.verifier import Verifier
@@ -24,6 +25,7 @@ class NovaCore:
         self.long_memory = MemoryManager()
         self.short_memory = ShortTermMemory()
         self.knowledge = KnowledgeMemory()
+        self.episodic_memory = EpisodicMemory()
         self.extractor = MemoryExtractor(self.brain)
         self.tools = load_tools()
 
@@ -1432,6 +1434,7 @@ If nothing reliable can be extracted:
                 f"Recent conversation:\n{self._conversation_context(max_chars=8000)}\n\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\n\n"
                 f"Relevant saved user memory:\n{self.long_memory.get_relevant_context(message)}\n\n"
+                f"Relevant past tool experiences:\n{self.episodic_memory.context(message)}\n\n"
                 "Answer the user's actual question or statement directly. "
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
@@ -1512,9 +1515,9 @@ If nothing reliable can be extracted:
         ):
 
             knowledge_context = (
-                self.knowledge.get_context(
-                    message
-                )
+                self.knowledge.get_context(message)
+                + "\n\n"
+                + self.episodic_memory.context(message)
             )
 
             conversation = self._conversation_context(max_chars=12000)
@@ -2007,6 +2010,19 @@ Nova must choose another useful action.
                     result,
                     verification
                 )
+
+            # Save a concise outcome for both success and failure. The memory
+            # module redacts common secrets and never stores raw tool payloads.
+            try:
+                self.episodic_memory.record(
+                    goal=message,
+                    tool_name=tool_name,
+                    status=getattr(verification, "status", "unverifiable"),
+                    evidence=getattr(verification, "evidence", ""),
+                    message=getattr(verification, "message", ""),
+                )
+            except Exception:
+                pass
 
             current_step = self.planner.get_next_step(plan)
             current_step_id = (
