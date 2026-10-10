@@ -133,7 +133,7 @@ Fix / continue
 
 # ✦ Terminal UI
 
-Nova includes a Rich-based terminal interface designed to make agent activity visible without exposing internal chain-of-thought.
+Nova includes a full-screen Textual terminal interface, with Rich-rendered panels and activity output. A prompt_toolkit CLI is also available as a lightweight fallback. The interface is designed to make agent activity visible without exposing internal chain-of-thought.
 
 The interface reports high-level agent activity such as:
 
@@ -174,6 +174,14 @@ Example:
 ```
 
 The UI is designed to show **what Nova is doing**, rather than exposing private model reasoning.
+
+### Launch modes
+
+- `python main.py` — full-screen Textual UI (default)
+- `python main.py --prompt-toolkit` — prompt_toolkit input with slash-command completion
+- `python main.py --rich` — legacy Rich prompt interface
+
+The Textual UI keeps agent execution in a worker so a slow local model does not freeze the interface. `prompt_toolkit` is an alternate CLI, not embedded inside Textual; both front ends use the same Nova core.
 
 ---
 
@@ -689,3 +697,24 @@ We believe AI assistance is a natural part of modern software development — it
 ## License
 This project is licensed under the MIT License.
 
+
+
+---
+
+# ✦ Runtime Self-Inspection
+
+The Rich terminal interface includes evidence-based inspection commands:
+
+| Command | What it shows |
+|---|---|
+| `/status` | Fast local runtime summary; does not contact Ollama |
+| `/self` | Nova identity, Python/platform, context/output budgets, live core components, registered tools, permissions, and Ollama model metadata |
+| `/model` | On-demand Ollama metadata such as parameter count, architecture, quantization, model context length, and reported capabilities |
+| `/tools` | Live tool registry with capability and permission state |
+| `/doctor` | Runtime configuration checks and Ollama/model-list diagnostics |
+| `/permissions` | Current web, Git, and PC permission toggles |
+| `/help` | Full command list |
+
+Model metadata is read from Ollama, not guessed from a model tag. If Ollama does not provide a value, Nova displays `Unknown`. A model appearing in metadata or a local model list does not by itself prove that text generation is working. Parameter count refers to the configured language model, not to the number of parameters in Nova's Python agent code.
+
+The UI shows high-level activity and observable results. It does not expose private model reasoning.

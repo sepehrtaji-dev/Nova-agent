@@ -40,6 +40,28 @@ class SelfKnowledgeTests(unittest.TestCase):
         self.assertIn("qwen2.5:3b", answer)
         self.assertIn("not verified", answer)
 
+    def test_parameter_question_uses_ollama_metadata_and_does_not_guess(self):
+        from unittest.mock import patch
+
+        metadata = {
+            "status": "available",
+            "configured_name": "qwen2.5:3b",
+            "parameter_count": "3.00B (3,000,000,000)",
+            "parameter_size": "3.1B",
+            "architecture": "qwen2",
+            "quantization": "Q4_K_M",
+            "detail": "Ollama metadata available.",
+        }
+        with patch("agent.self_knowledge.inspect_model", return_value=metadata):
+            answer = self.knowledge.answer("How many parameters do you have?", self.core)
+        self.assertIn("3.00B", answer)
+        self.assertIn("not a count of parameters in Nova's Python agent code", answer)
+
+        unavailable = dict(metadata, status="unreachable", detail="Ollama is unreachable.")
+        with patch("agent.self_knowledge.inspect_model", return_value=unavailable):
+            answer = self.knowledge.answer("مدلت چند پارامتر داره", self.core)
+        self.assertIn("will not guess", answer)
+
     def test_tool_answer_distinguishes_enabled_and_disabled(self):
         answer = self.knowledge.answer("What tools do you have?", self.core)
         self.assertIn("web search", answer)

@@ -7,6 +7,8 @@ import platform
 import re
 import sys
 
+from agent.introspection import inspect_model, runtime_profile
+
 
 class SelfKnowledge:
     """Build self-descriptions from the live NovaCore instance."""
@@ -58,13 +60,20 @@ class SelfKnowledge:
 
     def context(self, core):
         state = self.snapshot(core)
+        profile = runtime_profile(core)
         lines = [
             "Identity: Nova, a local AI agent developed by Taji-Soft.",
             f"Model provider: {state['model_provider']}.",
             f"Configured Ollama model: {state['configured_model']} (configuration only; not proof it is currently loaded).",
             f"Runtime: Python {state['python_version']} on {state['platform']}.",
-            "Registered tools:",
+            f"Configured generation budgets: context={profile['context_budget']} tokens; output={profile['output_budget']} tokens.",
+            f"Agent components present: {profile['present_components']}/{profile['component_count']}.",
+            "Component status (observed from this running instance):",
         ]
+        for component in profile["components"]:
+            status = "present" if component["present"] else "missing"
+            lines.append(f"- {component['name']}: {component['implementation']} [{status}]")
+        lines.append("Registered tools:")
         if state["tools"]:
             for tool in state["tools"]:
                 status = "enabled" if tool["enabled"] else "disabled by capability permission"
@@ -88,6 +97,27 @@ class SelfKnowledge:
         if not text:
             return None
         state = self.snapshot(core)
+
+        parameter_question = bool(re.search(
+            r"\bhow many parameters (?:do you have|does your model have|are in your model)\b|"
+            r"\bparameter count\b|\bnumber of parameters\b|"
+            r"(?:مدلت چند پارامتر داره|مدل تو چند پارامتر داره|چند پارامتر داری|تعداد پارامترهای مدل)",
+            text,
+        ))
+        if parameter_question:
+            model = inspect_model(core)
+            if model["status"] == "available":
+                return (
+                    f"Ollama reports {model['parameter_count']} parameters for the configured model "
+                    f"{model['configured_name']}. Reported model size: {model['parameter_size']}; "
+                    f"architecture: {model['architecture']}; quantization: {model['quantization']}. "
+                    "These are model metadata, not a count of parameters in Nova's Python agent code. "
+                    "Metadata availability does not prove generation is working."
+                )
+            return (
+                f"I cannot verify the parameter count for {model['configured_name']}: "
+                f"{model['detail']} I will not guess it from the model tag."
+            )
 
         model_question = bool(re.search(
             r"\b(?:what|which) model (?:are you using|do you use|is this)|"

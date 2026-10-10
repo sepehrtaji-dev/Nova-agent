@@ -8,3 +8,5 @@ torch
 PySide6
 diffusers
 safetensors
+textual
+prompt_toolkit

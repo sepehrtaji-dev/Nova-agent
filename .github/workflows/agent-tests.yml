@@ -19,10 +19,13 @@ jobs:
           python-version: "3.11"
 
       - name: Compile all Python sources
-        run: python -m compileall -q agent tools memory model main.py App.py
+        run: python -m compileall -q agent tools memory model ui main.py App.py
 
       - name: Install lightweight runtime dependency
-        run: python -m pip install --disable-pip-version-check ollama
+        run: python -m pip install --disable-pip-version-check ollama textual prompt_toolkit
+
+      - name: Smoke-test both terminal UI front ends
+        run: python -c "from ui.textual_app import NovaTextualApp; from ui.prompt_cli import main; print('UI imports OK')"
 
       - name: Run lightweight agent regression tests
         run: >
@@ -39,5 +42,6 @@ jobs:
           tests/test_terminal_security.py
           tests/test_self_knowledge.py
           tests/test_diagnostics.py
+          tests/test_introspection.py
           tests/test_episodic_memory.py
           tests/test_self_reflection.py
