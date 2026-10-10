@@ -23,17 +23,15 @@ class SelfReflection:
         valid_steps = [step for step in steps if isinstance(step, dict)]
 
         completed_steps = [
-            str(step.get("description", "")).strip()
+            str(step.get("description", "")).strip() or "(unnamed step)"
             for step in valid_steps
             if step.get("status") == "completed"
         ]
         pending_steps = [
-            str(step.get("description", "")).strip()
+            str(step.get("description", "")).strip() or "(unnamed step)"
             for step in valid_steps
             if step.get("status") != "completed"
         ]
-        completed_steps = [item for item in completed_steps if item]
-        pending_steps = [item for item in pending_steps if item]
 
         if isinstance(tool_history, list):
             history_text = "\n".join(str(item) for item in tool_history)
