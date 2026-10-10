@@ -2,6 +2,7 @@ import subprocess
 import os
 import json
 import shlex
+import ntpath
 
 
 class TerminalTool:
@@ -31,6 +32,54 @@ class TerminalTool:
 
     def _is_blocked(self, command):
         lower = command.lower().strip()
+
+        # shell=False prevents shell metacharacter interpretation, but it does
+        # not prevent launching a shell or asking an interpreter to execute
+        # arbitrary inline code. Block those escape hatches while preserving
+        # ordinary project commands (including Python test/script execution).
+        try:
+            tokens = shlex.split(command, posix=(os.name != "nt"))
+        except ValueError:
+            return True
+
+        if not tokens:
+            return True
+
+        executable = ntpath.basename(tokens[0]).casefold()
+        executable = executable.removesuffix(".exe")
+        shell_launchers = {
+            "sh", "bash", "zsh", "fish", "dash", "cmd", "powershell",
+            "pwsh", "wscript", "cscript", "mshta", "rundll32", "regsvr32",
+        }
+        if executable in shell_launchers:
+            return True
+
+        # Inline interpreter modes can run arbitrary code without a script
+        # path, so refuse them. Python's unittest and compileall modules remain
+        # available for the project's normal verification workflow.
+        inline_flags = {
+            "python": {"-c", "--command"},
+            "python3": {"-c", "--command"},
+            "python3.11": {"-c", "--command"},
+            "python3.12": {"-c", "--command"},
+            "python3.13": {"-c", "--command"},
+            "python3.14": {"-c", "--command"},
+            "pypy": {"-c", "--command"},
+            "node": {"-e", "--eval", "-p", "--print"},
+            "ruby": {"-e", "--eval"},
+            "perl": {"-e"},
+            "php": {"-r"},
+        }
+        flags = inline_flags.get(executable, set())
+        if any(token.casefold() in flags for token in tokens[1:]):
+            return True
+
+        if executable in {"python", "python3", "python3.11", "python3.12", "python3.13", "python3.14", "pypy"}:
+            for index, token in enumerate(tokens[1:-1], start=1):
+                if token == "-m":
+                    module = tokens[index + 1].casefold()
+                    if module not in {"unittest", "compileall", "pytest"}:
+                        return True
 
         blocked = [
             "format ",
