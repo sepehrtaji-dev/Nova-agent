@@ -4,9 +4,6 @@ pyautogui
 pillow
 pytesseract
 numpy
-pyarrow
-datasets
-huggingface-hub
 torch
 PySide6
 diffusers
