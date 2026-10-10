@@ -54,19 +54,9 @@ console = Console(theme=theme)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-TOOL_NAMES = {
-    "web_search":       ("WEB",     "bright_blue"),
-    "terminal":         ("TERM",    "bright_yellow"),
-    "read_file":        ("READ",    "bright_cyan"),
-    "write_file":       ("WRITE",   "bright_green"),
-    "edit_file":        ("EDIT",    "bright_green"),
-    "delete_file":      ("DELETE",  "bright_red"),
-    "create_directory": ("MKDIR",   "bright_magenta"),
-    "list_files":       ("LIST",    "bright_white"),
-    "git":              ("GIT",     "bright_magenta"),
-    "desktop":          ("DESKTOP", "bright_yellow"),
-    "generate_image":   ("IMAGE",   "bright_blue"),
-}
+# Tool names are resolved from the live registry at runtime so newly
+# registered tools can appear in activity traces without editing this UI.
+TOOL_COLOR = "bright_magenta"
 
 ACCESS_META = {
     "web": ("WEB SEARCH",  "Web search access"),
@@ -110,7 +100,7 @@ def access_pill(name: str, enabled: bool) -> Text:
     return text
 
 
-def classify_status(message: str) -> tuple[str, str, str]:
+def classify_status(message: str, tool_names=None) -> tuple[str, str, str]:
     text = str(message).strip()
     lower = text.lower()
 
@@ -119,9 +109,21 @@ def classify_status(message: str) -> tuple[str, str, str]:
     if text.startswith("✗"):
         return "✗ FAIL", "bright_red",   "error"
 
-    for tool_name, (label, color) in TOOL_NAMES.items():
-        if tool_name in lower:
-            return label, color, "tool"
+    if tool_names:
+        # Longest-first avoids matching a short tool name inside a longer one.
+        for tool_name in sorted(tool_names, key=len, reverse=True):
+            normalized = str(tool_name).strip().lower()
+            if normalized and normalized in lower:
+                label = normalized.upper()
+                if label == "WEB_SEARCH":
+                    label = "WEB"
+                elif label == "TERMINAL":
+                    label = "TERM"
+                elif label == "CREATE_DIRECTORY":
+                    label = "MKDIR"
+                elif label.endswith("_FILE"):
+                    label = label.removesuffix("_FILE")
+                return label[:12], TOOL_COLOR, "tool"
 
     if any(w in lower for w in (
         "error", "failed", "failure", "exception", "blocked",
@@ -650,7 +652,7 @@ def run_agent(
         if not status_message:
             return
 
-        label, color, kind = classify_status(status_message)
+        label, color, kind = classify_status(status_message, getattr(getattr(core, "tools", None), "tools", {}).keys())
         state["current"] = status_message
 
         if status_message == state["last_status"]:
@@ -717,7 +719,7 @@ def ask(
 
         if "error" in result:
             error = str(result["error"])
-            label, color, kind = classify_status(error)
+            label, color, kind = classify_status(error, getattr(getattr(core, "tools", None), "tools", {}).keys())
             state["events"].append({
                 "time": now(),
                 "label": label,
