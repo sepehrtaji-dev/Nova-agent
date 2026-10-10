@@ -80,7 +80,10 @@ class Verifier:
             common = os.path.commonpath([root, resolved_path])
         except ValueError:
             return None
-        return resolved_path if common == root else None
+        # Keep the lexical absolute path returned by FileSystemTool so the
+        # verifier compares the same path the tool reports. The canonical path
+        # above is still used to reject symlink escapes.
+        return actual_path if common == root else None
 
 
     def verify(self, tool_name, tool_input_str, tool_result):
@@ -340,6 +343,20 @@ class Verifier:
                 message="create_directory succeeded but path not found in result."
             )
 
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="create_directory could not resolve its requested location safely.",
+            )
+        if os.path.abspath(actual_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
+                message="create_directory reported a different path than requested.",
+            )
+
         if not os.path.isdir(actual_path):
             return VerificationResult(
                 status="failed",
@@ -575,7 +592,27 @@ class Verifier:
             if line.startswith("Location:"):
                 actual_path = line.replace("Location:", "", 1).strip()
                 break
-        if not actual_path or not os.path.isfile(actual_path):
+        if not actual_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="edit_file reported success but did not provide a concrete path.",
+            )
+
+        requested_path = self._resolve_path_for_verification(tool_input)
+        if requested_path is None:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="edit_file could not resolve its requested location safely.",
+            )
+        if os.path.abspath(actual_path) != requested_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
+                message="edit_file reported a different path than requested.",
+            )
+        if not os.path.isfile(actual_path):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
@@ -659,13 +696,32 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="delete_file did not return FILE_DELETED.",
             )
-        # BUG 12: Use _resolve_path_for_verification instead of trusting tool-reported path
+        # Require a concrete reported path as well as independent filesystem
+        # evidence; a bare FILE_DELETED marker is not enough to confirm an action.
+        reported_path = None
+        for line in tool_result.splitlines():
+            if line.startswith("Location:"):
+                reported_path = line.split(":", 1)[1].strip()
+                break
+        if not reported_path:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="delete_file reported no concrete path.",
+            )
+
         actual_path = self._resolve_path_for_verification(tool_input)
         if actual_path is None:
             return VerificationResult(
                 status="unverifiable",
                 evidence=tool_result[:300],
                 message="delete_file could not resolve its requested location safely.",
+            )
+        if os.path.abspath(reported_path) != actual_path:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Tool reported: {reported_path}, Expected: {actual_path}",
+                message="delete_file reported a different path than requested.",
             )
         if os.path.exists(actual_path):
             return VerificationResult(
