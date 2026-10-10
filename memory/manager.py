@@ -4,8 +4,8 @@ from memory.storage import MemoryStorage
 class MemoryManager:
     """Persistent, user-controlled long-term memory stored as local JSON."""
 
-    def __init__(self):
-        self.storage = MemoryStorage()
+    def __init__(self, path=None):
+        self.storage = MemoryStorage(path=path) if path is not None else MemoryStorage()
         self.data = self.storage.load()
 
     def remember(self, category, key, value):
