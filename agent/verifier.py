@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import re
+from urllib.parse import urlsplit
 
 
 class VerificationResult:
@@ -884,20 +885,39 @@ class Verifier:
                 message="web_search result missing Title/URL markers."
             )
 
-        # BUG 8: Validate that titles and URLs are non-empty
-        titles = re.findall(r"Title:\s*(.*)", tool_result)
-        urls = re.findall(r"URL:\s*(.*)", tool_result)
-        if not any(t.strip() for t in titles) or not any(u.strip() for u in urls):
+        # Every result entry must contain a non-empty title and a public
+        # HTTP(S) URL. Do not treat arbitrary strings or javascript: links as
+        # evidence that a real search result was returned.
+        titles = [value.strip() for value in re.findall(r"^Title:\\s*(.*)$", tool_result, flags=re.MULTILINE)]
+        urls = [value.strip() for value in re.findall(r"^URL:\\s*(.*)$", tool_result, flags=re.MULTILINE)]
+        if not titles or not urls or len(titles) != len(urls):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
-                message="web_search result has empty Title or URL."
+                message="web_search result has missing or mismatched Title/URL entries."
+            )
+        if any(not title for title in titles):
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="web_search result contains an empty title."
             )
 
-        query = tool_input.get("query", "(unknown)")
-        # BUG 16: Use regex to count actual result entries
-        count = len(re.findall(r"^Title:", tool_result, flags=re.MULTILINE))
+        for url in urls:
+            try:
+                parsed = urlsplit(url)
+                valid_url = parsed.scheme.lower() in {"http", "https"} and bool(parsed.hostname)
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                return VerificationResult(
+                    status="failed",
+                    evidence=f"Invalid result URL: {url[:160]}",
+                    message="web_search returned a result with an invalid or unsafe URL.",
+                )
 
+        query = str(tool_input.get("query", "(unknown)"))
+        count = len(titles)
         return VerificationResult(
             status="confirmed",
             evidence=tool_result[:400],
