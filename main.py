@@ -27,6 +27,7 @@ from rich.columns import Columns
 from rich.padding import Padding
 
 from agent.core import NovaCore
+from agent.introspection import inspect_model, runtime_profile
 from utils.math_parser import format_response_math
 
 
@@ -189,18 +190,27 @@ def render_header(core: NovaCore) -> RenderableType:
         access_pill("pc", access["pc"]),
     )
 
-    # Hint bar
+    # Runtime strip is derived from the live registry and config, without a network probe.
+    profile = runtime_profile(core)
+    runtime = Text()
+    runtime.append(f"  {profile['enabled_tools']}/{profile['registered_tools']} tools enabled", style="bold bright_green")
+    runtime.append("   ·   ", style="dim")
+    runtime.append(f"CTX {profile['context_budget']:,}", style="bright_cyan")
+    runtime.append("   ·   ", style="dim")
+    runtime.append(f"PY {profile['python']}", style="dim")
+
+    # Command hint bar
     hint = Text()
-    hint.append("  /web", style="bright_blue")
-    hint.append(" toggle   ", style="dim")
-    hint.append("/git", style="bright_magenta")
-    hint.append(" toggle   ", style="dim")
-    hint.append("/pc", style="bright_green")
-    hint.append(" toggle   ", style="dim")
+    hint.append("  /self", style="bright_cyan")
+    hint.append(" inspect   ", style="dim")
+    hint.append("/model", style="bright_blue")
+    hint.append(" metadata   ", style="dim")
+    hint.append("/doctor", style="bright_yellow")
+    hint.append(" diagnostics   ", style="dim")
     hint.append("/help", style="white")
 
     return Panel(
-        Group(top, perms, hint),
+        Group(top, perms, runtime, hint),
         border_style="bright_cyan",
         padding=(0, 0),
         expand=True,
@@ -217,8 +227,14 @@ def render_welcome() -> RenderableType:
         "inspect real results, re-plan, and finish the work.\n\n",
         style="dim",
     )
+    content.append(" /self ", style="bright_cyan")
+    content.append("runtime profile   ", style="dim")
+    content.append("/model ", style="bright_blue")
+    content.append("model metadata   ", style="dim")
+    content.append("/doctor ", style="bright_yellow")
+    content.append("health checks\n\n", style="dim")
     content.append(
-        "Model activity is shown at a high level; private reasoning is never displayed.",
+        "Nova reports observed facts and metadata, not guessed capabilities or private model reasoning.",
         style="dim italic",
     )
 
@@ -452,6 +468,133 @@ def render_permissions(core: NovaCore) -> RenderableType:
     )
 
 
+def render_runtime_profile(core: NovaCore, include_model: bool = True) -> RenderableType:
+    profile = runtime_profile(core)
+
+    overview = Table(box=box.SIMPLE, show_header=False, expand=True, padding=(0, 1))
+    overview.add_column("field", style="dim", width=22)
+    overview.add_column("value", style="white", ratio=1)
+    overview.add_row("Identity", f"{profile['identity']} · {profile['developer']}")
+    overview.add_row("Version", profile["version"])
+    overview.add_row("Provider / model", f"{profile['provider']} · {profile['configured_model']}")
+    overview.add_row("Python runtime", f"{profile['implementation']} {profile['python']} · {profile['system']}")
+    overview.add_row("Platform", profile["platform"])
+    overview.add_row("Working directory", profile["working_directory"])
+    overview.add_row("Agent budgets", f"Context {profile['context_budget']:,} · Output {profile['output_budget']:,}")
+    overview.add_row("Tool registry", f"{profile['enabled_tools']}/{profile['registered_tools']} enabled")
+    overview.add_row("Core components", f"{profile['present_components']}/{profile['component_count']} present")
+    overview.add_row("Execution ledger", "available" if profile["execution_state_available"] else "missing")
+
+    components = Table(box=box.SIMPLE, expand=True, padding=(0, 1))
+    components.add_column("Component", style="white")
+    components.add_column("Implementation", style="dim")
+    components.add_column("State", justify="right")
+    for item in profile["components"]:
+        state = Text("● PRESENT", style="bright_green") if item["present"] else Text("○ MISSING", style="bright_red")
+        components.add_row(item["label"], item["implementation"], state)
+
+    tools = Table(box=box.SIMPLE, expand=True, padding=(0, 1))
+    tools.add_column("Tool", style="bright_cyan")
+    tools.add_column("Capability", style="dim")
+    tools.add_column("Permission", justify="right")
+    for item in profile["tools"]:
+        enabled = Text("● ENABLED", style="bright_green") if item["enabled"] else Text("○ DISABLED", style="bright_yellow")
+        tools.add_row(item["name"], item["capability"], enabled)
+    if not profile["tools"]:
+        tools.add_row("No tools registered", "—", "—")
+
+    sections = [
+        Panel(overview, title="[bold bright_cyan]RUNTIME IDENTITY[/bold bright_cyan]", border_style="bright_cyan", padding=(0, 1)),
+        Panel(components, title="[bold bright_cyan]LIVE AGENT COMPONENTS[/bold bright_cyan]", border_style="grey30", padding=(0, 1)),
+        Panel(tools, title="[bold bright_cyan]TOOL REGISTRY[/bold bright_cyan]", border_style="grey30", padding=(0, 1)),
+    ]
+
+    if include_model:
+        model = inspect_model(core)
+        model_table = Table(box=box.SIMPLE, show_header=False, expand=True, padding=(0, 1))
+        model_table.add_column("field", style="dim", width=22)
+        model_table.add_column("value", style="white", ratio=1)
+        model_table.add_row("Metadata status", model["status"])
+        model_table.add_row("Configured tag", model["configured_name"])
+        model_table.add_row("Parameter count", model["parameter_count"])
+        model_table.add_row("Reported size", model["parameter_size"])
+        model_table.add_row("Architecture", model["architecture"])
+        model_table.add_row("Quantization", model["quantization"])
+        model_table.add_row("Model context length", model["model_context_length"])
+        model_table.add_row("Capabilities", ", ".join(model["capabilities"]) or "Unknown")
+        model_table.add_row("Evidence", model["detail"])
+        sections.append(Panel(model_table, title="[bold bright_blue]OLLAMA MODEL METADATA[/bold bright_blue]", border_style="bright_blue", padding=(0, 1)))
+        sections.append(Text("Parameter count comes from Ollama metadata; unknown values are not guessed. Metadata availability does not prove text generation works.", style="dim italic"))
+
+    return Group(*sections)
+
+
+def render_model_profile(core: NovaCore) -> RenderableType:
+    model = inspect_model(core)
+    table = Table(box=box.SIMPLE, show_header=False, expand=True, padding=(0, 1))
+    table.add_column("field", style="dim", width=22)
+    table.add_column("value", style="white", ratio=1)
+    table.add_row("Status", model["status"])
+    table.add_row("Configured model", model["configured_name"])
+    table.add_row("Parameter count", model["parameter_count"])
+    table.add_row("Reported parameter size", model["parameter_size"])
+    table.add_row("Architecture", model["architecture"])
+    table.add_row("Quantization", model["quantization"])
+    table.add_row("Context length", model["model_context_length"])
+    table.add_row("Capabilities", ", ".join(model["capabilities"]) or "Unknown")
+    table.add_row("Metadata", model["detail"])
+    return Panel(table, title="[bold bright_blue]OLLAMA MODEL INSPECTOR[/bold bright_blue]", border_style="bright_blue", padding=(1, 2), expand=True)
+
+
+def render_runtime_status(core: NovaCore) -> RenderableType:
+    profile = runtime_profile(core)
+    table = Table(box=box.SIMPLE, show_header=False, expand=True, padding=(0, 1))
+    table.add_column("field", style="dim", width=22)
+    table.add_column("value", style="white", ratio=1)
+    table.add_row("Nova", f"{profile['identity']} · version {profile['version']}")
+    table.add_row("Model", profile["configured_model"])
+    table.add_row("Runtime", f"Python {profile['python']} · {profile['platform']}")
+    table.add_row("Tools", f"{profile['enabled_tools']}/{profile['registered_tools']} enabled")
+    table.add_row("Components", f"{profile['present_components']}/{profile['component_count']} present")
+    table.add_row("Context / output", f"{profile['context_budget']:,} / {profile['output_budget']:,} tokens configured")
+    table.add_row("Permissions", ", ".join(f"{k}={'ON' if v else 'OFF'}" for k, v in profile["access"].items()))
+    return Panel(table, title="[bold bright_cyan]NOVA RUNTIME STATUS[/bold bright_cyan]", border_style="bright_cyan", padding=(1, 2), expand=True)
+
+
+def render_tool_registry(core: NovaCore) -> RenderableType:
+    profile = runtime_profile(core)
+    table = Table(title="Live Tool Registry", box=box.ROUNDED, border_style="bright_cyan", expand=True, padding=(0, 1))
+    table.add_column("Tool", style="bright_cyan")
+    table.add_column("Capability", style="dim")
+    table.add_column("State", justify="center")
+    table.add_column("Description", overflow="ellipsis")
+    for item in profile["tools"]:
+        state = Text("ENABLED", style="bright_green") if item["enabled"] else Text("DISABLED", style="bright_yellow")
+        table.add_row(item["name"], item["capability"], state, item["description"] or "—")
+    if not profile["tools"]:
+        table.add_row("—", "—", "—", "No tools are registered.")
+    return table
+
+
+def render_doctor(core: NovaCore) -> RenderableType:
+    report = core.diagnostics.snapshot(core, probe_model=True)
+    table = Table(box=box.SIMPLE, expand=True, padding=(0, 1))
+    table.add_column("Check", style="white")
+    table.add_column("State", justify="center")
+    table.add_column("Evidence", ratio=1)
+    for item in report["checks"]:
+        status = item["status"]
+        color = "bright_green" if status in {"available", "configured"} else ("bright_red" if status == "failed" else "bright_yellow")
+        table.add_row(item["name"], Text(status.upper(), style=f"bold {color}"), item["detail"])
+    summary = report["summary"]
+    footer = Text(
+        f"Tools: {summary['registered_tools']} registered · {summary['verified_tools']} recently verified · "
+        f"{summary['failed_tools']} failed last check · {summary['untested_tools']} untested · {summary['disabled_tools']} disabled",
+        style="dim",
+    )
+    return Panel(Group(table, Text(""), footer), title="[bold bright_yellow]NOVA SELF-DIAGNOSTICS[/bold bright_yellow]", border_style="bright_yellow", padding=(1, 2), expand=True)
+
+
 def render_help() -> RenderableType:
     table = Table(
         title="Nova Controls",
@@ -468,6 +611,11 @@ def render_help() -> RenderableType:
         ("/git",         "Toggle Git / repository access"),
         ("/pc",          "Toggle terminal, files, desktop OS control"),
         ("/permissions", "Show current capability states"),
+        ("/self",        "Inspect Nova's live runtime, components, tools and model metadata"),
+        ("/model",       "Query Ollama for model parameters, architecture and quantization"),
+        ("/tools",       "List registered tools and permission state"),
+        ("/doctor",      "Run local configuration and Ollama diagnostics"),
+        ("/status",      "Show a fast runtime summary without probing Ollama"),
         ("/clear",       "Clear the screen, keep the session"),
         ("/reset",       "Start a fresh Nova session"),
         ("/help",        "Show this menu"),
@@ -660,6 +808,31 @@ def main():
         if command == "/permissions":
             console.print()
             console.print(render_permissions(core))
+            continue
+
+        if command in {"/self", "/introspect"}:
+            console.print()
+            console.print(render_runtime_profile(core, include_model=True))
+            continue
+
+        if command == "/model":
+            console.print()
+            console.print(render_model_profile(core))
+            continue
+
+        if command == "/status":
+            console.print()
+            console.print(render_runtime_status(core))
+            continue
+
+        if command == "/tools":
+            console.print()
+            console.print(render_tool_registry(core))
+            continue
+
+        if command in {"/doctor", "/diagnostics"}:
+            console.print()
+            console.print(render_doctor(core))
             continue
 
         if command == "/help":
