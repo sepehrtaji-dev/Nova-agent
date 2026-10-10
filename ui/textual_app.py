@@ -178,7 +178,7 @@ class NovaTextualApp(App):
         elif name == "/memory":
             entries = self.core.long_memory.entries()
             lines = [f"{item['key']}: {item['value']}" for item in entries]
-            body = "\\n".join(lines) if lines else "No saved long-term memories."
+            body = "\n".join(lines) if lines else "No saved long-term memories."
             self.query_one("#transcript", RichLog).write(
                 Panel(body, title=f"SAVED MEMORY · {len(entries)} entries", border_style="cyan")
             )
@@ -186,7 +186,7 @@ class NovaTextualApp(App):
             parts = command.split(maxsplit=2)
             if len(parts) != 3:
                 self.query_one("#transcript", RichLog).write(Panel(
-                    "Usage: /forget <category> <key>\\nExample: /forget profile gpu",
+                    "Usage: /forget <category> <key>\nExample: /forget profile gpu",
                     title="MEMORY COMMAND", border_style="yellow"))
             elif self.core.long_memory.forget(parts[1], parts[2]):
                 self.query_one("#transcript", RichLog).write(Panel(
