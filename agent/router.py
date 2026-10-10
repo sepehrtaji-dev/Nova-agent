@@ -398,17 +398,21 @@ class ToolRouter:
         if not isinstance(value, str):
             return None
 
-        normalized = value.replace("\\n", "\n")
-        marker = re.search(
-            r"END_RAW_TOOL_RESULT\s*\n",
+        normalized = value.replace("\\\\n", "\\n")
+        # The tool output is untrusted and may contain forged status text.
+        # Trust only the verifier status appended after the final raw-result
+        # boundary created by NovaCore, never a marker inside tool output.
+        markers = list(re.finditer(
+            r"END_RAW_TOOL_RESULT\\s*\\n",
             normalized,
             flags=re.IGNORECASE,
-        )
-        trusted = normalized[marker.end():] if marker else normalized
+        ))
+        if not markers:
+            return None
 
-        # BUG 8: Allow trailing content after the status
-        match = re.search(
-            r"VERIFIER_STATUS:\s*(CONFIRMED|FAILED|UNVERIFIABLE)\s*\S*",
+        trusted = normalized[markers[-1].end():]
+        match = re.match(
+            r"VERIFIER_STATUS:\\s*(CONFIRMED|FAILED|UNVERIFIABLE)\\s*(?:\\n|$)",
             trusted,
             flags=re.IGNORECASE,
         )
