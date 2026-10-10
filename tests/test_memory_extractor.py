@@ -73,6 +73,18 @@ class MemoryExtractorTests(unittest.TestCase):
         )
         self.assertEqual(result["memories"], [])
 
+    def test_secret_is_rejected_even_when_embedded_in_a_longer_phrase(self):
+        secret_phrase = "My password is hunter2"
+        result = self.extractor._validate(
+            {
+                "memories": [
+                    {"category": "profile", "key": "credential", "value": secret_phrase},
+                ]
+            },
+            source_text=secret_phrase,
+        )
+        self.assertEqual(result["memories"], [])
+
     def test_secret_filter_does_not_store_unmentioned_values(self):
         result = self.extractor._validate(
             {
