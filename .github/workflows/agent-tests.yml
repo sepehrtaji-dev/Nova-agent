@@ -24,6 +24,9 @@ jobs:
       - name: Install lightweight runtime dependency
         run: python -m pip install --disable-pip-version-check ollama textual prompt_toolkit
 
+      - name: Smoke-test both terminal UI front ends
+        run: python -c "from ui.textual_app import NovaTextualApp; from ui.prompt_cli import main; print('UI imports OK')"
+
       - name: Run lightweight agent regression tests
         run: >
           python -m unittest
