@@ -1,0 +1,9 @@
+# Optional desktop control, OCR, GUI, and local image-generation features
+pyautogui
+pillow
+pytesseract
+numpy
+PySide6
+torch
+diffusers
+safetensors
