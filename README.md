@@ -70,6 +70,8 @@ Nova currently exposes capabilities through a registry-driven tool system:
 | Capability | Purpose |
 |---|---|
 | `web_search` | Search the public web |
+| `web_fetch` | Fetch readable text from public HTTP(S) pages with size limits and local/private destination checks |
+| `github` | Read-only GitHub repository, issue, pull-request, workflow, release, and code-search queries via `gh` |
 | `terminal` | Execute terminal commands |
 | `list_files` | List files and directories |
 | `read_file` | Read text files |
@@ -84,6 +86,19 @@ Nova currently exposes capabilities through a registry-driven tool system:
 Tools are registered with capability metadata. Nova derives the enabled tool set from the registry instead of maintaining a separate hard-coded tool list in the agent core.
 
 ---
+
+## ✦ Web and GitHub research
+
+`web_search` finds public results; `web_fetch` retrieves a bounded text view of a specific public webpage. Fetching accepts HTTP(S) only, validates redirect destinations, limits response size to 1 MB, and rejects localhost/private/reserved IP destinations. This is a defense-in-depth filter, not a substitute for keeping the local agent's environment secure.
+
+`github` provides read-only queries through the locally installed GitHub CLI (`gh`). Supported actions include `repo_view`, `issue_list`, `issue_view`, `pr_list`, `pr_view`, `run_list`, `release_list`, and `code_search`. Install GitHub CLI and run `gh auth login` first. The tool deliberately does not create, edit, merge, or delete remote resources.
+
+Example inputs:
+
+```json
+{"action": "web_fetch", "url": "https://example.com"}
+{"action": "pr_list", "repo": "owner/repository", "state": "open", "limit": 5}
+```
 
 ## ✦ Agent Workflow
 
@@ -107,7 +122,7 @@ Nova can break the task into steps:
 7. Finish
 ```
 
-The important part is that Nova receives the **real result** of each tool execution and verifies it before using it as evidence.
+The important part is that Nova receives the **real result** of each tool execution and verifies it before using it as evidence. For generated `.py` files, Nova also parses the code before writing and rejects syntax errors; this is a syntax check, not a proof that code is correct or safe to run.
 
 For example:
 
