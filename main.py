@@ -889,4 +889,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from ui.launcher import main as launch_terminal_ui
+    launch_terminal_ui()
