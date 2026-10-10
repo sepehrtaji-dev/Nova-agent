@@ -40,8 +40,13 @@ class GitHubTool:
                 f"Unsupported read-only GitHub action {action!r}. "
                 f"Supported actions: {', '.join(sorted(self._ACTIONS))}."
             )
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-            raise ValueError("repo must be an owner/name GitHub repository.")
+        parts = repo.split("/")
+        if (
+            len(parts) != 2
+            or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts)
+            or any(part in {".", ".."} for part in parts)
+        ):
+            raise ValueError("repo must be a valid owner/name GitHub repository.")
         limit = data.get("limit", 10)
         try:
             limit = max(1, min(20, int(limit)))
