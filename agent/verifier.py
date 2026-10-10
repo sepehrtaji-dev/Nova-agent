@@ -642,6 +642,24 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="edit_file did not return FILE_EDITED.",
             )
+        # Require the edit tool's explicit replacement count. Avoid false
+        # failures when the old text legitimately remains inside the replacement
+        # (for example, replacing "cat" with "concatenate").
+        replacements = None
+        for line in tool_result.splitlines():
+            if line.startswith("Replacements:"):
+                try:
+                    replacements = int(line.split(":", 1)[1].strip())
+                except (TypeError, ValueError):
+                    replacements = None
+                break
+        if replacements is None or replacements < 1:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="edit_file did not report a valid positive replacement count.",
+            )
+
         actual_path = None
         for line in tool_result.splitlines():
             if line.startswith("Location:"):
@@ -689,23 +707,7 @@ class Verifier:
                 message=f"Could not reread edited file: {actual_path}",
             )
 
-        # Require the edit tool's explicit replacement count. Avoid false
-        # failures when the old text legitimately remains inside the replacement
-        # (for example, replacing "cat" with "concatenate").
-        replacements = None
-        for line in tool_result.splitlines():
-            if line.startswith("Replacements:"):
-                try:
-                    replacements = int(line.split(":", 1)[1].strip())
-                except (TypeError, ValueError):
-                    replacements = None
-                break
-        if replacements is None or replacements < 1:
-            return VerificationResult(
-                status="failed",
-                evidence=tool_result[:300],
-                message="edit_file did not report a valid positive replacement count.",
-            )
+
 
         if (
             isinstance(old_value, str)
