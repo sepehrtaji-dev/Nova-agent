@@ -888,8 +888,8 @@ class Verifier:
         # Every result entry must contain a non-empty title and a public
         # HTTP(S) URL. Do not treat arbitrary strings or javascript: links as
         # evidence that a real search result was returned.
-        titles = [value.strip() for value in re.findall(r"^Title:\\s*(.*)$", tool_result, flags=re.MULTILINE)]
-        urls = [value.strip() for value in re.findall(r"^URL:\\s*(.*)$", tool_result, flags=re.MULTILINE)]
+        titles = [value.strip() for value in re.findall(r"^Title:\s*(.*)$", tool_result, flags=re.MULTILINE)]
+        urls = [value.strip() for value in re.findall(r"^URL:\s*(.*)$", tool_result, flags=re.MULTILINE)]
         if not titles or not urls or len(titles) != len(urls):
             return VerificationResult(
                 status="failed",
