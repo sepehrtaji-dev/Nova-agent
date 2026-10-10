@@ -207,17 +207,17 @@ class TestVerifier(unittest.TestCase):
             self.assertEqual(verification.status, "failed")
 
     def test_web_search_rejects_unsafe_url(self):
-        result = "Title: Example\\nURL: javascript:alert(1)\\nSnippet: unsafe"
+        result = "Title: Example\nURL: javascript:alert(1)\nSnippet: unsafe"
         verification = self.verifier.verify("web_search", {"query": "example"}, result)
         self.assertEqual(verification.status, "failed")
 
     def test_web_search_requires_matching_title_and_url_entries(self):
-        result = "Title: First\\nURL: https://example.com\\nTitle: Second"
+        result = "Title: First\nURL: https://example.com\nTitle: Second"
         verification = self.verifier.verify("web_search", {"query": "example"}, result)
         self.assertEqual(verification.status, "failed")
 
     def test_web_search_confirms_http_result(self):
-        result = "Title: Example\\nURL: https://example.com/page\\nSnippet: sample"
+        result = "Title: Example\nURL: https://example.com/page\nSnippet: sample"
         verification = self.verifier.verify("web_search", {"query": "example"}, result)
         self.assertTrue(verification.confirmed())
 
