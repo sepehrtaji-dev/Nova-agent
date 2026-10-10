@@ -490,5 +490,34 @@ class CoreTests(unittest.TestCase):
         )
         self.assertEqual(core._trusted_verifier_status(history), "confirmed")
 
+
+    def test_write_file_rejects_invalid_python_syntax(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {"exists": lambda self, name: name == "write_file"})()
+        request = {
+            "path": "broken.py",
+            "location": "projects",
+            "content": "def broken(:\n    pass\n",
+        }
+        valid, reason = core._validate_tool_request(
+            "create broken Python file", "write_file", json.dumps(request)
+        )
+        self.assertFalse(valid)
+        self.assertIn("syntax error", reason.lower())
+
+    def test_write_file_accepts_valid_python_syntax(self):
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {"exists": lambda self, name: name == "write_file"})()
+        request = {
+            "path": "valid.py",
+            "location": "projects",
+            "content": "def greet(name):\n    return f'Hello, {name}'\n",
+        }
+        valid, reason = core._validate_tool_request(
+            "create Python file", "write_file", json.dumps(request)
+        )
+        self.assertTrue(valid, reason)
+
+
 if __name__ == "__main__":
     unittest.main()
