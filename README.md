@@ -421,21 +421,33 @@ The architecture is intentionally separated so the model layer does not contain 
 
 # ✦ Installation
 
-Install the required Python packages.
+### 1. Install the core Python dependencies
 
-For example:
+From the repository root, run:
 
 ```bash
-pip install ollama rich
+python -m pip install -r requirements.txt
 ```
 
-Make sure Ollama is installed and running.
+This installs the dependencies needed for the default Textual interface and the prompt_toolkit/Rich alternatives without forcing the large image-generation or desktop-GUI packages onto every installation.
 
-Then pull the model:
+### 2. Install optional features only when you need them
+
+```bash
+python -m pip install -r requirements-optional.txt
+```
+
+These extras support desktop automation, OCR, the separate PySide6 GUI, and local Stable Diffusion image generation. Image generation also requires a compatible local model; see `NOVA_IMAGE_MODEL_PATH` in the image-generation tool documentation. OCR via `pytesseract` additionally requires the Tesseract OCR application to be installed on your operating system.
+
+### 3. Install and start Ollama
+
+Make sure Ollama is installed and running, then pull the default model:
 
 ```bash
 ollama pull qwen2.5:3b
 ```
+
+You can select another installed model with the `NOVA_MODEL` environment variable.
 
 ---
 
