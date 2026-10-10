@@ -501,6 +501,12 @@ class RouterTests(unittest.TestCase):
         history = "Tool: desktop\nResult: STATUS: SUCCESS\nOpened: imaginary"
         self.assertFalse(self.router._has_successful_tool(history))
 
+    def test_legacy_function_call_parser_handles_web_search(self):
+        decision = self.router._extract_function_call('[web_search("assembly")]')
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision["tool"], "web_search")
+        self.assertEqual(json.loads(decision["input"]), {"query": "assembly"})
+
     def test_terminal_location_matches_runtime_contract(self):
         self.assertTrue(
             self.router._validate_basic_tool_input(
