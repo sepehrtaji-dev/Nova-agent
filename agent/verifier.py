@@ -120,6 +120,7 @@ class Verifier:
             "terminal":         self._verify_terminal,
             "git":              self._verify_git,
             "web_search":       self._verify_web_search,
+            "web_fetch":        self._verify_web_fetch,
             "generate_image":   self._verify_generate_image,
             "desktop":          self._verify_desktop,
         }
@@ -922,4 +923,63 @@ class Verifier:
             status="confirmed",
             evidence=tool_result[:400],
             message=f"✓ Web search confirmed: {count} result(s) for '{query[:60]}'"
+        )
+
+
+    def _verify_web_fetch(self, tool_input, tool_result):
+        """Verify a bounded webpage fetch returned a public URL and page text."""
+        if tool_result.startswith("WEB_FETCH_ERROR:"):
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:400],
+                message="web_fetch returned an error.",
+            )
+        if "WEB_FETCH_SUCCESS" not in tool_result:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="web_fetch result is missing its success marker.",
+            )
+
+        fetched_url = None
+        for line in tool_result.splitlines():
+            if line.startswith("URL:"):
+                fetched_url = line.split(":", 1)[1].strip()
+                break
+        if not fetched_url:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="web_fetch did not report the final URL.",
+            )
+        try:
+            parsed = urlsplit(fetched_url)
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                raise ValueError("unsafe URL")
+        except ValueError:
+            return VerificationResult(
+                status="failed",
+                evidence=f"Invalid URL: {fetched_url[:160]}",
+                message="web_fetch reported an invalid URL.",
+            )
+
+        begin = tool_result.rfind("BEGIN_PAGE_TEXT")
+        end = tool_result.rfind("END_PAGE_TEXT")
+        if begin < 0 or end <= begin:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=tool_result[:300],
+                message="web_fetch result has no complete page-text block.",
+            )
+        page_text = tool_result[begin + len("BEGIN_PAGE_TEXT"):end].strip()
+        if not page_text:
+            return VerificationResult(
+                status="failed",
+                evidence=tool_result[:300],
+                message="web_fetch returned an empty page-text block.",
+            )
+        return VerificationResult(
+            status="confirmed",
+            evidence=f"URL: {fetched_url}\nCharacters observed: {len(page_text)}",
+            message=f"✓ Webpage text fetched from {fetched_url}",
         )
