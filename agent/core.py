@@ -48,6 +48,18 @@ class NovaCore:
             "last_verified": None,
         }
 
+    def _episodic_context(self, query):
+        """Return episodic context when memory is initialized; keep test/minimal instances safe."""
+        memory = getattr(self, "episodic_memory", None)
+        context = getattr(memory, "context", None)
+        if not callable(context):
+            return ""
+        try:
+            return context(query)
+        except Exception:
+            # Memory retrieval must never prevent Nova from answering or acting.
+            return ""
+
     def set_access(self, web=None, git=None, pc=None):
         """Update UI-controlled capability permissions for future actions."""
         if web is not None:
@@ -1434,7 +1446,7 @@ If nothing reliable can be extracted:
                 f"Recent conversation:\n{self._conversation_context(max_chars=8000)}\n\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\n\n"
                 f"Relevant saved user memory:\n{self.long_memory.get_relevant_context(message)}\n\n"
-                f"Relevant past tool experiences:\n{self.episodic_memory.context(message)}\n\n"
+                f"Relevant past tool experiences:\n{self._episodic_context(message)}\n\n"
                 "Answer the user's actual question or statement directly. "
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
@@ -1517,7 +1529,7 @@ If nothing reliable can be extracted:
             knowledge_context = (
                 self.knowledge.get_context(message)
                 + "\n\n"
-                + self.episodic_memory.context(message)
+                + self._episodic_context(message)
             )
 
             conversation = self._conversation_context(max_chars=12000)
