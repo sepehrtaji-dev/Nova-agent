@@ -39,7 +39,7 @@ def main() -> None:
             console.print("  " + "  ".join(COMMANDS))
         elif command == "/memory":
             entries = core.long_memory.entries()
-            body = "\\n".join(f"{item['key']}: {item['value']}" for item in entries)
+            body = "\n".join(f"{item['key']}: {item['value']}" for item in entries)
             console.print(Panel(body or "No saved long-term memories.", title=f"Saved memory · {len(entries)} entries", border_style="cyan"))
         elif command == "/forget":
             parts = message.split(maxsplit=2)
