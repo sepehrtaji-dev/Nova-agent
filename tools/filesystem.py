@@ -98,23 +98,14 @@ class FileSystemTool:
                     f"Root: {root}  Path: {full_path}"
                 )
 
-            if os.path.exists(full_path) and os.path.commonpath([root, candidate_real]) != root:
+            # Always validate the canonical candidate, not only existing paths.
+            # exists() is False for broken symlinks, but realpath() still resolves
+            # their target and lets us reject paths that point outside the workspace.
+            if os.path.commonpath([root, candidate_real]) != root:
                 raise ValueError(
                     f"Path escapes workspace root through a symlink. "
                     f"Root: {root}  Path: {full_path}"
                 )
-
-            # Check parent directories for symlinks even if the path doesn't exist yet
-            current = parent_real
-            while current and current != root and current != os.path.dirname(current):
-                if os.path.islink(current):
-                    link_target = os.path.realpath(current)
-                    if os.path.commonpath([root, link_target]) != root:
-                        raise ValueError(
-                            f"Path escapes workspace root through a symlink in parent directory. "
-                            f"Root: {root}  Path: {full_path}"
-                        )
-                current = os.path.dirname(current)
         except ValueError:
             raise ValueError(
                 f"Path escapes workspace root. "
