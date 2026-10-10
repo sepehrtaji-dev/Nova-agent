@@ -304,20 +304,20 @@ class WebSearchTool:
             pass
         document = raw.decode(charset, errors="replace")
         if "html" in content_type:
-            document = re.sub(r"(?is)<(script|style|noscript|svg)\\b[^>]*>.*?</\\1\\s*>", " ", document)
+            document = re.sub(r"(?is)<(script|style|noscript|svg)\b[^>]*>.*?</\1\s*>", " ", document)
             document = re.sub(r"(?s)<[^>]+>", " ", document)
             document = html.unescape(document)
-        document = re.sub(r"[ \\t\\r\\f\\v]+", " ", document)
-        document = re.sub(r"\\n\\s*\\n+", "\\n\\n", document).strip()
+        document = re.sub(r"[ \t\r\f\v]+", " ", document)
+        document = re.sub(r"\n\s*\n+", "\n\n", document).strip()
         if not document:
             return "WEB_FETCH_ERROR: The page returned no readable text."
 
         return (
-            "WEB_FETCH_SUCCESS\\n"
-            f"URL: {final_url}\\n"
-            f"Content-Type: {content_type or 'unknown'}\\n"
-            f"Characters: {len(document)}\\n"
-            "BEGIN_PAGE_TEXT\\n"
-            f"{document[:12000]}\\n"
+            "WEB_FETCH_SUCCESS\n"
+            f"URL: {final_url}\n"
+            f"Content-Type: {content_type or 'unknown'}\n"
+            f"Characters: {len(document)}\n"
+            "BEGIN_PAGE_TEXT\n"
+            f"{document[:12000]}\n"
             "END_PAGE_TEXT"
         )
