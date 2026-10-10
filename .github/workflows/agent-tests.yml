@@ -27,23 +27,5 @@ jobs:
       - name: Smoke-test both terminal UI front ends
         run: python -c "from ui.textual_app import NovaTextualApp; from ui.prompt_cli import main; print('UI imports OK')"
 
-      - name: Run lightweight agent regression tests
-        run: >
-          python -m unittest
-          tests/test_agent_routing.py
-          tests/test_model_intent_classification.py
-          tests/test_verifier.py
-          tests/test_core.py
-          tests/test_math_parser.py
-          tests/test_memory.py
-          tests/test_desktop_app_resolution.py
-          tests/test_git_tool.py
-          tests/test_filesystem_security.py
-          tests/test_terminal_security.py
-          tests/test_self_knowledge.py
-          tests/test_diagnostics.py
-          tests/test_introspection.py
-          tests/test_episodic_memory.py
-          tests/test_self_reflection.py
-          tests/test_web_tool.py
-          tests/test_github_tool.py
+      - name: Run all lightweight agent regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
