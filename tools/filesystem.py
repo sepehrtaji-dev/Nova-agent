@@ -437,6 +437,8 @@ class FileSystemTool:
 
             if not isinstance(new_str, str):
                 return "edit_file requires 'new' replacement string."
+            if old_str == "":
+                return "edit_file requires a non-empty 'old' string to avoid replacing every boundary."
 
             full_path = self._resolve_path(path, location)
 
