@@ -130,7 +130,7 @@ class NovaTextualApp(App):
         self.busy = True
         self.query_one("#prompt", Input).disabled = True
         self._set_status("Nova is working…")
-        self.run_worker(self._process_request, message, thread=True, exclusive=True)
+        self.run_worker(lambda: self._process_request(message), thread=True, exclusive=True)
 
     def _process_request(self, message: str) -> None:
         if self.core is None:
@@ -187,7 +187,7 @@ class NovaTextualApp(App):
             self.busy = True
             self.query_one("#prompt", Input).disabled = True
             self._set_status("Reading local Ollama metadata…")
-            self.run_worker(self._inspect, name, thread=True, exclusive=True)
+            self.run_worker(lambda: self._inspect(name), thread=True, exclusive=True)
         elif name == "/tools":
             profile = runtime_profile(self.core)
             table = Table(title="Tool registry", expand=True)
