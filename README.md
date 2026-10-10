@@ -689,3 +689,24 @@ We believe AI assistance is a natural part of modern software development — it
 ## License
 This project is licensed under the MIT License.
 
+
+
+---
+
+# ✦ Runtime Self-Inspection
+
+The Rich terminal interface includes evidence-based inspection commands:
+
+| Command | What it shows |
+|---|---|
+| `/status` | Fast local runtime summary; does not contact Ollama |
+| `/self` | Nova identity, Python/platform, context/output budgets, live core components, registered tools, permissions, and Ollama model metadata |
+| `/model` | On-demand Ollama metadata such as parameter count, architecture, quantization, model context length, and reported capabilities |
+| `/tools` | Live tool registry with capability and permission state |
+| `/doctor` | Runtime configuration checks and Ollama/model-list diagnostics |
+| `/permissions` | Current web, Git, and PC permission toggles |
+| `/help` | Full command list |
+
+Model metadata is read from Ollama, not guessed from a model tag. If Ollama does not provide a value, Nova displays `Unknown`. A model appearing in metadata or a local model list does not by itself prove that text generation is working. Parameter count refers to the configured language model, not to the number of parameters in Nova's Python agent code.
+
+The UI shows high-level activity and observable results. It does not expose private model reasoning.
