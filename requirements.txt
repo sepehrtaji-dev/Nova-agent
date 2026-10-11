@@ -1,4 +1,4 @@
-ollama
-rich
-textual
-prompt_toolkit
+ollama>=0.4.7,<1.0
+rich>=13,<15
+textual>=0.50,<2
+prompt_toolkit>=3.0,<4
