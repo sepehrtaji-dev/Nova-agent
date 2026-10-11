@@ -54,5 +54,30 @@ class MemoryManagerTests(unittest.TestCase):
             self.memory.remember("profile", "key", None)
 
 
+    def test_graphics_card_question_matches_gpu_memory_key(self):
+        self.memory.remember("profile", "gpu", "RTX 3060")
+
+        matches = self.memory.relevant("what graphics card do I use?")
+
+        self.assertTrue(matches)
+        self.assertEqual(matches[0]["key"], "profile.gpu")
+        self.assertEqual(matches[0]["value"], "RTX 3060")
+
+    def test_persian_graphics_card_question_matches_gpu_memory_key(self):
+        self.memory.remember("profile", "gpu", "RTX 3060")
+
+        matches = self.memory.relevant("کارت گرافیکم چیه؟")
+
+        self.assertTrue(matches)
+        self.assertEqual(matches[0]["key"], "profile.gpu")
+        self.assertEqual(matches[0]["value"], "RTX 3060")
+
+    def test_empty_or_irrelevant_query_returns_no_match(self):
+        self.memory.remember("profile", "gpu", "RTX 3060")
+
+        self.assertEqual(self.memory.relevant("what is my favorite food"), [])
+        self.assertEqual(self.memory.relevant("   "), [])
+
+
 if __name__ == "__main__":
     unittest.main()
