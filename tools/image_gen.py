@@ -171,7 +171,7 @@ class ImageGenTool:
                 f"Size: {width}x{height}\n"
                 f"Steps: {steps}\n"
                 f"Guidance: {guidance}\n"
-                f"Seed: {seed or 'random'}\n"
+                f"Seed: {seed if seed is not None else 'random'}\n"
                 f"Saved to: {output_path}\n"
                 f"STATUS: SUCCESS"
             )
