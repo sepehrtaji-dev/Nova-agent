@@ -253,16 +253,14 @@ Rules:
 - When the user explicitly asks to operate an application or GUI, use the available desktop/GUI capability for those interactions instead of substituting a different tool.
 - Do not invent intermediate actions that are not required to fulfill the user's goal.
 - A follow-up question that asks only about a previous verified result should not create a new action.
-- If the task needs a GitHub token and none is in the context, first step must be: "ask user for GitHub PAT token"
-- For GitHub repo creation the steps must be in order:
-  1. ask for token (if not already provided)
-  2. git create_repo
-  3. git init
-  4. write_file (the actual files)
-  5. git add
-  6. git commit
-  7. git push
-- Do not skip steps. Do not combine steps.
+- When modifying existing software, gather enough context from the actual project before editing: inspect relevant files and, when useful, project configuration, dependency manifests, documentation, and tests. Choose what to inspect based on the request and available evidence.
+- Make the smallest coherent change that fulfills the goal. Preserve existing APIs, style, architecture, and unrelated user changes unless the user asks otherwise.
+- Choose validation steps from the project's observed files, documentation, configuration, and available tools. Do not assume a language, framework, test runner, command, or path that has not been established by evidence.
+- When implementation changes warrant verification, include an appropriate test, type-check, build, or other observable validation step. If no suitable validation can be established, state that limitation instead of inventing one.
+- If validation fails, use the actual output to plan a diagnostic or corrective action before retrying. Do not repeat the same failed tool/input while the relevant workspace state is unchanged.
+- Avoid destructive operations, broad rewrites, dependency installation, network actions, or changes outside the requested scope unless they are necessary and authorized.
+- Ask the user for missing credentials or approval when a required action cannot safely proceed without them; never invent credentials.
+- Do not skip required steps or combine independent actions into an opaque command.
 - Return JSON only.
 
 Schema:
@@ -462,12 +460,13 @@ Rules:
 - NEVER remove a completed step.
 - If the latest tool successfully performed the current step,
   mark that step completed.
-- If the latest tool failed,
-  keep the relevant step pending.
-- Add a new step only if the REAL result proves that it is necessary.
+- Never mark a new or previously pending step completed without real evidence.
+- If a tool failed or its result is unverifiable, use its actual output to choose a useful diagnostic or corrective action.
+- When retrying a failed validation, put any required diagnosis or correction before the retry step. Do not repeat an identical failed tool/input while the relevant workspace state is unchanged.
+- Preserve all completed work, but you may reorder pending steps when the new evidence shows a better execution order.
+- Add a new step only when the real result or remaining goal justifies it.
 - Do not execute tools.
-- Do not claim the overall goal is complete unless all required
-  steps are actually complete.
+- Do not claim the overall goal is complete unless all required steps are actually complete.
 - Return JSON only.
 
 Schema:
@@ -754,11 +753,11 @@ Schema:
                 else:
                     status = "pending"
 
-            # Don't accept "completed" from model for previously-pending steps
+            # Only previously completed steps have authoritative completion evidence.
+            # A model cannot mark a new or previously-pending step complete by assertion.
             if (
                 status == "completed"
-                and old
-                and old.get("status") != "completed"
+                and (not old or old.get("status") != "completed")
             ):
                 status = "pending"
 
@@ -816,24 +815,26 @@ Schema:
                 f"step(s) during replan normalization."
             )
 
-        # Preserve original step order
-        old_order = {}
-        for idx, old_step in enumerate(
-            old_plan.get("steps", [])
-        ):
-            if isinstance(old_step, dict):
-                desc = old_step.get("description")
-                if isinstance(desc, str):
-                    old_order[desc.strip().lower()] = idx
+        # Keep completed work in its original order, then honor the model's
+        # proposed order for remaining steps. This lets replanning place a
+        # diagnosis or repair before a failed validation retry.
+        old_completed_order = {}
+        for idx, old_step in enumerate(old_plan.get("steps", [])):
+            if not isinstance(old_step, dict):
+                continue
+            if old_step.get("status") != "completed":
+                continue
+            desc = old_step.get("description")
+            if isinstance(desc, str):
+                old_completed_order[desc.strip().lower()] = idx
+
+        model_order = {id(step): idx for idx, step in enumerate(normalized)}
 
         def sort_key(step):
-            desc = step.get(
-                "description",
-                ""
-            ).strip().lower()
-            if desc in old_order:
-                return (0, old_order[desc])
-            return (1, 0)
+            desc = str(step.get("description", "")).strip().lower()
+            if step.get("status") == "completed" and desc in old_completed_order:
+                return (0, old_completed_order[desc])
+            return (1, model_order[id(step)])
 
         normalized.sort(key=sort_key)
 
