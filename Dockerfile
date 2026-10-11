@@ -18,8 +18,8 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 COPY . /opt/nova
 
-# Keep application code root-owned. The episodic-memory module currently stores
-# its JSON data beside the module, so only that package directory is writable.
+# Keep application code root-owned; the runtime process writes project and
+# persistent memory data under /workspace.
 RUN useradd --create-home --uid 10001 nova \
     && mkdir -p /workspace/projects /workspace/memory \
     && chown -R nova:nova /workspace \
