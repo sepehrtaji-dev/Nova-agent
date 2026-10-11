@@ -88,8 +88,17 @@ class OllamaBrain:
                 print(f"[NOVA] Ollama retry error: {type(retry_error).__name__}: {retry_error}")
                 raise
 
-        content = response.get("message", {}).get("content", "")
+        # The current ollama Python SDK returns a ChatResponse model, not a dict.
+        # Keep dict support for older/custom adapters used by tests or wrappers.
+        if isinstance(response, dict):
+            message = response.get("message") or {}
+            content = message.get("content", "") if isinstance(message, dict) else getattr(message, "content", "")
+        else:
+            message = getattr(response, "message", None)
+            content = getattr(message, "content", "") if message is not None else ""
 
+        if content is None:
+            content = ""
         if not isinstance(content, str):
             content = str(content)
 
