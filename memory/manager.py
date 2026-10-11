@@ -104,7 +104,7 @@ class MemoryManager:
         for variants, canonical in aliases:
             for variant in sorted(variants, key=len, reverse=True):
                 normalized = re.sub(
-                    r"(?<!\\w)" + re.escape(variant) + r"(?!\\w)",
+                    r"(?<!\w)" + re.escape(variant) + r"(?!\w)",
                     canonical,
                     normalized,
                 )
@@ -120,7 +120,7 @@ class MemoryManager:
             "دارم", "دارم؟", "بگو", "لطفا", "لطفاً",
         }
         return {
-            token for token in re.findall(r"\\b[\\w]+\\b", normalized)
+            token for token in re.findall(r"\\b[\w]+\\b", normalized)
             if len(token) > 1 and token not in stop_words
         }
 
