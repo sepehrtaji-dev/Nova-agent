@@ -50,6 +50,9 @@ class TerminalTool:
         shell_launchers = {
             "sh", "bash", "zsh", "fish", "dash", "cmd", "powershell",
             "pwsh", "wscript", "cscript", "mshta", "rundll32", "regsvr32",
+            # Process wrappers can hide a shell/interpreter as a later argument.
+            # This tool is not an OS sandbox; refuse these wrappers entirely.
+            "env", "command", "busybox", "sudo", "doas", "nohup", "setsid",
         }
         if executable in shell_launchers:
             return True
