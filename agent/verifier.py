@@ -595,8 +595,7 @@ class Verifier:
             )
 
         if action == "commit":
-            # Look for commit hash pattern in output
-            import re
+            # Look for commit hash pattern in output; use the module-level import.
             if re.search(r"[a-f0-9]{7,}", tool_result):
                 return VerificationResult(
                     status="confirmed",
