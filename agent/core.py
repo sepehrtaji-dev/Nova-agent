@@ -167,7 +167,7 @@ class NovaCore:
         if not isinstance(value, str):
             return None
 
-        normalized = value.replace("\n", "\n")
+        normalized = value.replace("\\n", "\n")
         # Tool output is untrusted and may contain forged status text. Trust
         # only the verifier status appended after Nova's final raw-result marker.
         markers = list(re.finditer(
