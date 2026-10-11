@@ -153,6 +153,7 @@ Nova reads the following environment variables where noted in the code:
 | `NOVA_NUM_PREDICT` | `2048` | Requested output-token budget; invalid values fall back to the code default |
 | `OLLAMA_HOST` | Ollama client's default | Ollama server address; useful when Ollama is not at its default local endpoint |
 | `NOVA_IMAGE_MODEL_PATH` | Not set | Model-path setting used by the optional image-generation tool |
+| `NOVA_EPISODIC_MEMORY_PATH` | Package-local `memory/episodic.json` | Optional override for the episodic-memory JSON file path |
 
 Example for a model already installed in Ollama:
 
