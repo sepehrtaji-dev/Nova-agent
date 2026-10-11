@@ -1,4 +1,6 @@
 import html
+import http.client
+import ssl
 import ipaddress
 import socket
 import json
@@ -208,10 +210,11 @@ class WebSearchTool:
         return "\n\n".join(results)
 
 
-    def _validate_public_url(self, url):
-        """Reject local/private destinations before making outbound requests."""
+    def _resolve_public_url(self, url):
+        """Validate a URL and return its resolved public IPs for connection pinning."""
         parsed = urllib.parse.urlsplit(str(url).strip())
-        if parsed.scheme.lower() not in {"http", "https"}:
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"}:
             raise ValueError("Only http:// and https:// URLs are supported.")
         if not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("URL must have a hostname and cannot contain credentials.")
@@ -219,7 +222,7 @@ class WebSearchTool:
             raise ValueError("Only standard HTTP/HTTPS ports are allowed.")
 
         hostname = parsed.hostname.rstrip(".").lower()
-        if hostname == "localhost" or hostname.endswith(".localhost") or hostname.endswith(".local"):
+        if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
             raise ValueError("Local hostnames are not allowed.")
 
         try:
@@ -228,7 +231,7 @@ class WebSearchTool:
             try:
                 records = socket.getaddrinfo(
                     hostname,
-                    parsed.port or (443 if parsed.scheme.lower() == "https" else 80),
+                    parsed.port or (443 if scheme == "https" else 80),
                     type=socket.SOCK_STREAM,
                 )
             except OSError as exc:
@@ -244,7 +247,11 @@ class WebSearchTool:
             raise ValueError("Hostname did not resolve to an IP address.")
         if any(not address.is_global for address in addresses):
             raise ValueError("Private, loopback, reserved, or non-public IP destinations are blocked.")
-        return str(url).strip()
+        return str(url).strip(), hostname, [str(address) for address in addresses]
+
+    def _validate_public_url(self, url):
+        """Reject local/private destinations before making outbound requests."""
+        return self._resolve_public_url(url)[0]
 
     def fetch(self, input_data):
         """Fetch a public web page as bounded plain text, following safe redirects only."""
@@ -263,24 +270,96 @@ class WebSearchTool:
         if not isinstance(url, str) or not url.strip():
             return "WEB_FETCH_ERROR: A URL is required."
 
+        pinned_addresses = {}
+
+        def pin_url(candidate):
+            clean_url, hostname, addresses = self._resolve_public_url(candidate)
+            # Use a resolved address for the actual socket, rather than allowing
+            # urllib/libcurl to resolve the hostname a second time (DNS rebinding).
+            pinned_addresses[hostname] = addresses[0]
+            return clean_url
+
         try:
-            url = self._validate_public_url(url)
+            url = pin_url(url)
         except (ValueError, TypeError) as exc:
             return f"WEB_FETCH_ERROR: {exc}"
-
-        validator = self._validate_public_url
 
         class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 absolute = urllib.parse.urljoin(req.full_url, newurl)
-                validator(absolute)
+                pin_url(absolute)
                 return super().redirect_request(req, fp, code, msg, headers, absolute)
+
+        class PinnedHTTPConnection(http.client.HTTPConnection):
+            def __init__(self, host, *args, pinned_ip=None, **kwargs):
+                self._pinned_ip = pinned_ip
+                super().__init__(host, *args, **kwargs)
+
+            def connect(self):
+                if not self._pinned_ip:
+                    raise OSError("No validated IP address is pinned for this host.")
+                self.sock = socket.create_connection(
+                    (self._pinned_ip, self.port), self.timeout, self.source_address
+                )
+                if self._tunnel_host:
+                    self._tunnel()
+
+        class PinnedHTTPSConnection(http.client.HTTPSConnection):
+            def __init__(self, host, *args, pinned_ip=None, context=None,
+                         check_hostname=None, **kwargs):
+                self._pinned_ip = pinned_ip
+                self._context = context or ssl.create_default_context()
+                if check_hostname is not None:
+                    self._context.check_hostname = check_hostname
+                super().__init__(host, *args, context=self._context, **kwargs)
+
+            def connect(self):
+                if not self._pinned_ip:
+                    raise OSError("No validated IP address is pinned for this host.")
+                self.sock = socket.create_connection(
+                    (self._pinned_ip, self.port), self.timeout, self.source_address
+                )
+                if self._tunnel_host:
+                    self._tunnel()
+                self.sock = self._context.wrap_socket(
+                    self.sock, server_hostname=self.host
+                )
+
+        class PinnedHTTPHandler(urllib.request.HTTPHandler):
+            def http_open(self, req):
+                hostname = (urllib.parse.urlsplit(req.full_url).hostname or "").lower().rstrip(".")
+                pinned_ip = pinned_addresses.get(hostname)
+                return self.do_open(
+                    lambda host, **kwargs: PinnedHTTPConnection(
+                        host, pinned_ip=pinned_ip, **kwargs
+                    ),
+                    req,
+                )
+
+        class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+            def https_open(self, req):
+                hostname = (urllib.parse.urlsplit(req.full_url).hostname or "").lower().rstrip(".")
+                pinned_ip = pinned_addresses.get(hostname)
+                return self.do_open(
+                    lambda host, **kwargs: PinnedHTTPSConnection(
+                        host, pinned_ip=pinned_ip, **kwargs
+                    ),
+                    req,
+                    context=self._context,
+                    check_hostname=self._check_hostname,
+                )
 
         request = urllib.request.Request(
             url,
             headers={"User-Agent": self.user_agent, "Accept": "text/html,text/plain,application/json,application/xml"},
         )
-        opener = urllib.request.build_opener(SafeRedirectHandler)
+        # Ignore ambient proxy settings: proxying would bypass the pinned socket.
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            SafeRedirectHandler,
+            PinnedHTTPHandler,
+            PinnedHTTPSHandler,
+        )
         try:
             with opener.open(request, timeout=15) as response:
                 content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
