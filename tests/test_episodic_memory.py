@@ -1,6 +1,8 @@
 import json
+import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from memory.episodic import EpisodicMemory
@@ -14,6 +16,15 @@ class EpisodicMemoryTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+
+    def test_environment_can_configure_default_storage_path(self):
+        configured_path = Path(self.temp_dir.name) / "configured-episodes.json"
+        with patch.dict(os.environ, {"NOVA_EPISODIC_MEMORY_PATH": str(configured_path)}):
+            memory = EpisodicMemory()
+            self.assertEqual(memory.path, configured_path)
+            self.assertTrue(memory.record("task", "tool", "confirmed"))
+        self.assertTrue(configured_path.is_file())
 
     def test_records_minimal_evidence_and_reloads_from_disk(self):
         saved = self.memory.record(

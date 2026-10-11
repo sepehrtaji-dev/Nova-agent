@@ -29,3 +29,6 @@ jobs:
 
       - name: Run all lightweight agent regression tests
         run: python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Build the Docker image
+        run: docker build --tag nova-agent:test .

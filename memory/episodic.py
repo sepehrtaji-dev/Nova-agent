@@ -5,6 +5,7 @@ tool inputs are deliberately not saved. The JSON file is runtime data and is
 ignored by git.
 """
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,12 @@ class EpisodicMemory:
     """Persist recent tool experiences and retrieve relevant lessons."""
 
     def __init__(self, path=None, max_episodes=100):
-        default_path = Path(__file__).resolve().parent / "episodic.json"
+        configured_path = os.getenv("NOVA_EPISODIC_MEMORY_PATH")
+        default_path = (
+            Path(configured_path).expanduser()
+            if configured_path
+            else Path(__file__).resolve().parent / "episodic.json"
+        )
         self.path = Path(path) if path is not None else default_path
         self.max_episodes = max(1, int(max_episodes))
         self._episodes = self._load()

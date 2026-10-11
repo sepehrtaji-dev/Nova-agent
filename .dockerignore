@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+venv
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+checkpoints
+projects
+.env
+.env.*
+memory/*.json
+memory/database/*.json
