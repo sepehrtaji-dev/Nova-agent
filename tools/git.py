@@ -6,6 +6,9 @@ import urllib.request
 import urllib.error
 import shutil
 import re
+import ipaddress
+import socket
+import urllib.parse
 
 
 class GitTool:
@@ -154,6 +157,47 @@ class GitTool:
                 return True, blocked
 
         return False, None
+
+    @staticmethod
+    def _validate_clone_url(url):
+        """Allow HTTPS clones only and reject non-public network destinations."""
+        try:
+            parsed = urllib.parse.urlsplit(str(url).strip())
+            if parsed.scheme.lower() != "https":
+                raise ValueError("clone URLs must use HTTPS.")
+            if not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("clone URL must contain a hostname and no credentials.")
+            if parsed.port not in (None, 443):
+                raise ValueError("only the standard HTTPS port is allowed.")
+            hostname = parsed.hostname.rstrip(".").lower()
+            if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
+                raise ValueError("local hostnames are not allowed for cloning.")
+            try:
+                addresses = [ipaddress.ip_address(hostname)]
+            except ValueError:
+                records = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+                addresses = []
+                for record in records:
+                    try:
+                        addresses.append(ipaddress.ip_address(record[4][0]))
+                    except ValueError:
+                        continue
+            if not addresses:
+                raise ValueError("clone hostname did not resolve to an IP address.")
+            if any(not address.is_global for address in addresses):
+                raise ValueError("private, loopback, reserved, and non-public clone destinations are blocked.")
+        except (TypeError, ValueError, OSError) as exc:
+            raise ValueError(f"unsafe clone URL: {exc}") from exc
+        return str(url).strip()
+
+    @staticmethod
+    def _safe_remote_or_branch(value, label):
+        value = str(value or "").strip()
+        if (not value or value.startswith("-") or value.startswith("/")
+                or value.endswith("/") or any(ch.isspace() for ch in value)
+                or any(ord(ch) < 32 for ch in value)):
+            raise ValueError(f"invalid Git {label}.")
+        return value
 
     def _check_gh_cli(self):
         """Check if GitHub CLI (gh) is available."""
@@ -335,19 +379,29 @@ class GitTool:
             if not url:
                 return "GIT ERROR: 'url' is required for clone."
 
-            # Only allow safe URL schemes
-            allowed_schemes = ("https://", "git://")
-            if not url.lower().startswith(allowed_schemes):
-                return (
-                    "GIT ERROR: clone URL must use https:// or git:// scheme. "
-                    f"Got: {url[:50]!r}"
-                )
+            try:
+                url = self._validate_clone_url(url)
+            except ValueError as exc:
+                return f"GIT ERROR: {exc}"
 
-            dest_name = data.get("dest") or url.rstrip("/").split("/")[-1].replace(".git", "")
-            dest_name = os.path.basename(str(dest_name).replace("\\", "/"))
-            if not dest_name or dest_name in {".", ".."}:
-                return "GIT ERROR: invalid clone destination."
-            dest_path = os.path.join(self.projects_path, dest_name)
+            parsed_url = urllib.parse.urlsplit(url)
+            inferred_name = parsed_url.path.rstrip("/").split("/")[-1]
+            if inferred_name.lower().endswith(".git"):
+                inferred_name = inferred_name[:-4]
+            requested_dest = data.get("dest")
+            dest_name = str(requested_dest if requested_dest is not None else inferred_name).strip()
+            # A clone destination is one directory name, never an arbitrary path.
+            if (not dest_name or dest_name in {".", ".."} or "/" in dest_name
+                    or "\\" in dest_name or os.path.basename(dest_name) != dest_name
+                    or dest_name.startswith("-")):
+                return "GIT ERROR: clone destination must be a simple directory name inside projects/."
+
+            try:
+                dest_path = self._resolve_repo_path(dest_name)
+            except ValueError as exc:
+                return f"GIT ERROR: invalid clone destination: {exc}"
+            if os.path.lexists(dest_path):
+                return f"GIT ERROR: clone destination already exists: {dest_name}"
 
             return self._run_git(["clone", url, dest_path], self.projects_path)
 
@@ -378,9 +432,19 @@ class GitTool:
 
         # ── push ──────────────────────────────────────────────────────────
         if action == "push":
-            remote = data.get("remote", "origin")
-            branch = data.get("branch", "")
-            args   = ["push", remote]
+            try:
+                remote = self._safe_remote_or_branch(data.get("remote", "origin"), "remote")
+                branch = self._safe_remote_or_branch(data.get("branch", ""), "branch") if data.get("branch") else ""
+            except ValueError as exc:
+                return f"GIT ERROR: {exc}"
+            remote_result = self._run_git(["remote"], cwd)
+            remote_names = []
+            marker = "OUTPUT:\n"
+            if marker in remote_result:
+                remote_names = remote_result.split(marker, 1)[1].splitlines()
+            if remote not in remote_names:
+                return f"GIT ERROR: unknown Git remote: {remote!r}"
+            args = ["push", remote]
             if branch:
                 args.append(branch)
 
@@ -392,9 +456,12 @@ class GitTool:
 
         # ── pull ──────────────────────────────────────────────────────────
         if action == "pull":
-            remote = data.get("remote", "origin")
-            branch = data.get("branch", "")
-            args   = ["pull", remote]
+            try:
+                remote = self._safe_remote_or_branch(data.get("remote", "origin"), "remote")
+                branch = self._safe_remote_or_branch(data.get("branch", ""), "branch") if data.get("branch") else ""
+            except ValueError as exc:
+                return f"GIT ERROR: {exc}"
+            args = ["pull", remote]
             if branch:
                 args.append(branch)
             return self._run_git(args, cwd)
