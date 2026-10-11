@@ -87,37 +87,68 @@ class MemoryManager:
             self.storage.save(self.data)
         return changed
 
-    def relevant(self, query, limit=5):
+    @staticmethod
+    def _query_terms(text):
+        """Normalize common aliases and remove low-information question words."""
         import re
 
+        normalized = str(text or "").casefold()
+        aliases = (
+            (("graphics processor", "graphics cards", "graphics card", "video card",
+              "کارت گرافیکم", "کارت گرافیکی", "کارت گرافیک", "پردازنده گرافیکی",
+              "گرافیکم", "گرافیک"), "gpu"),
+            (("central processing unit", "سی پی یو", "پردازنده مرکزی"), "cpu"),
+            (("system memory", "system ram", "حافظه رم", "رم"), "ram"),
+            (("operating system", "سیستم عامل"), "os"),
+        )
+        for variants, canonical in aliases:
+            for variant in sorted(variants, key=len, reverse=True):
+                normalized = re.sub(
+                    r"(?<!\w)" + re.escape(variant) + r"(?!\w)",
+                    canonical,
+                    normalized,
+                )
+
+        stop_words = {
+            "what", "whats", "which", "where", "when", "who", "how",
+            "is", "are", "am", "was", "were", "the", "a", "an", "my",
+            "your", "you", "i", "me", "do", "does", "did", "have",
+            "has", "had", "of", "for", "to", "in", "on", "about",
+            "tell", "please", "can", "could", "would", "should",
+            "چی", "چیه", "چیه؟", "چه", "کدام", "کدوم", "من", "مال",
+            "منه", "برای", "رو", "را", "از", "به", "در", "است", "هست",
+            "دارم", "دارم؟", "بگو", "لطفا", "لطفاً",
+        }
+        return {
+            token for token in re.findall(r"\b[\w]+\b", normalized)
+            if len(token) > 1 and token not in stop_words
+        }
+
+    def relevant(self, query, limit=5):
+        """Return saved facts ranked by normalized query/key matches.
+
+        Key matches are weighted above value matches so questions such as
+        "what graphics card do I use?" can retrieve a fact stored under
+        profile.gpu even when the value itself is only "RTX 3060".
+        """
         if not isinstance(query, str) or not query.strip():
             return []
 
-        words = {
-            item for item in re.findall(r"\b[\w]+\b", query.casefold())
-            if len(item) > 2
-        }
+        words = self._query_terms(query)
         if not words:
             return []
 
         scored = []
         for key, value in self._flatten(self.data):
-            value_text = str(value)
-            searchable = f"{key} {value_text}".casefold()
-            value_words = set(re.findall(r"\b[\w]+\b", searchable))
-            overlap = words & value_words
-            if not overlap:
+            key_words = self._query_terms(str(key).replace(".", " "))
+            value_words = self._query_terms(str(value))
+            key_overlap = words & key_words
+            value_overlap = words & value_words
+            if not key_overlap and not value_overlap:
                 continue
 
-            score = len(overlap)
-            key_text = re.sub(r"[_\-\.]+", " ", str(key).casefold())
-            if any(
-                word in key_text or word.rstrip("s") in key_text
-                for word in words
-            ):
-                score += 1
-
-            scored.append((score, key, value_text))
+            score = len(key_overlap) * 3 + len(value_overlap)
+            scored.append((score, key, str(value)))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
         try:
