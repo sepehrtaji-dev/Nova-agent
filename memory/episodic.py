@@ -5,6 +5,7 @@ tool inputs are deliberately not saved. The JSON file is runtime data and is
 ignored by git.
 """
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,12 @@ class EpisodicMemory:
     """Persist recent tool experiences and retrieve relevant lessons."""
 
     def __init__(self, path=None, max_episodes=100):
-        default_path = Path(__file__).resolve().parent / "episodic.json"
+        configured_path = os.getenv("NOVA_EPISODIC_MEMORY_PATH")
+        default_path = (
+            Path(configured_path).expanduser()
+            if configured_path
+            else Path(__file__).resolve().parent / "episodic.json"
+        )
         self.path = Path(path) if path is not None else default_path
         self.max_episodes = max(1, int(max_episodes))
         self._episodes = self._load()
@@ -63,76 +69,63 @@ class EpisodicMemory:
 
     def record(self, goal, tool_name, status, evidence="", message=""):
         """Store a minimal tool outcome; never persist raw inputs or raw outputs."""
-        status = str(status or "unverifiable").strip().lower()
+        status = str(status or "unverifiable").lower()
         if status not in {"confirmed", "failed", "unverifiable"}:
             status = "unverifiable"
-        tool = self._clean(tool_name, 80)
-        if not tool:
-            return False
-
-        episode = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "task": self._clean(goal, 180),
-            "tool": tool,
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "task": self._clean(goal),
+            "tool": self._clean(tool_name, 80),
             "status": status,
-            "evidence": self._clean(evidence, 220),
-            "outcome": self._clean(message, 220),
+            "evidence": self._clean(evidence),
+            "message": self._clean(message),
         }
-        self._episodes.append(episode)
+        self._episodes.append(entry)
         self._episodes = self._episodes[-self.max_episodes:]
         return self._save()
 
     def recent(self, limit=10):
         try:
-            count = max(1, min(int(limit), self.max_episodes))
+            count = max(0, int(limit))
         except (TypeError, ValueError):
             count = 10
-        return [dict(item) for item in self._episodes[-count:]]
+        return [dict(item) for item in self._episodes[-count:]] if count else []
 
-    def search(self, query, limit=5):
-        if not isinstance(query, str) or not query.strip():
-            return []
-        words = {
-            word for word in re.findall(r"\w+", query.casefold())
-            if len(word) > 2
-        }
-        if not words:
+    def search(self, query, limit=3):
+        terms = set(re.findall(r"[a-z0-9_]+", str(query or "").lower()))
+        if not terms:
             return []
         scored = []
-        for episode in self._episodes:
-            searchable = " ".join(str(episode.get(key, "")) for key in (
-                "task", "tool", "status", "evidence", "outcome"
-            )).casefold()
-            overlap = sum(1 for word in words if word in searchable)
-            if overlap:
-                scored.append((overlap, episode))
-        scored.sort(key=lambda pair: (-pair[0], pair[1].get("timestamp", "")), reverse=False)
+        for item in self._episodes:
+            haystack = " ".join(str(item.get(key, "")) for key in ("task", "tool", "status", "evidence", "message")).lower()
+            score = sum(1 for term in terms if term in haystack)
+            if score:
+                scored.append((score, item))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
         try:
-            count = max(1, min(int(limit), 20))
+            count = max(0, int(limit))
         except (TypeError, ValueError):
-            count = 5
+            count = 3
         return [dict(item) for _, item in scored[:count]]
 
-    def context(self, query, limit=4):
-        matches = self.search(query, limit=limit)
-        if not matches:
-            return "No relevant episodic experience found."
+    def context(self, query, limit=3):
+        results = self.search(query, limit=limit)
+        if not results:
+            return ""
         lines = [
-            "PAST TOOL EXPERIENCES (historical evidence, not a guarantee):"
+            "Historical tool outcomes are context only and do not prove the current outcome:"
         ]
-        for item in matches:
-            task = item.get("task") or "Unspecified task"
-            evidence = item.get("evidence") or item.get("outcome") or "No extra evidence recorded."
+        for item in results:
             lines.append(
-                f"- Task: {task}; tool: {item.get('tool')}; "
-                f"last status: {item.get('status')}; evidence: {evidence}"
+                f"- Task: {item.get('task', '')}; tool: {item.get('tool', '')}; "
+                f"status: {item.get('status', '')}; evidence: {item.get('evidence', '')}"
             )
-        lines.append(
-            "Use these episodes as hints only. Re-check current state and verify every new action; "
-            "a previous failure or success does not prove the current outcome."
-        )
         return "\n".join(lines)
 
     def clear(self):
+        previous = self._episodes
         self._episodes = []
-        return self._save()
+        if self._save():
+            return True
+        self._episodes = previous
+        return False
