@@ -756,7 +756,10 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
                     word = ocr_data['text'][i].strip()
                     if not word:
                         continue
-                    conf = int(ocr_data['conf'][i]) if ocr_data['conf'][i] != '-1' else 0
+                    try:
+                        conf = float(ocr_data['conf'][i])
+                    except (TypeError, ValueError):
+                        continue
                     if conf < 30:
                         continue
                     if text_lower in word.lower():

@@ -12,6 +12,7 @@ Verification results:
 """
 
 import json
+import logging
 import os
 import subprocess
 import re
@@ -558,11 +559,29 @@ class Verifier:
 
         # Action-specific checks
         if action == "clone":
-            url  = tool_input.get("url", "")
-            # Derive expected folder name
-            dest = url.rstrip("/").split("/")[-1].replace(".git", "")
-            # BUG 3: Check destination directory exists and contains .git
-            dest_path = os.path.join(os.getcwd(), "projects", dest)
+            url = str(tool_input.get("url", "") or "")
+            # Match GitTool's explicit destination when supplied.
+            dest = tool_input.get("dest")
+            if dest is None:
+                dest = url.rstrip("/").split("/")[-1]
+                if dest.lower().endswith(".git"):
+                    dest = dest[:-4]
+            dest = str(dest).strip()
+            if (not dest or dest in {".", ".."} or "/" in dest or "\\" in dest
+                    or os.path.basename(dest) != dest or dest.startswith("-")):
+                return VerificationResult(
+                    status="failed",
+                    evidence=f"Invalid clone destination: {dest!r}",
+                    message="git clone destination is not a safe workspace directory name.",
+                )
+            projects_root = os.path.realpath(os.path.join(os.getcwd(), "projects"))
+            dest_path = os.path.realpath(os.path.join(projects_root, dest))
+            if os.path.commonpath([projects_root, dest_path]) != projects_root:
+                return VerificationResult(
+                    status="failed",
+                    evidence=dest_path,
+                    message="git clone destination escapes the projects workspace.",
+                )
             if os.path.isdir(dest_path) and os.path.isdir(os.path.join(dest_path, ".git")):
                 return VerificationResult(
                     status="confirmed",
@@ -576,8 +595,7 @@ class Verifier:
             )
 
         if action == "commit":
-            # Look for commit hash pattern in output
-            import re
+            # Look for commit hash pattern in output; use the module-level import.
             if re.search(r"[a-f0-9]{7,}", tool_result):
                 return VerificationResult(
                     status="confirmed",

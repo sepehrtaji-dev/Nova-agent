@@ -12,7 +12,12 @@ from pathlib import Path
 
 
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|passwd|secret)\b\s*[:=]\s*[^\s,;]+"),
+    # Handle key/value forms and natural-language disclosures such as
+    # "my password is ..." before persisting episodic memory.
+    re.compile(
+        r"(?i)\b(?:my\s+)?(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|passwd|secret)\b"
+        r"\s*(?:(?:is|are)\s+|[:=]\s*)[^\s,;]+"
+    ),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
 )

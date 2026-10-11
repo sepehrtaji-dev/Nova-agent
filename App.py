@@ -114,7 +114,7 @@ class CodeBlock(QFrame):
         self.editor.setPlainText(code)
         self.editor.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.editor.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
 
         font = QFont("Cascadia Mono")
@@ -123,7 +123,7 @@ class CodeBlock(QFrame):
         font.setPointSize(10)
         self.editor.setFont(font)
 
-        line_count = max(1, code.count("\\n") + 1)
+        line_count = max(1, code.count("\n") + 1)
         line_height = max(18, font.pointSize() + 9)
         editor_height = min(480, max(54, line_count * line_height + 22))
         self.editor.setFixedHeight(editor_height)
