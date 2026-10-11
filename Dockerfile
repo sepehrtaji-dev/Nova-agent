@@ -23,7 +23,6 @@ COPY . /opt/nova
 RUN useradd --create-home --uid 10001 nova \
     && mkdir -p /workspace/projects /workspace/memory \
     && chown -R nova:nova /workspace \
-    && chown nova:nova /opt/nova/memory \
     && chmod 755 /opt/nova
 
 WORKDIR /workspace
