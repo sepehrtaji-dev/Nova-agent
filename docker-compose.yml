@@ -1,0 +1,30 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    # The Ollama API is only exposed on the private Compose network by default.
+    # Add a ports mapping only if you intentionally need host access.
+
+  nova:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      NOVA_MODEL: ${NOVA_MODEL:-qwen2.5:3b}
+      NOVA_NUM_CTX: ${NOVA_NUM_CTX:-8192}
+      NOVA_NUM_PREDICT: ${NOVA_NUM_PREDICT:-2048}
+    depends_on:
+      - ollama
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./projects:/workspace/projects
+      - nova-memory:/workspace/memory
+    # Run interactively with: docker compose run --rm nova
+
+volumes:
+  ollama-data:
+  nova-memory:
