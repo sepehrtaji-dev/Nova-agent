@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class VectorMemory:
     def __init__(self, path="memory/database/memories.json", dimensions=256):
         self.path = path
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         if not os.path.exists(self.path):
             self._write([])
         self.embedder = EmbeddingModel(dimensions=dimensions)
