@@ -99,7 +99,7 @@ class SelfKnowledge:
         state = self.snapshot(core)
 
         parameter_question = bool(re.search(
-            r"\bhow(?:\s+many)?\s+parameters?\b|"
+            r"\bhow many parameters (?:do you have|does your model have|are in your model)\b|"
             r"\bparameter count\b|\bnumber of parameters\b|"
             r"(?:مدلت چند پارامتر داره|مدل تو چند پارامتر داره|چند پارامتر داری|تعداد پارامترهای مدل)",
             text,
@@ -135,8 +135,7 @@ class SelfKnowledge:
         tools_question = bool(re.search(
             r"\b(?:what tools do you have|list your tools|what tools are available|"
             r"what are your capabilities|what can you do|what can i ask you to do|"
-            r"what can you help me with|tell me about your capabilities|"
-            r"can you (?:make|create|write|read|edit) (?:a |any )?files?)\b|"
+            r"what can you help me with|tell me about your capabilities)\b|"
             r"(?:چه ابزارهایی داری|چه کارهایی می.?تونی انجام بدی|قابلیت.?هات چیه)",
             text,
         ))
