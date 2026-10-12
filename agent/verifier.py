@@ -320,13 +320,15 @@ class Verifier:
         location = str(tool_input.get("location", "projects")).strip().lower()
 
         error_prefixes = (
-            "Filesystem error:",
-            "Permission denied:",
-            "File does not exist",
-            "Path is not a file",
-            "File is not a readable text file:",
+            "filesystem error:",
+            "permission denied:",
+            "file does not exist",
+            "path is not a file",
+            "file is not a readable text file:",
+            "file path is required",
         )
-        if any(prefix in tool_result for prefix in error_prefixes):
+        lowered_result = tool_result.casefold()
+        if any(prefix in lowered_result for prefix in error_prefixes):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
@@ -346,6 +348,37 @@ class Verifier:
                 status="failed",
                 evidence=f"os.path.isfile({actual_path!r}) = False",
                 message=f"File could not be confirmed on disk: {actual_path}",
+            )
+
+        # Existence alone does not prove the returned text is the file's content.
+        # Re-read independently and compare against the same truncation contract
+        # used by FileSystemTool.read_file.
+        try:
+            try:
+                with open(actual_path, "r", encoding="utf-8") as handle:
+                    expected_content = handle.read(50000)
+            except UnicodeDecodeError:
+                with open(actual_path, "r", encoding="latin-1") as handle:
+                    expected_content = handle.read(50000)
+        except (OSError, UnicodeError) as exc:
+            return VerificationResult(
+                status="unverifiable",
+                evidence=f"{actual_path}: {type(exc).__name__}: {exc}",
+                message="read_file result could not be independently checked.",
+            )
+
+        if len(expected_content) >= 50000:
+            expected_content += "\n\n[Truncated: showing first 50,000 characters]"
+
+        if tool_result != expected_content:
+            return VerificationResult(
+                status="failed",
+                evidence=(
+                    f"Path: {actual_path}\n"
+                    f"Expected chars: {len(expected_content)}; "
+                    f"returned chars: {len(tool_result)}"
+                ),
+                message="read_file output did not match the file content on disk.",
             )
 
         return VerificationResult(
