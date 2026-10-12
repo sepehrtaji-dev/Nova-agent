@@ -9,10 +9,24 @@ from agent.verifier import Verifier
 from memory.episodic import EpisodicMemory
 from model.ollama import OllamaBrain
 from tools.git import GitTool
+from tools.registry import ToolRegistry
 from tools.terminal import TerminalTool
 
 
 class AuditRegressionTests(unittest.TestCase):
+    def test_registry_exposes_callable_input_contract_to_planner(self):
+        def sample_tool(payload):
+            \"\"\"Input: {\\\"path\\\": \\\"file.txt\\\"}. Reads the named file.\"\"\"
+            return payload
+
+        registry = ToolRegistry()
+        registry.register(\"sample\", \"Read a file\", sample_tool)
+
+        descriptions = registry.get_descriptions()
+        self.assertIn(\"Input contract:\", descriptions)
+        self.assertIn(\"path\", descriptions)
+        self.assertIn(\"Reads the named file\", descriptions)
+
     def test_ollama_chat_response_model_is_supported(self):
         response = SimpleNamespace(message=SimpleNamespace(content="  hello Nova  "))
         with mock.patch("model.ollama.ollama.chat", return_value=response):
