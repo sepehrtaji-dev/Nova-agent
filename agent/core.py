@@ -1473,6 +1473,7 @@ If nothing reliable can be extracted:
         # Rejected decisions are not executions. Do not ask the model to repeat
         # the same invalid operation forever when workspace state has not changed.
         rejected_decisions = set()
+        consecutive_rejections = 0
         workspace_revision = 0
 
         self._status(
@@ -2058,13 +2059,19 @@ The file was NOT written.
                     str(validation_error),
                     workspace_revision,
                 )
-                if decision_signature in rejected_decisions:
+                consecutive_rejections += 1
+                if (
+                    decision_signature in rejected_decisions
+                    or consecutive_rejections >= 3
+                ):
                     last_tool_error = (
-                        "Repeated invalid tool decision; operation was not executed. "
+                        "Repeated or consecutive invalid tool decisions; operation "
+                        "was not executed. "
                         f"Validation error: {validation_error}"
                     )
                     tool_history.append(
-                        f"Repeated invalid tool decision stopped: {validation_error}"
+                        "Stopping after repeated invalid tool decisions: "
+                        f"{validation_error}"
                     )
                     self._status("Stopping repeated invalid tool decision...")
                     break
@@ -2090,6 +2097,8 @@ Nova must correct the invalid input rather than repeat it.
 
                 self._status("Invalid tool decision...")
                 continue
+
+            consecutive_rejections = 0
 
             tool_key = (
                 tool_name,
