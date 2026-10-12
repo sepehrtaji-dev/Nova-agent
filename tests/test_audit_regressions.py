@@ -16,11 +16,11 @@ from tools.terminal import TerminalTool
 class AuditRegressionTests(unittest.TestCase):
     def test_registry_exposes_callable_input_contract_to_planner(self):
         def sample_tool(payload):
-            \"\"\"Input: {\\\"path\\\": \\\"file.txt\\\"}. Reads the named file.\"\"\"
+            """Input: {"path": "file.txt"}. Reads the named file."""
             return payload
 
         registry = ToolRegistry()
-        registry.register(\"sample\", \"Read a file\", sample_tool)
+        registry.register("sample", "Read a file", sample_tool)
 
         descriptions = registry.get_descriptions()
         self.assertIn(\"Input contract:\", descriptions)
