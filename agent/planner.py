@@ -172,27 +172,36 @@ class Planner:
                 dropped += 1
                 continue
 
+            tool = step.get("tool")
+            raw_input = step.get("input")
+
+            # Every plan step is executable, so a description alone is not a
+            # valid step. Missing/unknown tools or non-object inputs must not
+            # leak into the execution loop as phantom pending actions.
+            if not isinstance(tool, str) or not tool.strip():
+                dropped += 1
+                continue
+
+            tool = tool.strip()
+            if self.tools is not None and not self.tools.exists(tool):
+                print(
+                    f"[PLANNER] Warning: step has unregistered tool '{tool}'."
+                )
+                dropped += 1
+                continue
+
+            if not isinstance(raw_input, dict):
+                dropped += 1
+                continue
+
             normalized_step = {
                 "id": index,
                 "description": description,
                 "status": "pending",
                 "result": None,
+                "tool": tool,
+                "input": raw_input,
             }
-
-            tool = step.get("tool")
-            raw_input = step.get("input")
-            if isinstance(tool, str) and tool.strip():
-                tool = tool.strip()
-                if self.tools is not None and self.tools.exists(tool):
-                    normalized_step["tool"] = tool
-                    if isinstance(raw_input, dict):
-                        normalized_step["input"] = raw_input
-                elif self.tools is not None:
-                    print(
-                        f"[PLANNER] Warning: step has unregistered "
-                        f"tool '{tool}'."
-                    )
-
             normalized.append(normalized_step)
 
         if dropped:
