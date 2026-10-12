@@ -214,7 +214,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(self.brain.calls, 1)
 
     def test_cplusplus_script_gets_cpp_filename(self):
-        planner = Planner(self.brain)
+        planner = Planner(self.brain, self.tools)
         plan = planner.create_plan(
             "write a c++ script printing hello"
         )
@@ -239,7 +239,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(self.brain.calls, 1)
 
     def test_explicit_file_read_gets_deterministic_read_step(self):
-        planner = Planner(self.brain)
+        planner = Planner(self.brain, self.tools)
         plan = planner.create_plan(
             "read hello.cpp in projects folder"
         )
@@ -258,10 +258,10 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(payload["path"], "hello.cpp")
         self.assertEqual(payload["location"], "projects")
 
-    def test_plan_selects_write_file_deterministically(self):
+    def test_structured_plan_executes_write_file_input(self):
         plan = (
             "Goal: create a model\n"
-            "1. [pending] Create the Python file test_model.py in projects"
+            '1. [pending] Create the Python file test_model.py in projects | TOOL=write_file | INPUT={"path":"test_model.py","location":"projects"}'
         )
         decision = self.router.decide(
             message="create a Python file called test_model.py in the projects folder",
@@ -279,7 +279,7 @@ class RouterTests(unittest.TestCase):
         plan = (
             "Goal: create two files\n"
             "1. [completed] Create first.py\n"
-            "2. [pending] Create the Python file second.py"
+            '2. [pending] Create the Python file second.py | TOOL=write_file | INPUT={"path":"second.py","location":"projects"}'
         )
         decision = self.router.decide(
             message="create first.py and second.py",
@@ -313,7 +313,7 @@ class RouterTests(unittest.TestCase):
     def test_model_cannot_override_a_planned_tool(self):
         plan = (
             "Goal: open Notepad\\n"
-            "1. [pending] desktop: open notepad"
+            '1. [pending] desktop: open notepad | TOOL=desktop | INPUT={"action":"open_app","app":"notepad"}'
         )
         decision = self.router.decide(
             message="open notepad",
@@ -347,7 +347,7 @@ class RouterTests(unittest.TestCase):
         decision = self.router.decide(
             message="move the mouse to 300, 250",
             task_type="computer",
-            plan="Goal: move the mouse\n1. [pending] desktop: move the mouse to 300, 250",
+            plan='Goal: move the mouse\n1. [pending] desktop: move the mouse to 300, 250 | TOOL=desktop | INPUT={"action":"move","x":300,"y":250}',
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
@@ -360,7 +360,7 @@ class RouterTests(unittest.TestCase):
         decision = self.router.decide(
             message='type "hello from nova"',
             task_type="computer",
-            plan='Goal: type text\n1. [pending] desktop: type "hello from nova"',
+            plan='Goal: type text\n1. [pending] desktop: type "hello from nova" | TOOL=desktop | INPUT={"action":"type","text":"hello from nova"}',
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
@@ -373,7 +373,7 @@ class RouterTests(unittest.TestCase):
         decision = self.router.decide(
             message="type hello here",
             task_type="computer",
-            plan="Goal: type hello here\n1. [pending] desktop: type hello here",
+            plan='Goal: type hello here\n1. [pending] desktop: type hello here | TOOL=desktop | INPUT={"action":"type","text":"hello"}',
             allowed_tools=["desktop"],
         )
         self.assertEqual(decision["tool"], "desktop")
@@ -435,7 +435,7 @@ class RouterTests(unittest.TestCase):
     def test_run_app_pending_plan_routes_to_open_app(self):
         plan = (
             "Goal: run an app\n"
-            "1. [pending] desktop: run firefox"
+            '1. [pending] desktop: run firefox | TOOL=desktop | INPUT={"action":"open_app","app":"firefox"}'
         )
         decision = self.router.decide(
             message="please run firefox",
@@ -467,7 +467,7 @@ class RouterTests(unittest.TestCase):
     def test_plan_preserves_filename_case(self):
         plan = (
             "Goal: create file\n"
-            "1. [pending] Create the Python file MyModel.py in projects"
+            '1. [pending] Create the Python file MyModel.py in projects | TOOL=write_file | INPUT={"path":"MyModel.py","location":"projects"}'
         )
         decision = self.router.decide(
             message="create a Python file called MyModel.py in the projects folder",
