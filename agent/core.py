@@ -1478,7 +1478,8 @@ If nothing reliable can be extracted:
 
         task_type = self.router.classify_task(
             message=message,
-            conversation=self._conversation_context(max_chars=8000)
+            conversation=self._conversation_context(max_chars=8000),
+            allowed_tools=self._allowed_tools(),
         )
 
         if task_type not in {
