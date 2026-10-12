@@ -1556,14 +1556,58 @@ If nothing reliable can be extracted:
             state["last_plan"] = plan
 
             if not isinstance(plan, dict) or not isinstance(plan.get("steps"), list) or not plan["steps"]:
-                # An empty plan is not an executable step. Previously we
-                # fabricated a pending placeholder with no tool/input, which
-                # sent an unplanned request to the router and could produce
-                # confusing failures or unintended actions.
-                response = (
-                    "I couldn't build a valid action plan, so I didn't execute "
-                    "any tools. Please restate the requested action more clearly."
+                # A malformed plan can mean either that the model failed to
+                # plan a real action or that the intent classifier mistakenly
+                # routed a conversational/capability question into the agent.
+                # Ask the model to distinguish these cases semantically;
+                # never infer the answer from keywords or execute a guessed step.
+                available = []
+                for name in self._allowed_tools():
+                    metadata = getattr(self.tools, "tools", {}).get(name, {})
+                    description = (
+                        metadata.get("description", "")
+                        if isinstance(metadata, dict)
+                        else ""
+                    )
+                    available.append(f"- {name}: {description}")
+                recovery_prompt = (
+                    "You are recovering from an invalid/empty action plan. "
+                    "Do not execute anything and do not invent tool results.\n"
+                    "Classify the user's original message as either:\n"
+                    '- "conversation": a question, capability inquiry, explanation '
+                    "request, or other message that does not ask for a real action now; "
+                    "provide a direct answer grounded only in the enabled tools below.\n"
+                    '- "action_failure": the user actually requested a real action, '
+                    "but no valid plan could be built; state clearly that nothing was executed.\n"
+                    'Return JSON only: {"kind":"conversation","answer":"..."} '
+                    'or {"kind":"action_failure","answer":"..."}\n\n'
+                    "ENABLED TOOLS:\n"
+                    + ("\n".join(available) or "No tools enabled.")
+                    + "\n\nORIGINAL USER MESSAGE:\n"
+                    + message
                 )
+                response = ""
+                try:
+                    recovery_raw = self.brain.generate(
+                        recovery_prompt,
+                        json_mode=True,
+                    )
+                    recovery = self.router._extract_json(recovery_raw)
+                    if isinstance(recovery, dict) and isinstance(recovery.get("answer"), str):
+                        kind = recovery.get("kind")
+                        answer = recovery["answer"].strip()
+                        if answer and kind == "conversation":
+                            response = answer
+                        elif answer and kind == "action_failure":
+                            response = answer
+                except Exception as exc:
+                    logging.warning("Empty-plan recovery failed: %s", exc)
+
+                if not response:
+                    response = (
+                        "I couldn't build a valid action plan, so I didn't execute "
+                        "any tools. Please restate the requested action more clearly."
+                    )
                 self._status("Done")
                 self.short_memory.add("assistant", response)
                 return response
