@@ -255,7 +255,7 @@ class WebSearchTool:
         return self._resolve_public_url(url)[0]
 
     def fetch(self, input_data):
-        """Fetch a public web page as bounded plain text, following safe redirects only."""
+        """Input object: {"url": "https://public.example/path"}. Fetches bounded readable text from a public HTTP/HTTPS page; private/local destinations are rejected."""
         if isinstance(input_data, dict):
             url = input_data.get("url", "")
         elif isinstance(input_data, str):
