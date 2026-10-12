@@ -1,3 +1,6 @@
+import inspect
+
+
 class ToolRegistry:
 
     def __init__(self):
@@ -65,10 +68,21 @@ class ToolRegistry:
         lines = []
 
         for name, data in self.tools.items():
+            description = str(data.get("description", "")).strip()
+            function = data.get("function")
+            contract = inspect.getdoc(function) if callable(function) else None
 
-            lines.append(
-                f"- {name}: "
-                f"{data['description']}"
-            )
+            if contract:
+                # Function documentation is the closest source of truth for the
+                # accepted input contract. Keep prompts bounded for local models.
+                contract = contract.strip()
+                if len(contract) > 1600:
+                    contract = contract[:1597].rstrip() + "..."
+                lines.append(
+                    f"- {name}: {description}\n"
+                    f"  Input contract: {contract}"
+                )
+            else:
+                lines.append(f"- {name}: {description}")
 
         return "\n".join(lines)
