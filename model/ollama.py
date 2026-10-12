@@ -79,9 +79,26 @@ class OllamaBrain:
                 print(f"[NOVA] Ollama retry error: {type(retry_error).__name__}: {retry_error}")
                 raise
 
-        content = response.get("message", {}).get("content", "")
+        # The Ollama Python client returns typed response objects in current
+        # releases, while older clients and test doubles may return dictionaries.
+        # Accept both shapes without assuming the response is subscriptable.
+        if isinstance(response, dict):
+            message = response.get("message", {})
+            content = (
+                message.get("content", "")
+                if isinstance(message, dict)
+                else getattr(message, "content", "")
+            )
+        else:
+            message = getattr(response, "message", None)
+            if isinstance(message, dict):
+                content = message.get("content", "")
+            else:
+                content = getattr(message, "content", "")
 
-        if not isinstance(content, str):
+        if content is None:
+            content = ""
+        elif not isinstance(content, str):
             content = str(content)
 
         return content.strip()
