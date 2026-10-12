@@ -782,40 +782,43 @@ Schema:
                     "result"
                 )
 
+            tool = step.get("tool")
+            raw_input = step.get("input")
+
+            # Replans may omit fields for an unchanged step. Reuse the prior
+            # validated tool/input only when the description matches an old step;
+            # never let an incomplete new step enter the executable plan.
+            if not isinstance(tool, str) or not tool.strip():
+                if old and isinstance(old.get("tool"), str):
+                    tool = old["tool"]
+                else:
+                    dropped += 1
+                    continue
+
+            tool = tool.strip()
+            if self.tools is not None and not self.tools.exists(tool):
+                print(
+                    f"[PLANNER] Warning: replanned step has unregistered "
+                    f"tool '{tool}'."
+                )
+                dropped += 1
+                continue
+
+            if not isinstance(raw_input, dict):
+                if old and old.get("tool") == tool and isinstance(old.get("input"), dict):
+                    raw_input = old["input"]
+                else:
+                    dropped += 1
+                    continue
+
             normalized_step = {
                 "id": index,
                 "description": description,
                 "status": status,
                 "result": result,
+                "tool": tool,
+                "input": raw_input,
             }
-
-            tool = step.get("tool")
-            raw_input = step.get("input")
-            if isinstance(tool, str) and tool.strip():
-                tool = tool.strip()
-                if (
-                    self.tools is not None
-                    and self.tools.exists(tool)
-                ):
-                    normalized_step["tool"] = tool
-                    if isinstance(raw_input, dict):
-                        normalized_step["input"] = raw_input
-                elif self.tools is not None:
-                    print(
-                        f"[PLANNER] Warning: step has unregistered "
-                        f"tool '{tool}'."
-                    )
-                    if old:
-                        if isinstance(old.get("tool"), str):
-                            normalized_step["tool"] = old["tool"]
-                        if isinstance(old.get("input"), dict):
-                            normalized_step["input"] = old["input"]
-                elif old:
-                    if isinstance(old.get("tool"), str):
-                        normalized_step["tool"] = old["tool"]
-                    if isinstance(old.get("input"), dict):
-                        normalized_step["input"] = old["input"]
-
             normalized.append(normalized_step)
 
         if dropped:
