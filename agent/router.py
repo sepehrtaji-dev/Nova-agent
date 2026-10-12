@@ -976,7 +976,7 @@ Available tools:
 
 Only the tools listed above are enabled for this request.
 
-IMPORTANT: If the user explicitly requested a web search and no successful web_search result exists, YOU MUST choose web_search.
+Choose the next tool based on the structured plan, enabled tool descriptions, and verified tool history. Do not force a tool solely because a particular word or phrase appears in the request.
 
 For web_search:
 {{"action":"tool","task_type":"computer","tool":"web_search","input":{{"query":"search query"}}}}
@@ -1529,8 +1529,6 @@ Return JSON only.
 
                     if pending_tool is not None and validated_function_call.get("tool") != pending_tool:
                         validated_function_call = None
-                    elif search_requested and validated_function_call.get("tool") != "web_search":
-                        validated_function_call = None
                     elif allowed_tools is not None and validated_function_call.get("tool") not in set(allowed_tools):
                         validated_function_call = None
                     else:
@@ -1595,9 +1593,6 @@ Return JSON only.
             if tool_decision and pending_tool is not None and tool_decision.get("tool") != pending_tool:
                 tool_decision = None
 
-            if tool_decision and search_requested and tool_decision.get("tool") != "web_search":
-                tool_decision = None
-
             if tool_decision:
 
                 # BUG 27: Empty allowed_tools list means no tools allowed
@@ -1632,8 +1627,6 @@ Return JSON only.
 
                 if validated_function_call:
                     if pending_tool is not None and validated_function_call.get("tool") != pending_tool:
-                        validated_function_call = None
-                    elif search_requested and validated_function_call.get("tool") != "web_search":
                         validated_function_call = None
                     elif allowed_tools is not None:
                         # BUG 27: Empty allowed_tools list means no tools allowed
