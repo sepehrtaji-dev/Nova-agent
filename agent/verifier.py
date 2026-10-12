@@ -320,15 +320,13 @@ class Verifier:
         location = str(tool_input.get("location", "projects")).strip().lower()
 
         error_prefixes = (
-            "filesystem error:",
-            "permission denied:",
-            "file does not exist",
-            "path is not a file",
-            "file is not a readable text file:",
-            "tool_execution_exception",
+            "Filesystem error:",
+            "Permission denied:",
+            "File does not exist",
+            "Path is not a file",
+            "File is not a readable text file:",
         )
-        normalized_result = str(tool_result or "").casefold()
-        if any(prefix in normalized_result for prefix in error_prefixes):
+        if any(prefix in tool_result for prefix in error_prefixes):
             return VerificationResult(
                 status="failed",
                 evidence=tool_result[:300],
