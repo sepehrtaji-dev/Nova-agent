@@ -774,7 +774,10 @@ class ToolRouter:
 
         allowed = set(allowed_tools) if allowed_tools is not None else None
         capabilities = []
-        for name, metadata in self.tools.tools.items():
+        registered_tools = getattr(self.tools, "tools", {}) or {}
+        if not isinstance(registered_tools, dict):
+            registered_tools = {}
+        for name, metadata in registered_tools.items():
             if allowed is not None and name not in allowed:
                 continue
             description = (
