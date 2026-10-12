@@ -139,7 +139,7 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(plan["steps"][0]["description"].startswith("web_search:"))
         self.assertTrue(plan["steps"][1]["description"].startswith("write_file:"))
 
-    def test_compound_desktop_request_uses_tool_aware_planner(self):
+    def test_planner_rejects_description_only_steps(self):
         brain = FakeBrain(
             '{"goal":"desktop task","steps":[{"description":"desktop: open notepad"},{"description":"desktop: type HELLO_NOVA_TEST"}]}'
         )
@@ -150,9 +150,28 @@ class RouterTests(unittest.TestCase):
             'open notepad and type "HELLO_NOVA_TEST" in it'
         )
 
-        self.assertEqual(len(plan["steps"]), 2)
+        self.assertEqual(plan["steps"], [])
         self.assertEqual(brain.calls, 1)
-        self.assertIn("desktop:", plan["steps"][0]["description"])
+
+    def test_planner_keeps_only_steps_with_registered_tool_and_object_input(self):
+        brain = FakeBrain(
+            '{"goal":"read a file","steps":['
+            '{"description":"missing tool"},'
+            '{"tool":"not_registered","input":{},"description":"unknown tool"},'
+            '{"tool":"read_file","input":"not-json","description":"bad input"},'
+            '{"tool":"read_file","input":{"path":"notes.txt","location":"projects"},'
+            '"description":"read notes.txt"}]}'
+        )
+        planner = Planner(brain, self.tools)
+
+        plan = planner.create_plan("read notes.txt")
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertEqual(plan["steps"][0]["tool"], "read_file")
+        self.assertEqual(
+            plan["steps"][0]["input"],
+            {"path": "notes.txt", "location": "projects"},
+        )
     def test_compound_notepad_request_gets_ordered_desktop_steps(self):
         planner = Planner(self.brain, self.tools)
         plan = planner.create_plan(
