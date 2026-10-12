@@ -767,16 +767,23 @@ class ToolRouter:
         logging.warning("Unknown tool encountered in validation: %s", tool_name)
         return False
 
-    def classify_task(self, message, conversation=""):
-        """Classify intent with the language model, not keyword/regex shortcuts.
-
-        Deterministic checks remain appropriate for validation and authorization,
-        but user intent should be interpreted from the full request and context.
-        If the model cannot provide a valid classification, fail closed to
-        conversation rather than accidentally initiating a computer action.
-        """
+    def classify_task(self, message, conversation="", allowed_tools=None):
+        """Classify intent from meaning and the capabilities actually enabled."""
         if not isinstance(message, str) or not message.strip():
             return "conversation"
+
+        allowed = set(allowed_tools) if allowed_tools is not None else None
+        capabilities = []
+        for name, metadata in self.tools.tools.items():
+            if allowed is not None and name not in allowed:
+                continue
+            description = (
+                str(metadata.get("description", "")).strip()
+                if isinstance(metadata, dict)
+                else ""
+            )
+            capabilities.append(f"- {name}: {description}")
+        capabilities_text = "\n".join(capabilities) or "No tools are currently enabled."
 
         prompt = f"""You are Nova's intent classifier.
 Determine whether the user's current message requires Nova to perform a real
@@ -784,10 +791,16 @@ action using an enabled tool, or whether it is a conversational/informational
 request that can be answered without a tool.
 
 Interpret the full meaning, including negation, hypotheticals, quotations,
-questions about how something works, and prior conversation. Mentioning a tool,
+questions about capabilities, and prior conversation. Mentioning a tool,
 app, file, terminal, web search, or computer action is NOT by itself a request
 to execute it. If the user asks how to do something, explain it unless they
-clearly ask Nova to do it. If intent is genuinely ambiguous, choose conversation.
+clearly ask Nova to do it. A direct request to inspect, create, modify, search,
+open, or otherwise operate on a real resource is an action when a listed tool
+supports that operation. If intent is genuinely ambiguous, choose conversation.
+Do not classify an action as executable if no enabled tool supports it.
+
+ENABLED TOOL CAPABILITIES:
+{capabilities_text}
 
 Return only JSON with exactly one field:
 {{"task_type":"computer"}}
@@ -802,19 +815,26 @@ CURRENT USER MESSAGE:
 """
         for attempt in range(2):
             try:
+                retry_prompt = (
+                    "Classify the user's intent using the enabled tool "
+                    "capabilities and conversation context below. Return only "
+                    'JSON: {"task_type":"computer"} or '
+                    '{"task_type":"conversation"}. Do not infer execution intent '
+                    "from mere mentions, hypotheticals, or questions.\n"
+                    f"Enabled capabilities:\n{capabilities_text}\n"
+                    f"Conversation: {conversation[-3000:] if isinstance(conversation, str) else ''}\n"
+                    f"Request: {message}"
+                )
                 raw = self.brain.generate(
-                    prompt if attempt == 0 else (
-                        "Classify the intent of this request. Return only JSON: "
-                        '{"task_type":"computer"} or '
-                        '{"task_type":"conversation"}. Do not infer execution '
-                        "intent from mere mentions, hypotheticals, or questions.\n"
-                        f"Conversation: {conversation[-3000:] if isinstance(conversation, str) else ''}\n"
-                        f"Request: {message}"
-                    ),
+                    prompt if attempt == 0 else retry_prompt,
                     json_mode=True,
                 )
             except Exception as exc:
-                logging.warning("Intent classification attempt %s failed: %s", attempt + 1, exc)
+                logging.warning(
+                    "Intent classification attempt %s failed: %s",
+                    attempt + 1,
+                    exc,
+                )
                 continue
 
             data = self._extract_json(raw)
