@@ -1548,293 +1548,52 @@ Return JSON only.
         return value if isinstance(value, dict) else None
 
     def _deterministic_plan_decision(self, message, task_type, plan, tool_history, allowed_tools=None):
-        """Return a tool decision for an unambiguous pending plan step.
+        """Execute only a complete, structured step already produced by Planner.
 
-        Tool selection for concrete computer actions must not depend entirely on
-        a second LLM decision. The planner already produced the next action;
-        use it deterministically and let the LLM generate only the file content.
+        The router must not reconstruct tool intent or arguments from natural-
+        language fragments. If a plan has selected a registered tool but lacks
+        structured arguments, let the model propose the arguments using the
+        tool description; normal validation and permission checks still apply.
         """
         if task_type != "computer" or not isinstance(plan, str):
             return None
 
-        # BUG 27: Empty allowed_tools list should mean no tools allowed
-        if allowed_tools is None:
-            allowed = set(self.tools.tools.keys())
-        else:
-            allowed = set(allowed_tools)
+        allowed = (
+            set(self.tools.tools.keys())
+            if allowed_tools is None
+            else set(allowed_tools)
+        )
         if not allowed:
             return None
 
-        history = str(tool_history or "")
-        pending = ""
-        for line in plan.splitlines():
-            if "[pending]" in line.lower():
-                pending = line.strip()
-                break
-
+        pending = next(
+            (
+                line.strip()
+                for line in plan.splitlines()
+                if "[pending]" in line.lower()
+            ),
+            None,
+        )
         if not pending:
             return None
 
-        pending_lower = pending.lower()
-
-        pending_action = re.search(
-            r":\s*(.+)$",
-            pending,
-            flags=re.IGNORECASE,
-        )
-        action_text = (
-            pending_action.group(1).strip()
-            if pending_action
-            else pending
-        )
-        action_lower = action_text.lower()
-        combined = f"{pending} {message or ''}".strip()
-
         planned_tool = self._pending_planned_tool(pending)
-        if planned_tool is not None and planned_tool not in allowed:
+        if not planned_tool or planned_tool not in allowed:
             return None
 
         planned_input = self._pending_plan_input(pending)
-        if planned_tool is not None and isinstance(planned_input, dict):
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": planned_tool,
-                "input": json.dumps(
-                    planned_input,
-                    ensure_ascii=False,
-                ),
-            }
+        if not isinstance(planned_input, dict):
+            return None
 
-        planned_tool = self._pending_planned_tool(pending)
-        if planned_tool in allowed:
-            tool_meta = getattr(self.tools, "tools", {}).get(planned_tool, {})
-            tool_description = (
-                str(tool_meta.get("description", "")).lower()
-                if isinstance(tool_meta, dict)
-                else ""
-            )
+        decision = {
+            "action": "tool",
+            "task_type": "computer",
+            "tool": planned_tool,
+            "input": json.dumps(planned_input, ensure_ascii=False),
+        }
+        self._remember_file_generation(decision)
+        return decision
 
-        # A text-only legacy plan still needs an execution adapter. This does
-        # not infer intent from the user's message: it translates only the
-        # already-selected pending desktop step and remains subject to the
-        # allowed-tools check above.
-        if planned_tool == "desktop" and "desktop" in allowed:
-            desktop_decision = self._force_desktop_decision(action_text)
-            if desktop_decision and desktop_decision.get("tool") == "desktop":
-                return desktop_decision
-        write_words = ("file", "script", "program", "source", "code")
-        write_intent = (
-            "write_file" in pending_lower
-            or ("write" in pending_lower and any(word in pending_lower for word in write_words))
-            or ("create" in pending_lower and any(word in pending_lower for word in write_words))
-            or ("save" in pending_lower and any(word in pending_lower for word in write_words))
-            or ("generate" in pending_lower and any(word in pending_lower for word in write_words))
-            or ("make" in pending_lower and any(word in pending_lower for word in write_words))
-        )
-        if write_intent and "write_file" in allowed:
-            path = None
-            # Prefer an explicit filename from the planner, preserving case.
-            path = self._extract_filename(pending) or self._extract_filename(str(message or ""))
-
-
-            # Otherwise derive a stable filename from the user's request.
-            if not path:
-                text = str(message or "").lower()
-                if "c++" in text or "c plus plus" in text or "cpp" in text:
-                    path = "hello.cpp"
-                elif "python" in text:
-                    path = "script.py"
-                elif "javascript" in text:
-                    path = "script.js"
-                elif "typescript" in text:
-                    path = "script.ts"
-                elif "rust" in text:
-                    path = "script.rs"
-                elif "java" in text:
-                    path = "Main.java"
-                elif "golang" in text or re.search(r"\bgo\b", text):
-                    path = "script.go"
-                elif any(x in text for x in ("deep learning", "deeplearning", "neural network", "pytorch", "tensorflow")):
-                    path = "deep_learning_model.py"
-                elif "model" in text:
-                    path = "model.py"
-                else:
-                    path = "generated_code.txt"
-
-            # BUG 28: Sanitize write_file path to prevent directory traversal
-            if path:
-                # Normalize path separators and remove any parent directory references
-                path = path.replace("\\", "/")
-                # Split into parts and remove ".." and "." segments
-                parts = [p for p in path.split("/") if p not in ("..", ".", "")]
-                path = "/".join(parts)
-                # Ensure no leading slash (prevent absolute paths)
-                path = path.lstrip("/")
-
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": "write_file",
-                "input": json.dumps({
-                    "path": path,
-                    "location": "projects"
-                }, ensure_ascii=False)
-            }
-
-        filename = self._extract_filename(
-            f"{pending} {message or ''}"
-        )
-
-        if planned_tool == "find_files" and "file" in tool_description:
-            combined = f"{pending} {message or ''}"
-
-            age_match = re.search(
-                r"\b(?:last|past)\s+(\d+)\s*(?:hours?|hrs?)\b",
-                combined,
-                flags=re.IGNORECASE,
-            )
-            created_match = re.search(
-                r"\b(?:created|made|created\s+for\s+me)\b",
-                combined,
-                flags=re.IGNORECASE,
-            )
-            modified_match = re.search(
-                r"\b(?:modified|changed|updated)\b",
-                combined,
-                flags=re.IGNORECASE,
-            )
-
-            payload = {
-                "path": ".",
-                "location": (
-                    "desktop"
-                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
-                    else "projects"
-                ),
-                "recursive": True,
-            }
-
-            filename = self._extract_filename(combined)
-            if filename:
-                payload["pattern"] = filename
-            if age_match:
-                hours = int(age_match.group(1))
-                if created_match:
-                    payload["created_within_hours"] = hours
-                elif modified_match:
-                    payload["modified_within_hours"] = hours
-
-            return {
-                "action": "tool",
-                "task_type": "computer",
-                "tool": planned_tool,
-                "input": json.dumps(payload, ensure_ascii=False),
-            }
-
-        if planned_tool is not None:
-            combined = f"{pending} {message or ''}"
-
-            if (
-                "file" in tool_description
-                and re.search(r"\bread\b", action_lower)
-                and filename
-            ):
-                location = (
-                    "desktop"
-                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
-                    else "projects"
-                )
-                return {
-                    "action": "tool",
-                    "task_type": "computer",
-                    "tool": planned_tool,
-                    "input": json.dumps(
-                        {"path": filename, "location": location},
-                        ensure_ascii=False,
-                    ),
-                }
-
-            if (
-                "file" in tool_description
-                and re.search(r"\blist\b", action_lower)
-            ):
-                location = (
-                    "desktop"
-                    if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
-                    else "projects"
-                )
-                return {
-                    "action": "tool",
-                    "task_type": "computer",
-                    "tool": planned_tool,
-                    "input": json.dumps(
-                        {"path": ".", "location": location},
-                        ensure_ascii=False,
-                    ),
-                }
-
-            if (
-                "directory" in tool_description
-                and re.search(r"\b(?:create|make)\b", action_lower)
-            ):
-                folder_match = re.search(
-                    r"(?:directory|folder)\s+(?:called|named)?\s*([A-Za-z0-9_.-]+)",
-                    combined,
-                    re.IGNORECASE,
-                )
-                if folder_match:
-                    location = (
-                        "desktop"
-                        if re.search(r"\bdesktop\b", combined, re.IGNORECASE)
-                        else "projects"
-                    )
-                    return {
-                        "action": "tool",
-                        "task_type": "computer",
-                        "tool": planned_tool,
-                        "input": json.dumps(
-                            {"path": folder_match.group(1), "location": location},
-                            ensure_ascii=False,
-                        ),
-                    }
-
-        if planned_tool is not None and "web" in tool_description and "search" in tool_description:
-            query = re.sub(
-                r'^\s*(?:go\s+and\s+)?(?:search|look\s+up)(?:\s+(?:the\s+web|the\s+internet|online))?\s*(?:for|about)?\s*',
-                '',
-                str(message or '').strip(),
-                flags=re.IGNORECASE,
-            ).strip()
-            if query:
-                return {
-                    "action": "tool",
-                    "task_type": "computer",
-                    "tool": planned_tool,
-                    "input": json.dumps({"query": query}, ensure_ascii=False),
-                }
-
-        if planned_tool is not None and "terminal" in tool_description and re.search(
-            r'\b(?:run|execute)\b',
-            action_lower,
-        ):
-            match = re.search(
-                r'(?:run|execute)\s+(?:the\s+)?(?:command|script)?\s*["\'](.+?)["\']',
-                str(message or '').strip(),
-                flags=re.IGNORECASE,
-            )
-            if match:
-                return {
-                    "action": "tool",
-                    "task_type": "computer",
-                    "tool": planned_tool,
-                    "input": json.dumps(
-                        {"command": match.group(1).strip(), "location": "projects"},
-                        ensure_ascii=False,
-                    ),
-                }
-
-        return None
     _MAX_RETRIES = 3
 
     def decide(
