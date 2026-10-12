@@ -93,6 +93,7 @@ class GitHubTool:
         raise ValueError("Unsupported GitHub action.")
 
     def run(self, input_data):
+        """Input object: {\"action\": action, \"repo\": \"owner/name\", \"number\": 1, \"state\": \"open\", \"limit\": 10, \"query\": \"search terms\"}. Actions: repo_view, issue_list, issue_view, pr_list, pr_view, run_list, release_list, code_search. Read-only; number/query are required for issue_view/pr_view/code_search as applicable."""
         data = self._parse_input(input_data)
         try:
             args = self._build_args(data)
