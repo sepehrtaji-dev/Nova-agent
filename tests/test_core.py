@@ -281,6 +281,32 @@ class CoreTests(unittest.TestCase):
         })()
         core.access = {"web": False, "git": True, "pc": True}
         self.assertEqual(core._allowed_tools(), ["custom_tool", "git_tool"])
+    def test_generic_capability_question_uses_model_and_enabled_tools(self):
+        class SemanticBrain:
+            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
+                return '{"kind":"capability_question","tools":["web_search"],"answer":"Yes."}'
+
+        core = NovaCore.__new__(NovaCore)
+        core.brain = SemanticBrain()
+        core.access = {"web": True, "git": True, "pc": True}
+        core.tools = FakeTools()
+
+        self.assertEqual(core._direct_capability_answer("can you search"), "Yes.")
+
+    def test_capability_resolver_does_not_intercept_an_explicit_action_request(self):
+        class SemanticBrain:
+            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
+                return '{"kind":"action_request"}'
+
+        core = NovaCore.__new__(NovaCore)
+        core.brain = SemanticBrain()
+        core.access = {"web": True, "git": True, "pc": True}
+        core.tools = FakeTools()
+
+        self.assertIsNone(
+            core._direct_capability_answer("can you search the web for Python 3.14 release notes?")
+        )
+
     def test_capability_question_reports_real_read_access(self):
         core = NovaCore.__new__(NovaCore)
         core.access = {"web": True, "git": True, "pc": True}
