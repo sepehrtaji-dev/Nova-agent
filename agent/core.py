@@ -1607,9 +1607,40 @@ If nothing reliable can be extracted:
                     logging.warning("Empty-plan recovery failed: %s", exc)
 
                 if not response:
+                    # Small local models sometimes fail the recovery JSON schema.
+                    # A bounded plain-text fallback still answers capability
+                    # questions while explicitly forbidding claims of execution.
+                    try:
+                        fallback_prompt = (
+                            "Respond directly to the user's original message.\n"
+                            "Use only the enabled tool registry below to describe Nova's capabilities.\n"
+                            "If the message asks whether a capability is available, answer that question plainly.\n"
+                            "If it requests an action that could not be planned, say that no action was executed "
+                            "and ask for only the clarification needed.\n"
+                            "Never claim a file was created, a search was run, or any action completed.\n"
+                            "Do not mention internal classifiers, JSON, planners, or model reasoning.\n\n"
+                            "ENABLED TOOLS:\n"
+                            + ("\n".join(available) or "No tools enabled.")
+                            + "\n\nUSER MESSAGE:\n"
+                            + message
+                        )
+                        fallback = self.brain.generate(
+                            fallback_prompt,
+                            system_prompt=(
+                                "You are Nova, a truthful local assistant. "
+                                "Answer directly, ground capability claims in the listed tools, "
+                                "and never claim an unexecuted action happened."
+                            ),
+                        )
+                        if isinstance(fallback, str) and fallback.strip():
+                            response = fallback.strip()
+                    except Exception as exc:
+                        logging.warning("Plain-text plan recovery failed: %s", exc)
+
+                if not response:
                     response = (
-                        "I couldn't build a valid action plan, so I didn't execute "
-                        "any tools. Please restate the requested action more clearly."
+                        "I couldn't safely plan that request, so no tools were executed. "
+                        "Please clarify what action you want me to perform."
                     )
                 self._status("Done")
                 self.short_memory.add("assistant", response)
