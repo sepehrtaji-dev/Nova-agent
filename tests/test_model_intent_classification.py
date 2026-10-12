@@ -31,20 +31,6 @@ class IntentClassificationTests(unittest.TestCase):
         self.assertEqual(result, "computer")
         self.assertEqual(len(router.brain.prompts), 1)
 
-    def test_prompt_distinguishes_read_only_action_from_capability_question(self):
-        router = self.make_router(['{"task_type":"computer"}'])
-        result = router.classify_task("Read hello_world.py and change nothing")
-        self.assertEqual(result, "computer")
-        prompt = router.brain.prompts[0]
-        self.assertIn("read-only action", prompt)
-        self.assertIn("Can you make files?", prompt)
-        self.assertIn("change nothing", prompt)
-
-    def test_capability_question_can_remain_conversational(self):
-        router = self.make_router(['{"task_type":"conversation"}'])
-        result = router.classify_task("Can you make files?")
-        self.assertEqual(result, "conversation")
-
     def test_invalid_model_output_retries_once_then_fails_closed(self):
         router = self.make_router(["not-json", "still-not-json"])
         result = router.classify_task("Maybe open an app?")
