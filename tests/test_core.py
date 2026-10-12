@@ -491,7 +491,7 @@ class CoreTests(unittest.TestCase):
         core.max_steps = 12
         core.access = {"web": True, "git": True, "pc": True}
 
-        response = core.ask("can you search")
+        response = core.ask("which tools are available?")
 
         self.assertIn("search the web", response.lower())
         self.assertEqual(core.tools.calls, [])
