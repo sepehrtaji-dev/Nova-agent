@@ -44,6 +44,15 @@ class TestVerifier(unittest.TestCase):
 
             self.assertTrue(verification.confirmed())
 
+    def test_read_file_rejects_case_insensitive_filesystem_errors(self):
+        verification = self.verifier.verify(
+            "read_file",
+            {"path": "missing.txt", "location": "projects"},
+            "FILESYSTEM ERROR: permission denied",
+        )
+        self.assertEqual(verification.status, "failed")
+        self.assertIn("read_file failed", verification.message)
+
     def test_edit_file_cannot_confirm_missing_target(self):
         result = (
             "FILE_EDITED\n"
