@@ -167,8 +167,8 @@ class RouterTests(unittest.TestCase):
     def test_pending_desktop_step_is_routed_to_desktop_tool(self):
         plan = (
             'Goal: notepad task\n'
-            '1. [completed] desktop: open notepad\n'
-            '2. [pending] desktop: write "HELLO_NOVA_TEST" in it'
+            '1. [completed] desktop: open notepad | TOOL=desktop | INPUT={"action":"open_app","app":"notepad"}\n'
+            '2. [pending] desktop: write "HELLO_NOVA_TEST" in it | TOOL=desktop | INPUT={"action":"type","text":"HELLO_NOVA_TEST"}'
         )
         decision = self.router.decide(
             message='open notepad and write "HELLO_NOVA_TEST" in it',
