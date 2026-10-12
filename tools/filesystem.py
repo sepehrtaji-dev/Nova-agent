@@ -185,6 +185,7 @@ class FileSystemTool:
     # ── list_files ────────────────────────────────────────────────────────────
 
     def list_files(self, input_data="."):
+        """Input: {\"path\": \".\", \"location\": \"projects\"|\"desktop\"}. Lists one directory; path defaults to the selected workspace root."""
         try:
             path, location, _ = self._parse_input(input_data, default_path=".")
             full_path = self._resolve_path(path, location)
@@ -220,7 +221,7 @@ class FileSystemTool:
     # ── find_files ─────────────────────────────────────────────────────────────
 
     def find_files(self, input_data):
-        """Find files recursively with optional name/time filters."""
+        """Input object: {\"path\": \".\", \"location\": \"projects\"|\"desktop\", \"pattern\": \"*.py\", \"recursive\": true, \"created_within_hours\": 24, \"modified_within_hours\": 24}. All filters except path/location are optional."""
         try:
             if isinstance(input_data, str):
                 data = json.loads(input_data)
@@ -309,6 +310,7 @@ class FileSystemTool:
     # ── read_file ─────────────────────────────────────────────────────────────
 
     def read_file(self, input_data):
+        """Input: {\"path\": \"relative/or/absolute/file.txt\", \"location\": \"projects\"|\"desktop\"|\"system\"}. Reads text only and returns at most 50,000 characters."""
         try:
             path, location, _ = self._parse_input(input_data)
 
@@ -350,6 +352,7 @@ class FileSystemTool:
     # ── write_file ────────────────────────────────────────────────────────────
 
     def write_file(self, input_data):
+        """Input: {\"path\": \"file.py\", \"location\": \"projects\"|\"desktop\"|\"system\", \"content\": \"complete file contents\"}. Content is required; do not omit it."""
         try:
             path, location, data = self._parse_input(input_data)
 
@@ -504,6 +507,7 @@ class FileSystemTool:
     # ── create_directory ──────────────────────────────────────────────────────
 
     def create_directory(self, input_data):
+        """Input: {\"path\": \"new_folder\", \"location\": \"projects\"|\"desktop\"|\"system\"}. Creates the requested directory."""
         try:
             if isinstance(input_data, str):
                 try:
