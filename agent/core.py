@@ -1470,6 +1470,9 @@ If nothing reliable can be extracted:
 
         tool_history = []
         used_tools = set()
+        # Rejected decisions are not executions. Do not ask the model to repeat
+        # the same invalid operation forever when workspace state has not changed.
+        rejected_decisions = set()
         workspace_revision = 0
 
         self._status(
@@ -2015,7 +2018,27 @@ The file was NOT written.
             )
 
             if not valid:
+                # A repeated identical rejection cannot become valid without a
+                # changed input or workspace. Let Nova recover once, then stop
+                # instead of emitting the same invalid decision for all 12 steps.
+                decision_signature = (
+                    tool_name,
+                    tool_input.strip(),
+                    str(validation_error),
+                    workspace_revision,
+                )
+                if decision_signature in rejected_decisions:
+                    last_tool_error = (
+                        "Repeated invalid tool decision; operation was not executed. "
+                        f"Validation error: {validation_error}"
+                    )
+                    tool_history.append(
+                        f"Repeated invalid tool decision stopped: {validation_error}"
+                    )
+                    self._status("Stopping repeated invalid tool decision...")
+                    break
 
+                rejected_decisions.add(decision_signature)
                 tool_history.append(
                     f"""
 Tool: {tool_name}
@@ -2030,14 +2053,11 @@ Validation rejected this operation:
 
 The tool was NOT executed.
 
-Nova must choose another useful action.
+Nova must correct the invalid input rather than repeat it.
 """
                 )
 
-                self._status(
-                    "Invalid tool decision..."
-                )
-
+                self._status("Invalid tool decision...")
                 continue
 
             tool_key = (
@@ -2292,12 +2312,18 @@ Nova must choose another useful action.
                     f"Last tool result:\n"
                     f"{last_tool_error}"
                 )
-            elif tool_history:
+            elif used_tools:
                 response = (
                     "I couldn't verify full completion "
                     "of the requested computer operation. "
-                    "Some tool actions ran, but the plan "
-                    "was not fully completed."
+                    "One or more tool operations were attempted, "
+                    "but the plan was not fully completed."
+                )
+            elif tool_history:
+                response = (
+                    "I couldn't perform the requested computer operation. "
+                    "The proposed tool decisions were rejected before execution, "
+                    "so no tool operation was run."
                 )
             else:
                 response = (
