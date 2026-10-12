@@ -1554,18 +1554,18 @@ If nothing reliable can be extracted:
                 self.execution_state = state
             state["last_plan"] = plan
 
-            if not plan.get("steps"):
-                plan = {
-                    "goal": message,
-                    "steps": [
-                        {
-                            "id": 1,
-                            "description": message,
-                            "status": "pending",
-                            "result": None
-                        }
-                    ]
-                }
+            if not isinstance(plan, dict) or not isinstance(plan.get("steps"), list) or not plan["steps"]:
+                # An empty plan is not an executable step. Previously we
+                # fabricated a pending placeholder with no tool/input, which
+                # sent an unplanned request to the router and could produce
+                # confusing failures or unintended actions.
+                response = (
+                    "I couldn't build a valid action plan, so I didn't execute "
+                    "any tools. Please restate the requested action more clearly."
+                )
+                self._status("Done")
+                self.short_memory.add("assistant", response)
+                return response
 
             self._status(
                 "Plan ready..."

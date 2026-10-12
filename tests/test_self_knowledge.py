@@ -57,10 +57,19 @@ class SelfKnowledgeTests(unittest.TestCase):
         self.assertIn("3.00B", answer)
         self.assertIn("not a count of parameters in Nova's Python agent code", answer)
 
+        with patch("agent.self_knowledge.inspect_model", return_value=metadata):
+            answer = self.knowledge.answer("How parameters do you have?", self.core)
+        self.assertIn("3.00B", answer)
+
         unavailable = dict(metadata, status="unreachable", detail="Ollama is unreachable.")
         with patch("agent.self_knowledge.inspect_model", return_value=unavailable):
             answer = self.knowledge.answer("مدلت چند پارامتر داره", self.core)
         self.assertIn("will not guess", answer)
+
+    def test_file_capability_question_uses_runtime_tool_inventory(self):
+        answer = self.knowledge.answer("Can you make files?", self.core)
+        self.assertIn("read file", answer)
+        self.assertIn("Tool availability does not guarantee", answer)
 
     def test_tool_answer_distinguishes_enabled_and_disabled(self):
         answer = self.knowledge.answer("What tools do you have?", self.core)

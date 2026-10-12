@@ -993,6 +993,16 @@ app, file, terminal, web search, or computer action is NOT by itself a request
 to execute it. If the user asks how to do something, explain it unless they
 clearly ask Nova to do it. If intent is genuinely ambiguous, choose conversation.
 
+Distinguish a request to perform an action from a question about capability:
+- "Read hello_world.py and change nothing" is computer: reading is a real,
+  read-only action; "change nothing" forbids edits, not reading.
+- "Can you make files?" is conversation: it asks about capability, not creation.
+- "How do I create a file?" is conversation: explain the steps, do not create it.
+- "Create hello.txt containing hello" is computer: it explicitly requests an action.
+Do not treat every imperative-looking phrase as an action if the full message
+is asking for advice; do not treat read-only actions as conversation merely
+because the user forbids modification.
+
 Return only JSON with exactly one field:
 {{"task_type":"computer"}}
 or
@@ -1008,10 +1018,14 @@ CURRENT USER MESSAGE:
             try:
                 raw = self.brain.generate(
                     prompt if attempt == 0 else (
-                        "Classify the intent of this request. Return only JSON: "
+                        "Classify the user's intent. Return only JSON: "
                         '{"task_type":"computer"} or '
-                        '{"task_type":"conversation"}. Do not infer execution '
-                        "intent from mere mentions, hypotheticals, or questions.\n"
+                        '{"task_type":"conversation"}. A request to read, inspect, '
+                        "list, or search an actual resource is a computer action even "
+                        "when the user says not to modify it. A capability question "
+                        "such as 'Can you make files?' and advice questions such as "
+                        "'How do I create a file?' are conversation. Do not infer "
+                        "execution from mere mentions or hypotheticals.\n"
                         f"Conversation: {conversation[-3000:] if isinstance(conversation, str) else ''}\n"
                         f"Request: {message}"
                     ),
