@@ -153,6 +153,7 @@ class TerminalTool:
         return command.strip(), location.strip(), stdin_data
 
     def run(self, input_data):
+        """Input object: {\"command\": \"program and arguments\", \"location\": \"projects\"|\"desktop\", \"input\": \"optional stdin\"}. Command is required; shell wrappers are restricted."""
         command, location, stdin_data = self._parse_input(
             input_data
         )
