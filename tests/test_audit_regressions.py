@@ -23,9 +23,9 @@ class AuditRegressionTests(unittest.TestCase):
         registry.register("sample", "Read a file", sample_tool)
 
         descriptions = registry.get_descriptions()
-        self.assertIn(\"Input contract:\", descriptions)
+        self.assertIn("Input contract:", descriptions)
         self.assertIn(\"path\", descriptions)
-        self.assertIn(\"Reads the named file\", descriptions)
+        self.assertIn("Reads the named file", descriptions)
 
     def test_ollama_chat_response_model_is_supported(self):
         response = SimpleNamespace(message=SimpleNamespace(content="  hello Nova  "))
