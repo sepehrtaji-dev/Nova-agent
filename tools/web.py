@@ -54,6 +54,7 @@ class WebSearchTool:
         return text
 
     def run(self, input_data):
+        """Input object: {\"query\": \"search terms\"}. Searches the public web; query must be non-empty."""
         query = self._parse_input(input_data)
 
         if not query:
