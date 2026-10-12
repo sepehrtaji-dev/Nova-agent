@@ -2336,7 +2336,13 @@ Nova must choose another useful action.
             # planner is the source of truth for multi-step computer work.
             self._status("Preparing final answer...")
 
-            if last_tool_error:
+            if last_tool_error and not used_tools:
+                response = (
+                    "I couldn't perform the requested computer operation. "
+                    "No tool operation was executed successfully.\n\n"
+                    f"Reason: {last_tool_error}"
+                )
+            elif last_tool_error:
                 response = (
                     "I couldn't complete the "
                     "requested computer operation.\n\n"
