@@ -221,7 +221,7 @@ class FileSystemTool:
     # ── find_files ─────────────────────────────────────────────────────────────
 
     def find_files(self, input_data):
-        """Input object: {\"path\": \".\", \"location\": \"projects\"|\"desktop\", \"pattern\": \"*.py\", \"recursive\": true, \"created_within_hours\": 24, \"modified_within_hours\": 24}. All filters except path/location are optional."""
+        """Input object: {\"path\": \".\", \"location\": \"projects\"|\"desktop\"|\"system\", \"pattern\": \"*.py\", \"recursive\": true, \"created_within_hours\": 24, \"modified_within_hours\": 24}. All filters except path/location are optional; system paths must be absolute."""
         try:
             if isinstance(input_data, str):
                 data = json.loads(input_data)
