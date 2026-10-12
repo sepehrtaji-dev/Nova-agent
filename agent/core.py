@@ -2348,7 +2348,7 @@ Nova must choose another useful action.
             if last_tool_error and not used_tools:
                 response = (
                     "I couldn't perform the requested computer operation. "
-                    "No tool operation was executed successfully.\n\n"
+                    "No tool operation was run.\n\n"
                     f"Reason: {last_tool_error}"
                 )
             elif last_tool_error:
