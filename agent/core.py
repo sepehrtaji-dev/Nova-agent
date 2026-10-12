@@ -1352,37 +1352,42 @@ If nothing reliable can be extracted:
             + "\n\nUSER MESSAGE:\n"
             + text
         )
+        unclear = (
+            "I couldn't reliably determine whether you're asking about a capability "
+            "or asking me to act. I haven't run anything—do you want me to perform "
+            "the action?"
+        )
         try:
             raw = self.brain.generate(prompt, json_mode=True)
             data = self._extract_json(raw)
         except Exception as exc:
             logging.debug("Capability intent resolution failed: %s", exc)
-            return None
+            return unclear
 
         if not isinstance(data, dict):
-            return None
+            return unclear
 
         kind = data.get("kind")
         if kind == "action_request":
             return None
         if kind != "capability_question":
-            return None
+            return unclear
 
         selected = data.get("tools", [])
         if not isinstance(selected, list) or any(
             not isinstance(name, str) or name not in allowed
             for name in selected
         ):
-            return None
+            return unclear
 
         answer = data.get("answer")
         if not isinstance(answer, str) or not answer.strip():
-            return None
+            return unclear
         answer = answer.strip()
         if answer.casefold().startswith("yes") and not selected:
-            return None
+            return unclear
         if answer.casefold().startswith("no") and selected:
-            return None
+            return unclear
         return answer
 
     def ask(self, message):
