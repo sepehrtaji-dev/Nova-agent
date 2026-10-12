@@ -1321,7 +1321,68 @@ If nothing reliable can be extracted:
                 else "No."
             )
 
-        return None
+        # Resolve other capability questions semantically against the live tool
+        # registry. This avoids a separate phrase/verb rule for each tool.
+        allowed = self._allowed_tools()
+        available = []
+        registry = getattr(self.tools, "tools", {}) or {}
+        for name in allowed:
+            metadata = registry.get(name, {})
+            description = (
+                metadata.get("description", "")
+                if isinstance(metadata, dict)
+                else ""
+            )
+            available.append(f"- {name}: {description}")
+
+        prompt = (
+            "Resolve the meaning of the user's message without executing tools.\n"
+            "Return JSON only, using one of these forms:\n"
+            '{"kind":"capability_question","tools":["registered_tool"],"answer":"Yes."}\n'
+            '{"kind":"capability_question","tools":[],"answer":"No."}\n'
+            '{"kind":"action_request"}\n'
+            "A capability question asks whether Nova has an ability. An action request "
+            "asks Nova to perform work now, including polite requests that specify a target "
+            "or search query. If the user only asks whether an ability exists and supplies "
+            "no target/query to act on, do not execute anything. Only name tools from the "
+            "enabled list. Base answers on the tool descriptions; do not guess.\n\n"
+            "ENABLED TOOLS:\n"
+            + ("\n".join(available) or "No tools enabled.")
+            + "\n\nUSER MESSAGE:\n"
+            + text
+        )
+        try:
+            raw = self.brain.generate(prompt, json_mode=True)
+            data = self._extract_json(raw)
+        except Exception as exc:
+            logging.debug("Capability intent resolution failed: %s", exc)
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        kind = data.get("kind")
+        if kind == "action_request":
+            return None
+        if kind != "capability_question":
+            return None
+
+        selected = data.get("tools", [])
+        if not isinstance(selected, list) or any(
+            not isinstance(name, str) or name not in allowed
+            for name in selected
+        ):
+            return None
+
+        answer = data.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            return None
+        answer = answer.strip()
+        if answer.casefold().startswith("yes") and not selected:
+            return None
+        if answer.casefold().startswith("no") and selected:
+            return None
+        return answer
 
     def ask(self, message):
 
