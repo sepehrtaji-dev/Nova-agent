@@ -421,6 +421,41 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(payload["path"], "test_model.py")
         self.assertEqual(payload["location"], "projects")
 
+    def test_empty_plan_uses_plain_text_recovery_for_capability_question(self):
+        class EmptyPlanner(FakePlanner):
+            def create_plan(self, goal, context):
+                return {"goal": goal, "steps": []}
+
+        class RecoveryBrain:
+            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
+                if json_mode:
+                    return "not valid recovery json"
+                return "Yes, I can search the web using the enabled web search tool."
+
+        class RecoveryRouter(FakeRouter):
+            def _extract_json(self, response):
+                return None
+
+        core = NovaCore.__new__(NovaCore)
+        core.status_callback = None
+        core.brain = RecoveryBrain()
+        core.long_memory = FakeLongMemory()
+        core.short_memory = FakeMemory()
+        core.knowledge = FakeKnowledge()
+        core.extractor = FakeExtractor()
+        core.tools = FakeTools()
+        core.router = RecoveryRouter()
+        core.planner = EmptyPlanner()
+        core.verifier = FakeVerifier()
+        core.max_steps = 12
+        core.access = {"web": True, "git": True, "pc": True}
+
+        response = core.ask("can you search")
+
+        self.assertIn("search the web", response.lower())
+        self.assertEqual(core.tools.calls, [])
+        self.assertEqual(core.short_memory.messages[-1], ("assistant", response))
+
     def test_repeated_invalid_tool_decision_stops_without_false_execution_claim(self):
         class InvalidReadRouter(FakeRouter):
             def __init__(self):
