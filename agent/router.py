@@ -1308,17 +1308,6 @@ Return JSON only.
             return stripped
         return None
 
-    def _extract_filename(self, text):
-        """Extract a filename while preserving its original casing."""
-        if not isinstance(text, str):
-            return None
-        match = re.search(
-            r"(?<![\w.-])([A-Za-z0-9_-]+\.(?:py|pyw|js|ts|tsx|jsx|cpp|c|h|java|rs|go|md|txt|json))(?![\w.-])",
-            text,
-            re.IGNORECASE,
-        )
-        return match.group(1) if match else None
-
     def _pending_planned_tool(self, plan_line):
         if not isinstance(plan_line, str):
             return None
