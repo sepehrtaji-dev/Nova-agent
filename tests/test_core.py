@@ -421,6 +421,49 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(payload["path"], "test_model.py")
         self.assertEqual(payload["location"], "projects")
 
+    def test_repeated_invalid_tool_decision_stops_without_false_execution_claim(self):
+        class InvalidReadRouter(FakeRouter):
+            def __init__(self):
+                super().__init__()
+                self.decisions = 0
+
+            def classify_task(self, message, conversation, allowed_tools=None):
+                return "computer"
+
+            def decide(self, **kwargs):
+                self.decisions += 1
+                return {
+                    "action": "tool",
+                    "task_type": "computer",
+                    "tool": "read_file",
+                    "input": json.dumps({"path": "", "location": "projects"}),
+                }
+
+        class ReadableFakeTools(FakeTools):
+            def exists(self, name):
+                return name in self.tools
+
+        core = NovaCore.__new__(NovaCore)
+        core.status_callback = None
+        core.brain = FakeBrain()
+        core.long_memory = FakeLongMemory()
+        core.short_memory = FakeMemory()
+        core.knowledge = FakeKnowledge()
+        core.extractor = FakeExtractor()
+        core.tools = ReadableFakeTools()
+        core.router = InvalidReadRouter()
+        core.planner = FakePlanner()
+        core.verifier = FakeVerifier()
+        core.max_steps = 12
+        core.access = {"web": True, "git": True, "pc": True}
+
+        response = core.ask("read the requested file")
+
+        self.assertEqual(core.router.decisions, 2)
+        self.assertIn("no tool operation was run", response.lower())
+        self.assertNotIn("some tool actions ran", response.lower())
+        self.assertEqual(core.tools.calls, [])
+
     def test_partial_success_does_not_claim_full_completion(self):
         core = NovaCore.__new__(NovaCore)
         core.status_callback = None
