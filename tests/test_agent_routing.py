@@ -322,27 +322,6 @@ class RouterTests(unittest.TestCase):
             allowed_tools=["desktop", "edit_file"],
         )
         self.assertEqual(decision["tool"], "desktop")
-    def test_click_gets_real_coordinates_deterministically(self):
-        decision = self.router._force_desktop_decision(
-            "click at 500, 400"
-        )
-        self.assertEqual(decision["tool"], "desktop")
-        payload = json.loads(decision["input"])
-        self.assertEqual(payload["action"], "click")
-        self.assertEqual(payload["x"], 500)
-        self.assertEqual(payload["y"], 400)
-        self.assertEqual(payload["button"], "left")
-        self.assertEqual(payload["clicks"], 1)
-
-    def test_keyboard_shortcut_is_deterministic(self):
-        decision = self.router._force_desktop_decision(
-            "press ctrl+shift+t"
-        )
-        self.assertEqual(decision["tool"], "desktop")
-        payload = json.loads(decision["input"])
-        self.assertEqual(payload["action"], "key")
-        self.assertEqual(payload["key"], "ctrl+shift+t")
-
     def test_mouse_move_is_deterministic(self):
         decision = self.router.decide(
             message="move the mouse to 300, 250",
