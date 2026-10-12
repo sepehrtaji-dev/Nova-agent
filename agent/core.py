@@ -1343,8 +1343,9 @@ If nothing reliable can be extracted:
             '{"kind":"action_request"}\n'
             "A capability question asks whether Nova has an ability. An action request "
             "asks Nova to perform work now, including polite requests that specify a target "
-            "or search query. If the user only asks whether an ability exists and supplies "
-            "no target/query to act on, do not execute anything. Only name tools from the "
+            "or search query. If the user asks for a yes/no answer or only whether an ability "
+            "exists, do not execute even if an example target is mentioned; execute only "
+            "when the user requests the action be performed now. Only name tools from the "
             "enabled list. Base answers on the tool descriptions; do not guess.\n\n"
             "ENABLED TOOLS:\n"
             + ("\n".join(available) or "No tools enabled.")
