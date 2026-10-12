@@ -293,6 +293,21 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(core._direct_capability_answer("can you search"), "Yes.")
 
+    def test_ambiguous_capability_question_fails_closed_on_invalid_model_output(self):
+        class BrokenSemanticBrain:
+            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
+                return "not valid json"
+
+        core = NovaCore.__new__(NovaCore)
+        core.brain = BrokenSemanticBrain()
+        core.access = {"web": True, "git": True, "pc": True}
+        core.tools = FakeTools()
+
+        response = core._direct_capability_answer("can you search")
+
+        self.assertIn("I haven't run anything", response)
+        self.assertIn("do you want me to perform", response)
+
     def test_capability_resolver_does_not_intercept_an_explicit_action_request(self):
         class SemanticBrain:
             def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
