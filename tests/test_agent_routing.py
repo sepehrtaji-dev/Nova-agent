@@ -122,6 +122,32 @@ class RouterTests(unittest.TestCase):
         )
         self.assertEqual(router_brain.calls, 0)
 
+    def test_replan_reuses_prior_structured_input_only_for_matching_step(self):
+        planner = Planner(self.brain, self.tools)
+        old_plan = {
+            "goal": "read notes",
+            "steps": [{
+                "id": 1,
+                "description": "read notes.txt",
+                "status": "pending",
+                "result": None,
+                "tool": "read_file",
+                "input": {"path": "notes.txt", "location": "projects"},
+            }],
+        }
+
+        normalized = planner._normalize_replanned_steps(
+            [{"description": "read notes.txt"}],
+            old_plan,
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["tool"], "read_file")
+        self.assertEqual(
+            normalized[0]["input"],
+            {"path": "notes.txt", "location": "projects"},
+        )
+
     def test_recent_file_query_routes_to_find_files(self):
         planner = Planner(self.brain, self.tools)
         plan = planner.create_plan(
