@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from agent.verifier import Verifier
 
@@ -220,6 +221,33 @@ class TestVerifier(unittest.TestCase):
         result = "Title: Example\nURL: https://example.com/page\nSnippet: sample"
         verification = self.verifier.verify("web_search", {"query": "example"}, result)
         self.assertTrue(verification.confirmed())
+
+
+    def test_read_file_rejects_output_that_does_not_match_disk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "note.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("actual contents")
+            with mock.patch.object(self.verifier, "_resolve_path_for_verification", return_value=path):
+                result = self.verifier.verify(
+                    "read_file",
+                    {"path": "note.txt", "location": "projects"},
+                    "invented contents",
+                )
+            self.assertEqual(result.status, "failed")
+
+    def test_read_file_confirms_matching_disk_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "note.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("actual contents")
+            with mock.patch.object(self.verifier, "_resolve_path_for_verification", return_value=path):
+                result = self.verifier.verify(
+                    "read_file",
+                    {"path": "note.txt", "location": "projects"},
+                    "actual contents",
+                )
+            self.assertTrue(result.confirmed())
 
     def test_unknown_tool_is_not_success(self):
         verification = self.verifier.verify(
