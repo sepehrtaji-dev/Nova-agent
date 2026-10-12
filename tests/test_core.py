@@ -73,7 +73,7 @@ class FakeRouter:
     def __init__(self):
         self.generate_calls = 0
 
-    def classify_task(self, message, conversation):
+    def classify_task(self, message, conversation, allowed_tools=None):
         return "computer"
 
     def decide(self, **kwargs):
