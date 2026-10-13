@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -302,6 +303,7 @@ class NovaWindow(QMainWindow):
         super().__init__()
 
         self.core = NovaCore()
+        self.core.set_access(web=True, git=False, pc=False)
         self.thread = None
         self.worker = None
         self.busy = False
@@ -362,7 +364,9 @@ class NovaWindow(QMainWindow):
 
         self.main_splitter = splitter
         splitter.addWidget(chat)
-        splitter.addWidget(self._build_activity_panel())
+        self.activity_panel = self._build_activity_panel()
+        splitter.addWidget(self.activity_panel)
+        self.activity_panel.hide()
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
 
