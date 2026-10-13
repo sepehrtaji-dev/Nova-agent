@@ -147,35 +147,8 @@ class FakeVerifier:
 
 
 class CoreTests(unittest.TestCase):
-    def test_identity_question_reports_nova_and_taji_soft(self):
-        core = NovaCore.__new__(NovaCore)
-        core.access = {"web": True, "git": True, "pc": True}
-
-        self.assertEqual(
-            core._direct_identity_answer("who are you?"),
-            "I'm Nova, a local AI assistant developed by the Taji-Soft team.",
-        )
-        self.assertEqual(
-            core._direct_identity_answer("who are you, and who are you developed by?"),
-            "I'm Nova, a local AI assistant. I'm developed by the Taji-Soft team.",
-        )
-
-    def test_identity_question_does_not_attribute_nova_to_anthropic(self):
-        core = NovaCore.__new__(NovaCore)
-        core.access = {"web": True, "git": True, "pc": True}
-
-        self.assertEqual(
-            core._direct_identity_answer("who are you developed by?"),
-            "I'm Nova, a local AI assistant. I'm developed by the Taji-Soft team.",
-        )
-        self.assertEqual(
-            core._direct_identity_answer("are you sure you are developed by Taji-soft team?"),
-            "Yes. Nova is developed by the Taji-Soft team.",
-        )
-        self.assertEqual(
-            core._direct_identity_answer("are you developed by Anthropic?"),
-            "No. Nova is developed by the Taji-Soft team, not by Anthropic.",
-        )
+    def test_identity_is_not_answered_by_a_fixed_core_rule(self):
+        self.assertFalse(hasattr(NovaCore, "_direct_identity_answer"))
 
     def test_structured_evidence_answers_follow_up_without_raw_memory_parsing(self):
         core = NovaCore.__new__(NovaCore)
@@ -255,119 +228,26 @@ class CoreTests(unittest.TestCase):
         self.assertIn("desktop type confirmed.", response)
         self.assertIn("Paths:", response) if "Path:" in response else self.assertNotIn("cannot provide", response)
         self.assertNotIn("I couldn't provide", response)
-    def test_capability_summary_comes_from_enabled_registry_tools(self):
+    def test_tool_capability_context_comes_from_live_registry_and_permissions(self):
         core = NovaCore.__new__(NovaCore)
         core.tools = type("Registry", (), {
             "tools": {
-                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
+                "desktop": {"capability": "pc", "description": "Control the desktop"},
                 "web_search": {"capability": "web", "description": "Search the public web"},
+                "git": {"capability": "git", "description": "Run Git operations"},
             }
         })()
         core.access = {"web": True, "git": False, "pc": True}
 
-        response = core._direct_capability_answer("what can you do?")
+        context = core._tool_capability_context()
 
-        self.assertIn("desktop", response)
-        self.assertIn("web search", response)
-        self.assertNotIn("git", response)
-    def test_allowed_tools_come_from_registry_metadata(self):
-        core = NovaCore.__new__(NovaCore)
-        core.tools = type("Registry", (), {
-            "tools": {
-                "custom_tool": {"capability": "pc"},
-                "web_tool": {"capability": "web"},
-                "git_tool": {"capability": "git"},
-            }
-        })()
-        core.access = {"web": False, "git": True, "pc": True}
-        self.assertEqual(core._allowed_tools(), ["custom_tool", "git_tool"])
-    def test_generic_capability_question_uses_model_and_enabled_tools(self):
-        class SemanticBrain:
-            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
-                return '{"kind":"capability_question","tools":["web_search"],"answer":"Yes."}'
+        self.assertIn("desktop [enabled]", context)
+        self.assertIn("web_search [enabled]", context)
+        self.assertIn("git [disabled]", context)
+        self.assertNotIn("self_knowledge", context)
 
-        core = NovaCore.__new__(NovaCore)
-        core.brain = SemanticBrain()
-        core.access = {"web": True, "git": True, "pc": True}
-        core.tools = FakeTools()
-
-        self.assertEqual(core._direct_capability_answer("can you search"), "Yes.")
-
-    def test_ambiguous_capability_question_fails_closed_on_invalid_model_output(self):
-        class BrokenSemanticBrain:
-            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
-                return "not valid json"
-
-        core = NovaCore.__new__(NovaCore)
-        core.brain = BrokenSemanticBrain()
-        core.access = {"web": True, "git": True, "pc": True}
-        core.tools = FakeTools()
-
-        response = core._direct_capability_answer("can you search")
-
-        self.assertIn("I haven't run anything", response)
-        self.assertIn("do you want me to perform", response)
-
-    def test_capability_resolver_does_not_intercept_an_explicit_action_request(self):
-        class SemanticBrain:
-            def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
-                return '{"kind":"action_request"}'
-
-        core = NovaCore.__new__(NovaCore)
-        core.brain = SemanticBrain()
-        core.access = {"web": True, "git": True, "pc": True}
-        core.tools = FakeTools()
-
-        self.assertIsNone(
-            core._direct_capability_answer("can you search the web for Python 3.14 release notes?")
-        )
-
-    def test_capability_question_reports_real_read_access(self):
-        core = NovaCore.__new__(NovaCore)
-        core.access = {"web": True, "git": True, "pc": True}
-        core.tools = type("Registry", (), {
-            "tools": {
-                "read_file": {"capability": "pc", "description": "Read the contents of a file"},
-                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
-            }
-        })()
-
-        self.assertEqual(
-            core._direct_capability_answer("can you read files? just say yes or no?"),
-            "Yes.",
-        )
-
-    def test_capability_question_reports_os_control(self):
-        core = NovaCore.__new__(NovaCore)
-        core.access = {"web": True, "git": True, "pc": True}
-        core.tools = type("Registry", (), {
-            "tools": {
-                "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
-            }
-        })()
-
-        self.assertEqual(
-            core._direct_capability_answer("can you use my os?"),
-            "Yes.",
-        )
-        self.assertEqual(
-            core._direct_capability_answer("can you really use os?"),
-            "Yes.",
-        )
-
-    def test_capability_question_reports_no_when_pc_access_is_disabled(self):
-        core = NovaCore.__new__(NovaCore)
-        core.access = {"web": True, "git": True, "pc": False}
-        core.tools = type("Registry", (), {
-            "tools": {
-                "read_file": {"capability": "pc"},
-            }
-        })()
-
-        self.assertEqual(
-            core._direct_capability_answer("can you read files"),
-            "No.",
-        )
+    def test_core_does_not_use_rule_based_capability_answer(self):
+        self.assertFalse(hasattr(NovaCore, "_direct_capability_answer"))
 
     def test_verified_tool_evidence_is_persisted_for_follow_up(self):
         core = NovaCore.__new__(NovaCore)
