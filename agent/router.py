@@ -645,9 +645,32 @@ class ToolRouter:
                 and location in {"projects", "desktop", "system"}
             )
 
-        # BUG 20: Unknown tools should return False
-        logging.warning("Unknown tool encountered in validation: %s", tool_name)
-        return False
+        # Registered tools without a legacy built-in validator use their
+        # own implementation and optional registry schema for validation.
+        metadata = getattr(self.tools, "tools", {}).get(tool_name, {})
+        schema = metadata.get("input_schema") if isinstance(metadata, dict) else None
+        if isinstance(schema, dict) and schema.get("type") == "object":
+            required = schema.get("required", [])
+            properties = schema.get("properties", {})
+            if not isinstance(properties, dict):
+                return False
+            if any(key not in tool_input for key in required if isinstance(key, str)):
+                return False
+            for key, value in tool_input.items():
+                definition = properties.get(key)
+                if isinstance(definition, dict):
+                    expected = definition.get("type")
+                    if expected == "string" and not isinstance(value, str):
+                        return False
+                    if expected == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+                        return False
+                    if expected == "boolean" and not isinstance(value, bool):
+                        return False
+            return True
+
+        # For tools without a schema, require a non-empty object and delegate
+        # domain-specific validation to the registered handler.
+        return isinstance(tool_input, dict) and bool(tool_input)
 
     def classify_task(self, message, conversation="", allowed_tools=None):
         """Classify intent from meaning and the capabilities actually enabled."""
