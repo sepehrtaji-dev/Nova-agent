@@ -526,6 +526,11 @@ class RouterTests(unittest.TestCase):
         self.assertFalse(self.router._has_successful_tool(history))
 
     def test_legacy_function_call_parser_handles_web_search(self):
+        self.tools.tools["web_search"]["input_schema"] = {
+            "type": "object",
+            "required": ["query"],
+            "properties": {"query": {"type": "string"}},
+        }
         decision = self.router._extract_function_call('[web_search("assembly")]')
         self.assertIsNotNone(decision)
         self.assertEqual(decision["tool"], "web_search")
