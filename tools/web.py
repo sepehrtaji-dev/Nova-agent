@@ -86,15 +86,19 @@ class WebSearchTool:
                         self._in_result = True
                         self._result_depth = 1
                         self._current = {"title": "", "url": "", "snippet": ""}
+                    elif self._in_result and tag == "div" and (
+                        "result__snippet" in classes or "result__body" in classes
+                    ):
+                        self._result_depth += 1
+                        self._capture = "snippet"
+                        self._buffer = []
                     elif self._in_result and tag == "div":
                         self._result_depth += 1
                     elif self._in_result and tag == "a" and "result__a" in classes:
                         self._current["url"] = attrs.get("href", "")
                         self._capture = "title"
                         self._buffer = []
-                    elif self._in_result and tag in {"a", "div"} and (
-                        "result__snippet" in classes or "result__body" in classes
-                    ):
+                    elif self._in_result and tag == "a" and "result__snippet" in classes:
                         self._capture = "snippet"
                         self._buffer = []
                 else:
