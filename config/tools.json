@@ -64,5 +64,22 @@
     "web": true,
     "git": false,
     "pc": false
+  },
+  "capabilities": {
+    "web": {
+      "label": "WEB SEARCH",
+      "subtitle": "Public web access",
+      "description": "Allow the assistant to search the public web."
+    },
+    "git": {
+      "label": "GIT",
+      "subtitle": "Repository operations",
+      "description": "Allow repository operations when Git tools are enabled."
+    },
+    "pc": {
+      "label": "PC USE",
+      "subtitle": "Terminal and files",
+      "description": "Allow local computer operations when corresponding tools are enabled."
+    }
   }
 }
