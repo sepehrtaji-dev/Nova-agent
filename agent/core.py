@@ -416,6 +416,8 @@ class NovaCore:
                         return False, f"Input field '{key}' has the wrong type."
                     if isinstance(value, str) and len(value) < int(definition.get("minLength", 0)):
                         return False, f"Input field '{key}' is too short."
+                    if "enum" in definition and value not in definition["enum"]:
+                        return False, f"Input field '{key}' is not an allowed value."
 
         # Content checks are data-driven and apply to any registered writer
         # that declares a path and content, rather than to a named tool.
