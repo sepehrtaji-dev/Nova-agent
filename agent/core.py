@@ -97,7 +97,7 @@ class NovaCore:
         for name, raw in sorted(registry.items()):
             metadata = raw if isinstance(raw, dict) else {}
             capability = metadata.get("capability")
-            enabled = bool(access.get(capability, True))
+            enabled = bool(capability and access.get(capability, False))
             description = str(metadata.get("description", "")).strip()
             status = "enabled" if enabled else "disabled"
             line = f"- {name} [{status}]"
