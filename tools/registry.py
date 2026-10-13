@@ -22,6 +22,66 @@ class ToolRegistry:
             "input_schema": input_schema,
         }
 
+    def validate_input(self, name, input_data):
+        """Validate arguments against the selected tool's declared JSON schema."""
+        if not self.exists(name):
+            return False, f"Unknown tool: {name}"
+        if not isinstance(input_data, dict):
+            return False, "Tool input must be a JSON object."
+
+        schema = self.tools[name].get("input_schema")
+        if not isinstance(schema, dict):
+            # The handler remains responsible for domain-specific validation
+            # when no machine-readable contract is declared.
+            return True, None
+        if schema.get("type", "object") != "object":
+            return False, "Tool input schema must describe an object."
+
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            return False, "Tool input schema is invalid."
+
+        missing = [
+            key for key in required
+            if isinstance(key, str)
+            and (key not in input_data or input_data[key] is None)
+        ]
+        if missing:
+            return False, "Missing required input field(s): " + ", ".join(missing)
+
+        if schema.get("additionalProperties") is False:
+            unknown = sorted(set(input_data) - set(properties))
+            if unknown:
+                return False, "Unexpected input field(s): " + ", ".join(unknown)
+
+        type_checks = {
+            "string": lambda value: isinstance(value, str),
+            "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+            "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+            "boolean": lambda value: isinstance(value, bool),
+            "object": lambda value: isinstance(value, dict),
+            "array": lambda value: isinstance(value, list),
+            "null": lambda value: value is None,
+        }
+        for key, value in input_data.items():
+            definition = properties.get(key)
+            if not isinstance(definition, dict):
+                continue
+            expected = definition.get("type")
+            check = type_checks.get(expected)
+            if check is not None and not check(value):
+                return False, f"Input field '{key}' must be {expected}."
+            if isinstance(value, str):
+                if len(value) < int(definition.get("minLength", 0)):
+                    return False, f"Input field '{key}' is too short."
+                max_length = definition.get("maxLength")
+                if max_length is not None and len(value) > int(max_length):
+                    return False, f"Input field '{key}' is too long."
+            if "enum" in definition and value not in definition["enum"]:
+                return False, f"Input field '{key}' is not an allowed value."
+        return True, None
+
     def exists(self, name):
 
         return name in self.tools
