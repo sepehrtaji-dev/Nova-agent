@@ -49,8 +49,31 @@ class FakeTools:
     def __init__(self):
         self.calls = []
         self.tools = {
-            "write_file": {"capability": "pc", "description": "Create or overwrite a file"},
-            "read_file": {"capability": "pc", "description": "Read the contents of a file"},
+            "write_file": {
+                "capability": "pc",
+                "description": "Create or overwrite a file",
+                "input_schema": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1},
+                        "location": {"type": "string", "enum": ["projects", "desktop", "system"]},
+                        "content": {"type": "string"},
+                    },
+                },
+            },
+            "read_file": {
+                "capability": "pc",
+                "description": "Read the contents of a file",
+                "input_schema": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1},
+                        "location": {"type": "string", "enum": ["projects", "desktop", "system"]},
+                    },
+                },
+            },
             "desktop": {"capability": "pc", "description": "Control the desktop and GUI"},
             "web_search": {"capability": "web", "description": "Search the public web"},
             "git": {"capability": "git", "description": "Run git operations"},
