@@ -351,6 +351,61 @@ class FileSystemTool:
 
     # ── write_file ────────────────────────────────────────────────────────────
 
+    def prepare_write_input(self, input_data, context):
+        """Prepare generated file content through the configured agent services."""
+        if isinstance(input_data, str):
+            try:
+                input_data = json.loads(input_data)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Tool input must be a JSON object.") from exc
+        if not isinstance(input_data, dict):
+            raise ValueError("Tool input must be a JSON object.")
+
+        data = dict(input_data)
+        path = data.get("path")
+        location = data.get("location", "projects")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("A non-empty output path is required.")
+        if not isinstance(location, str) or not location.strip():
+            raise ValueError("A valid output location is required.")
+        if isinstance(data.get("content"), str) and data["content"].strip():
+            return data
+
+        context = context if isinstance(context, dict) else {}
+        router = context.get("router")
+        generator = getattr(router, "generate_file_content", None)
+        if not callable(generator):
+            raise RuntimeError("No content generator is available for this tool.")
+
+        status = context.get("status")
+        if callable(status):
+            status("Generating file content...")
+        generated = generator(
+            user_request=str(context.get("message", "")),
+            path=path,
+            location=location,
+            conversation=str(context.get("conversation", "")),
+            tool_history=str(context.get("tool_history", "")),
+        )
+        if not isinstance(generated, str) or not generated.strip():
+            detail = getattr(router, "_last_file_generation_error", None)
+            raise RuntimeError(str(detail or "Content generation returned empty content."))
+        generated = generated.strip()
+        lowered = generated.lower()
+        placeholder_phrases = (
+            "<code>", "</code>", "<code here>", "code here",
+            "insert code here", "your code here", "write code here",
+            "put code here", "the rest of the code", "rest of the code",
+        )
+        if any(phrase in lowered for phrase in placeholder_phrases):
+            raise ValueError("Generated content contains a placeholder.")
+        for line in lowered.splitlines():
+            stripped = line.strip()
+            if stripped in {"...", "…"} or stripped.startswith(("# todo", "# tbd")):
+                raise ValueError("Generated content appears incomplete.")
+        data["content"] = generated
+        return data
+
     def write_file(self, input_data):
         """Input: {\"path\": \"file.py\", \"location\": \"projects\"|\"desktop\"|\"system\", \"content\": \"complete file contents\"}. Content is required; do not omit it."""
         try:
