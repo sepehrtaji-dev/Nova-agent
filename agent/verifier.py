@@ -110,24 +110,19 @@ class Verifier:
         else:
             tool_result = str(tool_result)
 
-        dispatch = {
-            "write_file":       self._verify_write_file,
-            "read_file":        self._verify_read_file,
-            "edit_file":        self._verify_edit_file,
-            "delete_file":      self._verify_delete_file,
-            "create_directory": self._verify_create_directory,
-            "list_files":       self._verify_list_files,
-            "find_files":       self._verify_find_files,
-            "terminal":         self._verify_terminal,
-            "git":              self._verify_git,
-            "web_search":       self._verify_web_search,
-            "web_fetch":        self._verify_web_fetch,
-            "github":            self._verify_github,
-            "generate_image":   self._verify_generate_image,
-            "desktop":          self._verify_desktop,
-        }
-
-        fn = dispatch.get(tool_name)
+        metadata = getattr(self.tools, "tools", {}).get(tool_name, {})
+        verifier_method = (
+            metadata.get("verifier_method")
+            if isinstance(metadata, dict)
+            else None
+        )
+        if not isinstance(verifier_method, str) or not verifier_method.strip():
+            verifier_method = f"_verify_{tool_name}"
+        fn = getattr(self, verifier_method, None)
+        if not callable(fn):
+            handler = metadata.get("function") if isinstance(metadata, dict) else None
+            owner = getattr(handler, "__self__", None)
+            fn = getattr(owner, "verify", None)
         if fn is None:
             return VerificationResult(
                 status="unverifiable",
