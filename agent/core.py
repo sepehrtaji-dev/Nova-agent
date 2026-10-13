@@ -85,6 +85,25 @@ class NovaCore:
 
         return allowed
 
+    def _tool_capability_context(self):
+        """Describe tool availability from live registry metadata and permissions."""
+        registry = getattr(getattr(self, "tools", None), "tools", {}) or {}
+        access = getattr(self, "access", {}) or {}
+        lines = []
+        for name, raw in sorted(registry.items()):
+            metadata = raw if isinstance(raw, dict) else {}
+            capability = metadata.get("capability")
+            enabled = bool(access.get(capability, True))
+            description = str(metadata.get("description", "")).strip()
+            status = "enabled" if enabled else "disabled"
+            line = f"- {name} [{status}]"
+            if capability:
+                line += f" capability={capability}"
+            if description:
+                line += f": {description}"
+            lines.append(line)
+        return "\n".join(lines) if lines else "No tools are registered."
+
     def _status(self, message):
         if self.status_callback:
             try:
@@ -849,10 +868,11 @@ class NovaCore:
             self._status("Preparing conversational answer...")
 
             conversation_prompt = (
-                "You are Nova, a helpful local AI assistant.\n\n"
+                "You are a helpful local AI assistant.\n\n"
                 f"User message: {message}\n\n"
                 f"Recent conversation:\n{self._conversation_context(max_chars=8000)}\n\n"
                 f"Relevant knowledge: {self.knowledge.get_context(message)}\n\n"
+                f"Registered tools and permissions:\n{self._tool_capability_context()}\n\n"
                 f"Relevant saved user memory:\n{self._long_memory_context(message)}\n\n"
                 f"Relevant past tool experiences:\n{self._episodic_context(message)}\n\n"
                 "Answer the user's actual question or statement directly. "
@@ -867,7 +887,7 @@ class NovaCore:
                 response = self.brain.generate(
                     conversation_prompt,
                     system_prompt=(
-                        "You are Nova, a helpful local AI assistant. "
+                        "You are a helpful local AI assistant. "
                         "For normal conversation, answer naturally without "
                         "inventing computer actions."
                     )
