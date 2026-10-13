@@ -216,53 +216,6 @@ class NovaCore:
 
         return False
 
-    def _format_verified_web_results(self, tool_history):
-        if not isinstance(tool_history, str):
-            return None
-
-        blocks = re.findall(
-            r"TOOL_NAME:\s*web_search\s*\n"
-            r"INPUT:\s*.*?\n"
-            r"BEGIN_RAW_TOOL_RESULT\n"
-            r"(.*?)"
-            r"\nEND_RAW_TOOL_RESULT\n"
-            r"VERIFIER_STATUS:\s*CONFIRMED",
-            tool_history,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        if not blocks:
-            return None
-
-        entries = []
-        for raw in blocks:
-            matches = re.findall(
-                r"\[\d+\]\s*\n"
-                r"Title:\s*(.*?)\n"
-                r"URL:\s*(.*?)\n"
-                r"Snippet:\s*(.*?)(?=\n\n\[\d+\]|\Z)",
-                raw,
-                flags=re.DOTALL,
-            )
-            for title, url, snippet in matches:
-                title = re.sub(r"\s+", " ", title).strip()
-                url = re.sub(r"\s+", " ", url).strip()
-                snippet = re.sub(r"\s+", " ", snippet).strip()
-                if title or snippet:
-                    entries.append((title, url, snippet))
-
-        if not entries:
-            return None
-
-        lines = ["Verified web search results:"]
-        for index, (title, url, snippet) in enumerate(entries[:6], start=1):
-            lines.append(f"{index}. {title}")
-            if snippet:
-                lines.append(f"   {snippet}")
-            if url:
-                lines.append(f"   Source: {url}")
-
-        return "\n".join(lines)
-
     def _format_tool_history(self, tool_history, max_chars=12000):
         """Keep the full step ledger within a predictable prompt budget."""
         if not isinstance(tool_history, list) or not tool_history:
@@ -342,38 +295,6 @@ class NovaCore:
             self.short_memory.add("tool", message)
         except Exception:
             pass
-    def _has_successful_web_search(
-        self,
-        tool_history
-    ):
-        state = getattr(self, "execution_state", None)
-        if isinstance(state, dict):
-            verified = state.get("verified_tools", [])
-            if isinstance(verified, list):
-                for entry in verified:
-                    if not isinstance(entry, dict):
-                        continue
-                    if entry.get("tool") != "web_search":
-                        continue
-                    verification = entry.get("verification", {})
-                    if (
-                        isinstance(verification, dict)
-                        and verification.get("status") == "confirmed"
-                    ):
-                        return True
-
-        if isinstance(tool_history, str):
-            return bool(
-                re.search(
-                    r"^TOOL_NAME:\s*web_search\s*$[\s\S]*?"
-                    r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
-                    tool_history,
-                    flags=re.IGNORECASE | re.MULTILINE,
-                )
-            )
-
-        return False
-
     def _parse_tool_input(self, tool_input):
         if isinstance(tool_input, dict):
             return tool_input
@@ -451,166 +372,6 @@ class NovaCore:
         # Tool handlers own domain-specific checks. The core does not maintain
         # a second, tool-name-specific list of argument rules.
         return True, None
-
-    def _learn_from_search(
-        self,
-        query,
-        result
-    ):
-        if not result:
-            return
-
-        prompt = f"""
-You are Nova's search-result extractor.
-
-USER QUERY:
-
-{query}
-
-REAL WEB SEARCH RESULT:
-
-{result}
-
-Your job is ONLY to extract facts that are
-explicitly supported by the search result.
-
-Do NOT use:
-
-- prior knowledge
-- personal memory
-- persistent knowledge
-- assumptions
-- guesses
-
-Return JSON only.
-
-Schema:
-
-{{
-  "facts": [
-    {{
-      "topic": "topic",
-      "fact": "fact directly supported by result",
-      "source": "source",
-      "confidence": 0.0,
-      "freshness": "volatile"
-    }}
-  ]
-}}
-
-For current/latest/recent information,
-use freshness "volatile".
-
-If the search result does not explicitly
-support a fact, DO NOT include it.
-
-If nothing reliable can be extracted:
-
-{{"facts":[]}}
-"""
-
-        try:
-            raw = self.brain.generate(
-                prompt,
-                json_mode=True
-            )
-
-            data = self._extract_json(
-                raw
-            )
-
-            if not isinstance(
-                data,
-                dict
-            ):
-                return
-
-            facts = data.get(
-                "facts",
-                []
-            )
-
-            if not isinstance(
-                facts,
-                list
-            ):
-                return
-
-            for item in facts:
-
-                if not isinstance(
-                    item,
-                    dict
-                ):
-                    continue
-
-                topic = item.get(
-                    "topic"
-                )
-
-                fact = item.get(
-                    "fact"
-                )
-
-                source = item.get(
-                    "source",
-                    ""
-                )
-
-                confidence = item.get(
-                    "confidence",
-                    0.0
-                )
-
-                freshness = item.get(
-                    "freshness",
-                    "volatile"
-                )
-
-                if not topic or not fact:
-                    continue
-
-                try:
-                    confidence = float(
-                        confidence
-                    )
-                except Exception:
-                    confidence = 0.0
-
-                confidence = max(0.0, min(1.0, confidence))
-                if confidence < 0.65:
-                    continue
-
-                urls = re.findall(
-                    r"^URL:\s*(\S+)\s*$",
-                    str(result),
-                    flags=re.MULTILINE,
-                )
-                source = str(source).strip()
-                if source and source not in urls:
-                    # A generated source is only trustworthy when it exactly
-                    # matches a URL that appeared in the real search result.
-                    continue
-                if not source and len(urls) == 1:
-                    source = urls[0]
-
-                if freshness not in {
-                    "stable",
-                    "temporary",
-                    "volatile"
-                }:
-                    freshness = "volatile"
-
-                self.knowledge.add(
-                    topic=topic,
-                    fact=fact,
-                    source=source,
-                    confidence=confidence,
-                    freshness=freshness
-                )
-
-        except Exception:
-            return
 
     def _build_final_prompt(
         self,
@@ -1278,11 +1039,6 @@ If nothing reliable can be extracted:
 
         completed = False
         last_tool_error = None
-        web_search_used = False
-        direct_read_response = None
-        direct_file_search_response = None
-        direct_web_response = None
-
         for step in range(
             self.max_steps
         ):
@@ -1838,53 +1594,10 @@ Nova must choose another useful action.
                         status="completed"
                     )
 
-                if tool_name == "find_files":
-                    direct_file_search_response = (
-                        f"File search results:\n{result}"
-                    )
-
-                if tool_name == "read_file":
-                    read_data = self._parse_tool_input(tool_input)
-                    read_path = ""
-                    read_location = "projects"
-                    if isinstance(read_data, dict):
-                        read_path = str(read_data.get("path", "")).strip()
-                        read_location = str(read_data.get("location", "projects")).strip()
-
-                    direct_read_response = (
-                        f"File: {read_path}\n"
-                        f"Location: {read_location}\n\n"
-                        f"{result}"
-                    )
-
                 # A verified success is authoritative. Never ask the LLM to
                 # re-plan a successful step, because it can accidentally reopen
                 # completed work or erase the progress we just verified.
                 workspace_revision += 1
-
-                if tool_name == "web_search":
-                    web_search_used = True
-                    direct_web_response = self._format_verified_web_results(
-                        "TOOL_NAME: web_search\n"
-                        f"INPUT:\n{tool_input}\n"
-                        "BEGIN_RAW_TOOL_RESULT\n"
-                        f"{result}\n"
-                        "END_RAW_TOOL_RESULT\n"
-                        "VERIFIER_STATUS: CONFIRMED"
-                    )
-                    self._status("Learning from search...")
-
-                    search_data = self._parse_tool_input(tool_input)
-                    query = ""
-                    if isinstance(search_data, dict):
-                        query = (
-                            search_data.get("query")
-                            or search_data.get("search")
-                            or search_data.get("q")
-                            or search_data.get("text")
-                            or ""
-                        )
-                    self._learn_from_search(query, result)
 
                 last_tool_error = None
 
@@ -1956,11 +1669,7 @@ Nova must choose another useful action.
                 "No tools were executed."
             )
 
-        successful_web_search = (
-            self._has_successful_web_search(
-                tool_context
-            )
-        )
+        successful_tool_execution = self._has_successful_tool(tool_context)
 
         if (
             task_type == "computer"
@@ -2009,45 +1718,7 @@ Nova must choose another useful action.
             self.short_memory.add("assistant", response)
             return response
 
-        if direct_file_search_response is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_file_search_response)
-            return direct_file_search_response
-
-        if direct_read_response is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_read_response)
-            return direct_read_response
-
-        if direct_web_response is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_web_response)
-            return direct_web_response
-
-        if (
-            web_search_used
-            and not successful_web_search
-        ):
-
-            response = (
-                "I couldn't verify that a real "
-                "web search was completed, so I "
-                "won't provide an answer based "
-                "on unsupported information."
-            )
-
-            self._status(
-                "Done"
-            )
-
-            self.short_memory.add(
-                "assistant",
-                response
-            )
-
-            return response
-
-        if task_type == "computer" and not successful_web_search:
+        if task_type == "computer" and not successful_tool_execution:
             response = self._build_verified_task_response(
                 tool_history
             )
@@ -2059,7 +1730,7 @@ Nova must choose another useful action.
             message=message,
             tool_context=tool_context,
             knowledge_context=knowledge_context,
-            web_search_used=successful_web_search
+            verified_tool_execution=successful_tool_execution
         )
 
         self._status(
