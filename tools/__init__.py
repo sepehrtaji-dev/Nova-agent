@@ -68,6 +68,9 @@ def load_tools():
             preparer = getattr(instance, preparer_name) if isinstance(preparer_name, str) else None
             if preparer is not None and not callable(preparer):
                 raise TypeError("Configured input preparer is not callable.")
+            verifier_method = definition.get("verifier_method")
+            if verifier_method is not None and not isinstance(verifier_method, str):
+                raise TypeError("Configured verifier method must be a method name.")
             registry.register(
                 name,
                 description,
@@ -75,6 +78,7 @@ def load_tools():
                 capability=capability,
                 input_schema=schema,
                 prepare_input=preparer,
+                verifier_method=verifier_method,
             )
         except Exception as exc:
             logging.warning(
