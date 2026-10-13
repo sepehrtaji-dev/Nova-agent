@@ -11,15 +11,13 @@ class ToolRegistry:
         name,
         description,
         function,
-        capability="pc",
-        input_schema=None,
+        capability="pc"
     ):
 
         self.tools[name] = {
             "description": description,
             "function": function,
             "capability": capability,
-            "input_schema": input_schema,
         }
 
     def exists(self, name):
