@@ -17,6 +17,11 @@ class RegistryDrivenToolRoutingTests(unittest.TestCase):
             "Search for a resource using a query string.",
             lambda value: value,
             capability="web",
+            input_schema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
         )
         self.router = ToolRouter(DummyBrain(), self.registry)
 
@@ -26,7 +31,10 @@ class RegistryDrivenToolRoutingTests(unittest.TestCase):
         )
 
         self.assertEqual(decision["tool"], "lookup")
-        self.assertEqual(decision["input"], "Pizza Shops In United States")
+        self.assertEqual(
+            decision["input"],
+            '{"query": "Pizza Shops In United States"}',
+        )
 
     def test_parses_python_like_keyword_arguments_without_tool_specific_rules(self):
         decision = self.router._extract_function_call(
@@ -51,7 +59,10 @@ class RegistryDrivenToolRoutingTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(decision)
-        self.assertEqual(decision["input"], "Pizza Shops In United States")
+        self.assertEqual(
+            decision["input"],
+            '{"query": "Pizza Shops In United States"}',
+        )
 
     def test_rejects_unregistered_function_call(self):
         self.assertIsNone(
