@@ -159,40 +159,29 @@ def runtime_profile(core):
             "enabled": bool(access.get(capability, True)),
         })
 
-    component_names = (
-        ("brain", "Ollama model adapter"),
-        ("router", "Tool router"),
-        ("planner", "Task planner"),
-        ("verifier", "Tool-result verifier"),
-        ("self_knowledge", "Self-knowledge"),
-        ("diagnostics", "Runtime diagnostics"),
-        ("extractor", "Memory extractor"),
-        ("long_memory", "Long-term memory manager"),
-        ("short_memory", "Short-term memory"),
-        ("knowledge", "Knowledge memory"),
-        ("episodic_memory", "Episodic memory"),
-    )
     components = []
-    for attr, label in component_names:
-        value = getattr(core, attr, None)
+    for attr, value in sorted(vars(core).items()) if hasattr(core, "__dict__") else []:
+        if attr.startswith("_"):
+            continue
         components.append({
             "name": attr,
-            "label": label,
+            "label": attr.replace("_", " ").strip().title(),
             "present": value is not None,
             "implementation": type(value).__name__ if value is not None else "Missing",
         })
 
+
     return {
-        "identity": "Nova",
-        "developer": "Taji-Soft",
+        "identity": os.getenv("NOVA_NAME", "Unknown"),
+        "developer": os.getenv("NOVA_DEVELOPER", "Unknown"),
         "version": os.getenv("NOVA_VERSION", "Unknown"),
         "python": platform.python_version(),
         "implementation": platform.python_implementation(),
         "platform": platform.platform(),
         "system": sys.platform,
         "working_directory": str(Path.cwd()),
-        "entrypoint": "main.py",
-        "provider": "Ollama",
+        "entrypoint": Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "Unknown",
+        "provider": type(brain).__name__ if brain is not None else "Unknown",
         "configured_model": str(getattr(brain, "model", "") or "Unknown"),
         "context_budget": _env_int("NOVA_NUM_CTX", 8192, 2048),
         "output_budget": _env_int("NOVA_NUM_PREDICT", 2048, 128),
@@ -203,8 +192,8 @@ def runtime_profile(core):
         "present_components": sum(bool(item["present"]) for item in components),
         "component_count": len(components),
         "access": {
-            key: bool(access.get(key, True))
-            for key in ("web", "git", "pc")
+            str(key): bool(value)
+            for key, value in access.items()
         },
         "execution_state_available": isinstance(getattr(core, "execution_state", None), dict),
     }
