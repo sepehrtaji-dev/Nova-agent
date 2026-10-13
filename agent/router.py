@@ -880,6 +880,8 @@ Return JSON only.
                 parsed_input = json.loads(stripped)
             except json.JSONDecodeError:
                 parsed_input = stripped
+            if isinstance(parsed_input, str):
+                parsed_input = self._input_from_positional(tool, parsed_input)
             tool_input_object = parsed_input
         else:
             return None
