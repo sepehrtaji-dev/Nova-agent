@@ -59,5 +59,10 @@
       },
       "verifier_method": "_verify_write_file"
     }
-  ]
+  ],
+  "default_access": {
+    "web": true,
+    "git": false,
+    "pc": false
+  }
 }
