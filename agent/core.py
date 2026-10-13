@@ -38,12 +38,17 @@ class NovaCore:
         self.planner = Planner(self.brain, self.tools)
         self.verifier = Verifier(self.tools)
 
-        self.max_steps = 12
+        self.max_steps = int(os.getenv("NOVA_MAX_STEPS", "12"))
+        configured_access = getattr(self.tools, "default_access", {}) or {}
         self.access = {
-            "web": True,
-            "git": True,
-            "pc": True,
+            str(name): bool(enabled)
+            for name, enabled in configured_access.items()
+            if isinstance(name, str)
         }
+        for metadata in self.tools.tools.values():
+            capability = metadata.get("capability") if isinstance(metadata, dict) else None
+            if isinstance(capability, str) and capability:
+                self.access.setdefault(capability, True)
         self.execution_state = {
             "last_plan": None,
             "verified_tools": [],
@@ -62,14 +67,13 @@ class NovaCore:
             # Memory retrieval must never prevent Nova from answering or acting.
             return ""
 
-    def set_access(self, web=None, git=None, pc=None):
-        """Update UI-controlled capability permissions for future actions."""
-        if web is not None:
-            self.access["web"] = bool(web)
-        if git is not None:
-            self.access["git"] = bool(git)
-        if pc is not None:
-            self.access["pc"] = bool(pc)
+    def set_access(self, **capabilities):
+        """Update permissions for named capabilities exposed by configuration."""
+        if not isinstance(capabilities, dict):
+            return
+        for name, enabled in capabilities.items():
+            if isinstance(name, str) and name.strip() and enabled is not None:
+                self.access[name] = bool(enabled)
 
     def get_access(self):
         return dict(self.access)
@@ -79,8 +83,8 @@ class NovaCore:
         allowed = []
 
         for name, data in self.tools.tools.items():
-            capability = data.get("capability", "pc")
-            if self.access.get(capability, True):
+            capability = data.get("capability")
+            if isinstance(capability, str) and self.access.get(capability, False):
                 allowed.append(name)
 
         return allowed
