@@ -1282,205 +1282,28 @@ Router provided invalid tool input.
 
                     continue
 
-            if tool_name == "write_file":
-
+            metadata = getattr(self.tools, "tools", {}).get(tool_name, {})
+            preparer = metadata.get("prepare_input") if isinstance(metadata, dict) else None
+            if callable(preparer):
                 try:
-
-                    file_data = (
-                        self._parse_tool_input(
-                            tool_input
-                        )
+                    parsed_input = self._parse_tool_input(tool_input)
+                    prepared_input = preparer(
+                        parsed_input,
+                        {
+                            "message": message,
+                            "router": self.router,
+                            "conversation": conversation,
+                            "tool_history": history,
+                            "status": self._status,
+                        },
                     )
-
-                    if not isinstance(
-                        file_data,
-                        dict
-                    ):
-
-                        tool_history.append(
-                            """
-Router returned invalid write_file input.
-
-The file was NOT written.
-"""
-                        )
-
-                        self._status(
-                            "Invalid file request..."
-                        )
-
-                        continue
-
-                    path = file_data.get(
-                        "path"
-                    )
-
-                    location = file_data.get(
-                        "location",
-                        "projects"
-                    )
-
-                    if (
-                        not isinstance(
-                            path,
-                            str
-                        )
-                        or not path.strip()
-                    ):
-
-                        tool_history.append(
-                            """
-write_file requires a valid file path.
-
-The file was NOT written.
-"""
-                        )
-
-                        self._status(
-                            "Invalid file path..."
-                        )
-
-                        continue
-
-                    if location not in {
-                        "projects",
-                        "desktop",
-                        "system"
-                    }:
-
-                        tool_history.append(
-                            """
-write_file received an invalid location.
-
-The file was NOT written.
-"""
-                        )
-
-                        self._status(
-                            "Invalid file location..."
-                        )
-
-                        continue
-
-                    self._status(
-                        "Generating file content..."
-                    )
-
-                    generated_content = (
-                        self.router.generate_file_content(
-                            user_request=message,
-                            path=path,
-                            location=location,
-                            conversation=conversation,
-                            tool_history=history
-                        )
-                    )
-
-                    if not isinstance(
-                        generated_content,
-                        str
-                    ):
-                        generated_content = str(
-                            generated_content
-                        )
-
-                    generated_content = (
-                        generated_content.strip()
-                    )
-
-                    if not generated_content:
-
-                        generation_error = getattr(
-                            self.router,
-                            "_last_file_generation_error",
-                            None
-                        )
-
-                        if generation_error:
-                            last_tool_error = (
-                                "write_file content generation failed: "
-                                f"{generation_error}"
-                            )
-                        else:
-                            last_tool_error = (
-                                "write_file content generation returned "
-                                "empty content."
-                            )
-
-                        tool_history.append(
-                            f"""
-File content generation failed.
-
-Error:
-{last_tool_error}
-
-The file was NOT written.
-"""
-                        )
-
-                        self._status(
-                            "File generation failed..."
-                        )
-
-                        # Do not loop on the same failed model-generation
-                        # request. OllamaBrain already performs one bounded
-                        # repeat-limit retry.
-                        break
-
-                    if self._contains_placeholder(
-                        generated_content
-                    ):
-
-                        last_tool_error = (
-                            "Generated file content contained "
-                            "an incomplete placeholder."
-                        )
-
-                        tool_history.append(
-                            f"""
-Generated file content appears to contain
-a placeholder instead of a complete
-implementation.
-
-{last_tool_error}
-
-The file was NOT written.
-"""
-                        )
-
-                        self._status(
-                            "Generated content rejected..."
-                        )
-
-                        break
-
-                    file_data["content"] = (
-                        generated_content
-                    )
-
-                    tool_input = json.dumps(
-                        file_data,
-                        ensure_ascii=False
-                    )
-
+                    if not isinstance(prepared_input, dict):
+                        raise TypeError("Tool input preparer must return an object.")
+                    tool_input = json.dumps(prepared_input, ensure_ascii=False)
                 except Exception as exc:
-
-                    tool_history.append(
-                        f"""
-File content generation failed.
-
-Error:
-
-{type(exc).__name__}: {exc}
-
-The file was NOT written.
-"""
-                    )
-
-                    self._status(
-                        "File generation failed..."
-                    )
-
+                    last_tool_error = f"Tool input preparation failed: {type(exc).__name__}: {exc}"
+                    tool_history.append(last_tool_error)
+                    self._status("Tool input preparation failed...")
                     continue
 
             valid, validation_error = (
