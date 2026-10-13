@@ -76,6 +76,7 @@ class WebSearchTool:
                 self._capture = None
                 self._buffer = []
                 self._in_result = False
+                self._result_depth = 0
 
             def handle_starttag(self, tag, attrs):
                 attrs = dict(attrs)
@@ -83,7 +84,10 @@ class WebSearchTool:
                 if self.provider == "ddg":
                     if tag == "div" and "result" in classes and "result--ad" not in classes:
                         self._in_result = True
+                        self._result_depth = 1
                         self._current = {"title": "", "url": "", "snippet": ""}
+                    elif self._in_result and tag == "div":
+                        self._result_depth += 1
                     elif self._in_result and tag == "a" and "result__a" in classes:
                         self._current["url"] = attrs.get("href", "")
                         self._capture = "title"
@@ -96,7 +100,10 @@ class WebSearchTool:
                 else:
                     if tag == "li" and "b_algo" in classes:
                         self._in_result = True
+                        self._result_depth = 1
                         self._current = {"title": "", "url": "", "snippet": ""}
+                    elif self._in_result and tag == "li":
+                        self._result_depth += 1
                     elif self._in_result and tag == "a" and not self._current.get("url"):
                         href = attrs.get("href", "")
                         if href.startswith(("https://", "http://")):
@@ -124,16 +131,21 @@ class WebSearchTool:
                             self._current[self._capture] = value
                     self._capture = None
                     self._buffer = []
-                if self._in_result and (
-                    (self.provider == "ddg" and tag == "div")
-                    or (self.provider == "bing" and tag == "li")
-                ):
-                    if self._current and self._current.get("url") and self._current.get("title"):
-                        self.results.append(self._current)
-                    self._current = None
-                    self._in_result = False
-                    self._capture = None
-                    self._buffer = []
+                closes_result = (
+                    self.provider == "ddg" and tag == "div"
+                ) or (
+                    self.provider == "bing" and tag == "li"
+                )
+                if self._in_result and closes_result:
+                    self._result_depth -= 1
+                    if self._result_depth <= 0:
+                        if self._current and self._current.get("url") and self._current.get("title"):
+                            self.results.append(self._current)
+                        self._current = None
+                        self._in_result = False
+                        self._result_depth = 0
+                        self._capture = None
+                        self._buffer = []
 
         providers = (
             (
