@@ -430,7 +430,32 @@ class ToolRouter:
         metadata = getattr(self.tools, "tools", {}).get(tool_name, {})
         schema = metadata.get("input_schema") if isinstance(metadata, dict) else None
         if isinstance(schema, dict):
-            return False
+            properties = schema.get("properties", {})
+            required = schema.get("required", [])
+            if not isinstance(properties, dict) or not isinstance(required, list):
+                return False
+            if any(key not in tool_input or tool_input[key] is None for key in required if isinstance(key, str)):
+                return False
+            if schema.get("additionalProperties") is False and set(tool_input) - set(properties):
+                return False
+            checks = {
+                "string": lambda value: isinstance(value, str),
+                "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+                "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+                "boolean": lambda value: isinstance(value, bool),
+                "object": lambda value: isinstance(value, dict),
+                "array": lambda value: isinstance(value, list),
+            }
+            for key, value in tool_input.items():
+                definition = properties.get(key)
+                if not isinstance(definition, dict):
+                    continue
+                check = checks.get(definition.get("type"))
+                if check and not check(value):
+                    return False
+                if isinstance(value, str) and len(value) < int(definition.get("minLength", 0)):
+                    return False
+            return True
         return self.tools.exists(tool_name) and bool(tool_input)
 
     def classify_task(self, message, conversation="", allowed_tools=None):
