@@ -2,7 +2,7 @@ import sys
 import threading
 from datetime import datetime
 
-from config.runtime import load_default_access
+from config.runtime import load_capability_definitions, load_default_access
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -42,6 +42,7 @@ GREEN = "#5fe09b"
 
 # Default permissions come from the declarative tool manifest.
 DEFAULT_ACCESS = load_default_access()
+CAPABILITY_DEFINITIONS = load_capability_definitions()
 
 
 def split_markdown_blocks(text):
@@ -650,24 +651,23 @@ class NovaWindow(QMainWindow):
         capabilities.setObjectName("sectionLabel")
         layout.addWidget(capabilities)
 
-        self.web_button = CapabilityButton("WEB SEARCH", "Public web access")
-        self.web_button.setToolTip("Allow Nova to use public web search.")
-        self.git_button = CapabilityButton("GIT", "Repository operations")
-        self.git_button.setToolTip("Allow Nova to use Git repository operations.")
-        self.pc_button = CapabilityButton("PC USE", "Terminal + files")
-        self.pc_button.setToolTip("Allow Nova to use terminal and filesystem tools.")
-
-        self.web_button.changed.connect(lambda v: self._set_access("web", v))
-        self.git_button.changed.connect(lambda v: self._set_access("git", v))
-        self.pc_button.changed.connect(lambda v: self._set_access("pc", v))
-
-        for button in (self.web_button, self.git_button, self.pc_button):
+        self.capability_buttons = {}
+        capability_names = dict.fromkeys(
+            (*DEFAULT_ACCESS.keys(), *CAPABILITY_DEFINITIONS.keys())
+        )
+        for capability in capability_names:
+            definition = CAPABILITY_DEFINITIONS.get(capability, {})
+            label = str(definition.get("label") or capability.replace("_", " ").upper())
+            subtitle = str(definition.get("subtitle") or capability.replace("_", " "))
+            button = CapabilityButton(label, subtitle)
+            button.setToolTip(str(definition.get("description") or f"Toggle {label} capability."))
+            button.changed.connect(
+                lambda enabled, name=capability: self._set_access(name, enabled)
+            )
             button.setAccessibleName(button.title)
             button.setAccessibleDescription(button.subtitle)
-
-        layout.addWidget(self.web_button, 0)
-        layout.addWidget(self.git_button, 0)
-        layout.addWidget(self.pc_button, 0)
+            self.capability_buttons[capability] = button
+            layout.addWidget(button, 0)
 
         return panel
 
@@ -752,9 +752,13 @@ class NovaWindow(QMainWindow):
         return wrapper
 
     def _wire_composer_controls(self):
-        """Globe button mirrors the WEB SEARCH capability toggle (both directions)."""
-        self.globe_button.toggled.connect(self.web_button.setChecked)
-        self.web_button.toggled.connect(self.globe_button.setChecked)
+        """Connect the globe control to the configured web capability when present."""
+        web_button = self.capability_buttons.get("web")
+        if web_button is None:
+            self.globe_button.setEnabled(False)
+        else:
+            self.globe_button.toggled.connect(web_button.setChecked)
+            web_button.toggled.connect(self.globe_button.setChecked)
         self.globe_button.toggled.connect(self._refresh_globe)
         self._refresh_globe()
 
@@ -1261,7 +1265,7 @@ class NovaWindow(QMainWindow):
         self.input.set_min_height(30)
 
         capability_height = max(48, min(58, int(height * 0.067)))
-        for button in (self.web_button, self.git_button, self.pc_button):
+        for button in self.capability_buttons.values():
             button.setFixedHeight(capability_height)
 
         self._refresh_capability_styles()
@@ -1277,31 +1281,21 @@ class NovaWindow(QMainWindow):
 
     def _sync_capabilities(self):
         access = self.core.get_access()
-
-        self.web_button.blockSignals(True)
-        self.git_button.blockSignals(True)
-        self.pc_button.blockSignals(True)
-
-        self.web_button.setChecked(access.get("web", True))
-        self.git_button.setChecked(access.get("git", True))
-        self.pc_button.setChecked(access.get("pc", True))
-
-        self.web_button.blockSignals(False)
-        self.git_button.blockSignals(False)
-        self.pc_button.blockSignals(False)
-
-        for button in (self.web_button, self.git_button, self.pc_button):
+        for capability, button in self.capability_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(access.get(capability, DEFAULT_ACCESS.get(capability, False)))
+            button.blockSignals(False)
             button._refresh()
 
+        web_button = self.capability_buttons.get("web")
         self.globe_button.blockSignals(True)
-        self.globe_button.setChecked(self.web_button.isChecked())
+        self.globe_button.setChecked(web_button.isChecked() if web_button else False)
         self.globe_button.blockSignals(False)
         self._refresh_globe()
-
         self._refresh_capability_styles()
 
     def _refresh_capability_styles(self):
-        for button in (self.web_button, self.git_button, self.pc_button):
+        for button in self.capability_buttons.values():
             if button.isChecked():
                 button.setStyleSheet(
                     """
@@ -1341,9 +1335,7 @@ class NovaWindow(QMainWindow):
                 )
 
     def _set_access(self, name, value):
-        kwargs = {"web": None, "git": None, "pc": None}
-        kwargs[name] = value
-        self.core.set_access(**kwargs)
+        self.core.set_access(**{name: value})
         self._refresh_capability_styles()
         self._add_activity(
             f"{name.upper()} access {'enabled' if value else 'disabled'}."
@@ -1355,10 +1347,16 @@ class NovaWindow(QMainWindow):
 
         access = self.core.get_access() if self.core else dict(DEFAULT_ACCESS)
         self.core = NovaCore()
-        self.core.set_access(**{
+        restored_access = {
             capability: access.get(capability, default)
             for capability, default in DEFAULT_ACCESS.items()
+        }
+        restored_access.update({
+            capability: enabled
+            for capability, enabled in access.items()
+            if capability not in restored_access
         })
+        self.core.set_access(**restored_access)
 
         if getattr(self, "current_model", None):
             self.core.brain.model = self.current_model
