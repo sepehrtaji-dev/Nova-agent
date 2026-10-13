@@ -151,12 +151,12 @@ def runtime_profile(core):
     tools = []
     for name, raw in sorted(registered.items()):
         data = raw if isinstance(raw, dict) else {}
-        capability = str(data.get("capability", "pc"))
+        capability = data.get("capability")
         tools.append({
             "name": str(name),
             "description": str(data.get("description", "")).strip(),
-            "capability": capability,
-            "enabled": bool(access.get(capability, True)),
+            "capability": capability or "Unknown",
+            "enabled": bool(capability and access.get(capability, False)),
         })
 
     components = []
