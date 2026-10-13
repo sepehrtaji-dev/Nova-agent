@@ -10,7 +10,9 @@
       "enabled": true,
       "input_schema": {
         "type": "object",
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "properties": {
           "query": {
             "type": "string",
@@ -18,6 +20,41 @@
           }
         },
         "additionalProperties": false
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create or overwrite a file after validating the requested path and complete content.",
+      "module": "tools.filesystem",
+      "class": "FileSystemTool",
+      "method": "write_file",
+      "prepare_input": "prepare_write_input",
+      "capability": "pc",
+      "enabled": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "desktop",
+              "system"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
     }
   ]
