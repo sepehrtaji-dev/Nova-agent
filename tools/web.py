@@ -1,3 +1,4 @@
+import base64
 import html
 import http.client
 import ssl
@@ -190,6 +191,17 @@ class WebSearchTool:
                 seen = set()
                 for item in parser.results:
                     result_url = html.unescape(item.get("url", "")).strip()
+                    if provider == "bing":
+                        bparsed = urllib.parse.urlsplit(result_url)
+                        if (bparsed.hostname or "").endswith("bing.com") and bparsed.path.startswith("/ck/a"):
+                            token = urllib.parse.parse_qs(bparsed.query).get("u", [""])[0]
+                            if token.startswith("a1"):
+                                try:
+                                    body = token[2:]
+                                    body += "=" * (-len(body) % 4)
+                                    result_url = base64.urlsafe_b64decode(body).decode("utf-8", "replace")
+                                except Exception:
+                                    pass
                     if provider == "ddg":
                         parsed_link = urllib.parse.urlsplit(result_url)
                         if parsed_link.hostname and parsed_link.hostname.endswith("duckduckgo.com"):
@@ -218,8 +230,8 @@ class WebSearchTool:
                     if len(cleaned) >= 8:
                         break
                 if cleaned:
-                    return "\\n\\n".join(
-                        f"[{index}]\\nTitle: {title}\\nURL: {result_url}\\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
+                    return "\n\n".join(
+                        f"[{index}]\nTitle: {title}\nURL: {result_url}\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
                         for index, (title, result_url, snippet) in enumerate(cleaned, start=1)
                     )
                 errors.append(f"{provider}: no parseable results")

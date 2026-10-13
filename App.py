@@ -1,17 +1,18 @@
 import sys
+import threading
 from datetime import datetime
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+from PySide6.QtCore import QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -36,6 +37,9 @@ MUTED = "#8d95a3"
 ACCENT = "#8b7cff"
 ACCENT_HOVER = "#9d91ff"
 GREEN = "#5fe09b"
+
+# Capabilities every new Nova session starts with (toggle them in the Activity panel).
+DEFAULT_ACCESS = {"web": True, "git": False, "pc": False}
 
 
 def split_markdown_blocks(text):
@@ -193,6 +197,44 @@ def make_avatar(letter="N", size=34):
     return pixmap
 
 
+def make_icon(kind, color="#aeb5c1", size=20, width=1.8):
+    """Crisp vector-drawn icons (no emoji / font glyph differences between PCs)."""
+    scale = 2
+    s = size * scale
+    c = s / 2
+    pixmap = QPixmap(s, s)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color), width * scale)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+
+    def line(x1, y1, x2, y2):
+        painter.drawLine(QPointF(x1 * s, y1 * s), QPointF(x2 * s, y2 * s))
+
+    if kind == "plus":
+        line(0.5, 0.25, 0.5, 0.75)
+        line(0.25, 0.5, 0.75, 0.5)
+    elif kind == "arrow_up":
+        line(0.5, 0.78, 0.5, 0.24)
+        line(0.5, 0.24, 0.27, 0.47)
+        line(0.5, 0.24, 0.73, 0.47)
+    elif kind == "chevron_down":
+        line(0.3, 0.4, 0.5, 0.62)
+        line(0.5, 0.62, 0.7, 0.4)
+    elif kind == "globe":
+        r = s * 0.36
+        painter.drawEllipse(QPointF(c, c), r, r)
+        painter.drawEllipse(QPointF(c, c), r * 0.45, r)
+        line(0.5 - 0.36, 0.5, 0.5 + 0.36, 0.5)
+    painter.end()
+    pixmap.setDevicePixelRatio(scale)
+    return QIcon(pixmap)
+
+
 class AgentWorker(QObject):
     status = Signal(str)
     finished = Signal(str)
@@ -210,6 +252,58 @@ class AgentWorker(QObject):
             self.finished.emit(str(result))
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class ComposerEdit(QPlainTextEdit):
+    """Multi-line input: Enter sends, Shift+Enter inserts a new line."""
+
+    submitted = Signal()
+    focus_changed = Signal(bool)
+    MAX_HEIGHT = 150
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.min_height = 44
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.setTabChangesFocus(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.textChanged.connect(self.fit_height)
+
+    def set_min_height(self, value):
+        self.min_height = value
+        self.fit_height()
+
+    def fit_height(self):
+        # QPlainTextEdit reports its document size in LINES (wrapped lines included),
+        # not pixels, so convert with the font's line height.
+        lines = max(1, int(round(self.document().size().height())))
+        margins = int(self.document().documentMargin() * 2)
+        wanted = lines * self.fontMetrics().lineSpacing() + margins + 8
+        self.setFixedHeight(max(self.min_height, min(self.MAX_HEIGHT, wanted)))
+        self.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded if wanted > self.MAX_HEIGHT else Qt.ScrollBarAlwaysOff
+        )
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.focus_changed.emit(True)
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.focus_changed.emit(False)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (
+            event.modifiers() & Qt.ShiftModifier
+        ):
+            self.submitted.emit()
+            return
+        super().keyPressEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_height()
 
 
 class MessageBubble(QFrame):
@@ -323,17 +417,19 @@ class NovaWindow(QMainWindow):
         super().__init__()
 
         self.core = NovaCore()
-        self.core.set_access(web=True, git=False, pc=False)
+        self.core.set_access(**DEFAULT_ACCESS)
         self.thread = None
+        self._autoscroll = True
         self.worker = None
         self.busy = False
         self.current_turn_status = None
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(760, 560)
+        self.setMinimumSize(980, 600)
         self.resize(1100, 760)
 
         self._build_ui()
+        self._wire_composer_controls()
         self._apply_style()
         self._sync_capabilities()
         self._welcome()
@@ -382,6 +478,9 @@ class NovaWindow(QMainWindow):
         self.chat_container_layout.addStretch()
 
         self.chat_scroll.setWidget(self.chat_container)
+        chat_bar = self.chat_scroll.verticalScrollBar()
+        chat_bar.rangeChanged.connect(self._on_chat_range_changed)
+        chat_bar.valueChanged.connect(self._on_chat_scrolled)
         chat_layout.addWidget(self.chat_scroll, 1)
         chat_layout.addWidget(self._build_composer(), 0)
 
@@ -389,7 +488,6 @@ class NovaWindow(QMainWindow):
         splitter.addWidget(chat)
         self.activity_panel = self._build_activity_panel()
         splitter.addWidget(self.activity_panel)
-        self.activity_panel.hide()
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
 
@@ -460,6 +558,7 @@ class NovaWindow(QMainWindow):
         ).strip()
         model_value = QLabel(model_name)
         model_value.setObjectName("modelValue")
+        self.sidebar_model_label = model_value
         footer_layout.addWidget(model_label)
         footer_layout.addWidget(model_value)
 
@@ -485,7 +584,7 @@ class NovaWindow(QMainWindow):
 
         pill = QLabel("LOCAL")
         pill.setObjectName("localPill")
-        layout.addWidget(pill)
+        layout.addWidget(pill, 0, Qt.AlignVCenter)
 
         layout.addStretch()
 
@@ -533,7 +632,10 @@ class NovaWindow(QMainWindow):
         self.activity_scroll.setFrameShape(QFrame.NoFrame)
         self.activity_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
+        self.activity_scroll.setObjectName("activityScroll")
+        self.activity_scroll.viewport().setAutoFillBackground(False)
         self.activity_container = QWidget()
+        self.activity_container.setObjectName("activityContainer")
         self.activity_layout = QVBoxLayout(self.activity_container)
         self.activity_layout.setContentsMargins(0, 0, 0, 0)
         self.activity_layout.setSpacing(5)
@@ -575,45 +677,148 @@ class NovaWindow(QMainWindow):
         layout = QVBoxLayout(wrapper)
         self.composer_layout = layout
         layout.setContentsMargins(34, 12, 34, 22)
-        layout.setSpacing(8)
+        layout.setSpacing(0)
 
-        self.input = QLineEdit()
+        # One rounded box holds the text field and the control row (like Ollama's app).
+        box = QFrame()
+        box.setObjectName("composerBox")
+        box.setProperty("focused", False)
+        self.composer_box = box
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(18, 12, 12, 12)
+        box_layout.setSpacing(8)
+
+        self.input = ComposerEdit()
         self.input.setObjectName("composer")
         self.input.setPlaceholderText("Send a message")
-        self.input.returnPressed.connect(self._send)
-        layout.addWidget(self.input, 1)
+        self.input.submitted.connect(self._send)
+        self.input.focus_changed.connect(self._on_composer_focus)
+        box_layout.addWidget(self.input)
 
         controls = QHBoxLayout()
-        controls.setContentsMargins(4, 0, 4, 0)
+        controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(8)
 
-        add_button = QPushButton("+")
-        add_button.setObjectName("composerUtility")
+        size = 38
+
+        add_button = QPushButton()
+        add_button.setObjectName("roundButton")
+        add_button.setIcon(make_icon("plus", "#aeb5c1"))
+        add_button.setIconSize(QSize(20, 20))
+        add_button.setFixedSize(size, size)
         add_button.setEnabled(False)
+        add_button.setToolTip("Attachments are not available yet.")
         controls.addWidget(add_button)
 
-        search_button = QPushButton("◎")
-        search_button.setObjectName("searchIndicator")
-        search_button.setToolTip("Web search is the only enabled tool.")
-        search_button.setEnabled(False)
-        controls.addWidget(search_button)
+        self.globe_button = QPushButton()
+        self.globe_button.setObjectName("roundButton")
+        self.globe_button.setCheckable(True)
+        self.globe_button.setCursor(Qt.PointingHandCursor)
+        self.globe_button.setIconSize(QSize(20, 20))
+        self.globe_button.setFixedSize(size, size)
+        controls.addWidget(self.globe_button)
+
         controls.addStretch(1)
 
-        self.model_selector = QComboBox()
+        self.current_model = str(
+            getattr(getattr(self.core, "brain", None), "model", "") or "Local model"
+        ).strip()
+        self.model_selector = QPushButton(self.current_model)
         self.model_selector.setObjectName("modelSelector")
-        model_name = str(getattr(getattr(self.core, "brain", None), "model", "") or "Configured local model").strip()
-        self.model_selector.addItem(model_name)
-        self.model_selector.setToolTip("Model switching will be added with Model Manager.")
+        self.model_selector.setCursor(Qt.PointingHandCursor)
+        self.model_selector.setIcon(make_icon("chevron_down", "#aeb5c1", 16))
+        self.model_selector.setIconSize(QSize(16, 16))
+        self.model_selector.setLayoutDirection(Qt.RightToLeft)  # chevron on the right
+        self.model_selector.setFixedHeight(size)
+        self.model_selector.setMinimumWidth(130)
+        self.model_selector.setToolTip("Choose which installed Ollama model Nova uses.")
+        self.model_selector.clicked.connect(self._show_model_menu)
         controls.addWidget(self.model_selector)
 
-        self.send_button = QPushButton("↑")
+        self.send_button = QPushButton()
         self.send_button.setObjectName("sendButton")
+        self.send_button.setIcon(make_icon("arrow_up", "#ffffff", 20, 2.2))
+        self.send_button.setIconSize(QSize(20, 20))
+        self.send_button.setFixedSize(size, size)
         self.send_button.setCursor(Qt.PointingHandCursor)
+        self.send_button.setToolTip("Send (Enter)")
         self.send_button.clicked.connect(self._send)
         controls.addWidget(self.send_button)
 
-        layout.addLayout(controls)
+        box_layout.addLayout(controls)
+        layout.addWidget(box)
         return wrapper
+
+    def _wire_composer_controls(self):
+        """Globe button mirrors the WEB SEARCH capability toggle (both directions)."""
+        self.globe_button.toggled.connect(self.web_button.setChecked)
+        self.web_button.toggled.connect(self.globe_button.setChecked)
+        self.globe_button.toggled.connect(self._refresh_globe)
+        self._refresh_globe()
+
+    def _refresh_globe(self, *_):
+        on = self.globe_button.isChecked()
+        self.globe_button.setIcon(make_icon("globe", "#7fb2ff" if on else "#747d8b"))
+        self.globe_button.setToolTip(
+            "Web search is ON (click to turn off)" if on else "Web search is OFF (click to turn on)"
+        )
+
+    def _on_composer_focus(self, focused):
+        self.composer_box.setProperty("focused", bool(focused))
+        self.composer_box.style().unpolish(self.composer_box)
+        self.composer_box.style().polish(self.composer_box)
+
+    def _installed_models(self):
+        """Names of models installed in Ollama; falls back to the current one."""
+        names = []
+        try:
+            import ollama
+
+            data = ollama.list()
+            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
+            for item in items or []:
+                if isinstance(item, dict):
+                    name = item.get("model") or item.get("name")
+                else:
+                    name = getattr(item, "model", None) or getattr(item, "name", None)
+                if name:
+                    names.append(str(name))
+        except Exception:
+            pass
+        if self.current_model and self.current_model not in names:
+            names.insert(0, self.current_model)
+        return sorted(set(names), key=str.lower)
+
+    def _build_model_menu(self):
+        menu = QMenu(self)
+        for name in self._installed_models():
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == self.current_model)
+            action.triggered.connect(lambda _checked=False, n=name: self._select_model(n))
+        return menu
+
+    def _show_model_menu(self):
+        if self.busy:
+            return
+        menu = self._build_model_menu()
+        button = self.model_selector
+        menu.adjustSize()
+        # Open upwards, aligned to the button's right edge (the composer sits at the bottom).
+        point = button.mapToGlobal(QPoint(button.width() - menu.sizeHint().width(), -menu.sizeHint().height() - 6))
+        menu.exec(point)
+
+    def _select_model(self, name):
+        if self.busy or not name or name == self.current_model:
+            return
+        self.current_model = name
+        brain = getattr(self.core, "brain", None)
+        if brain is not None:
+            brain.model = name
+        self.model_selector.setText(name)
+        if hasattr(self, "sidebar_model_label"):
+            self.sidebar_model_label.setText(name)
+        self._add_activity(f"Model switched to {name}.")
 
     def _welcome(self):
         model_name = str(
@@ -641,6 +846,12 @@ class NovaWindow(QMainWindow):
 
         QMainWindow, #root, #main {{
             background: {APP_BG};
+        }}
+
+        #activityScroll, #activityScroll > QWidget > QWidget, #activityContainer,
+        #chatScroll, #chatScroll > QWidget > QWidget, #chatContainer {{
+            background: transparent;
+            border: none;
         }}
 
         #sidebar {{
@@ -833,53 +1044,95 @@ class NovaWindow(QMainWindow):
             border-top: none;
         }}
 
-        #composer {{
-            background: #15171c;
-            border: 1px solid #2b3039;
-            border-radius: 20px;
-            padding: 0 16px;
-            font-size: 13px;
-            selection-background-color: #4a426f;
+        #composerBox {{
+            background: #15181f;
+            border: 1px solid #2a2f39;
+            border-radius: 22px;
         }}
 
-        #composer:focus {{
+        #composerBox[focused="true"] {{
             border-color: #514a72;
         }}
 
-        #composerUtility, #searchIndicator {{
-            background: #1b1e26;
-            color: #aeb5c1;
+        #composer {{
+            background: transparent;
             border: none;
-            border-radius: 18px;
-            font-size: 18px;
+            padding: 2px 2px;
+            font-size: 14px;
+            selection-background-color: #4a426f;
+        }}
+
+        #roundButton {{
+            background: #1e222b;
+            border: none;
+            border-radius: 19px;
+        }}
+
+        #roundButton:hover {{
+            background: #262b36;
+        }}
+
+        #roundButton:checked {{
+            background: #1a2438;
+        }}
+
+        #roundButton:disabled {{
+            background: #191c23;
         }}
 
         #modelSelector {{
-            background: #1b1e26;
-            color: #f5f7fa;
+            background: #1e222b;
+            color: {TEXT};
             border: none;
-            border-radius: 18px;
-            padding: 0 12px;
+            border-radius: 19px;
+            padding: 0 16px;
             font-size: 12px;
+            font-weight: 600;
+        }}
+
+        #modelSelector:hover {{
+            background: #262b36;
         }}
 
         #sendButton {{
             background: {ACCENT};
-            color: #ffffff;
             border: none;
-            border-radius: 18px;
-            font-size: 23px;
-            font-weight: 700;
+            border-radius: 19px;
         }}
 
         #sendButton:hover {{
             background: {ACCENT_HOVER};
-            color: #ffffff;
         }}
 
         #sendButton:disabled {{
-            background: #292733;
-            color: #666172;
+            background: #2a2833;
+        }}
+
+        QMenu {{
+            background: #15181f;
+            border: 1px solid #2a2f39;
+            border-radius: 10px;
+            padding: 6px;
+        }}
+
+        QMenu::item {{
+            padding: 8px 26px 8px 14px;
+            border-radius: 6px;
+            color: {TEXT};
+            font-size: 12px;
+        }}
+
+        QMenu::item:selected {{
+            background: #222733;
+        }}
+
+        QMenu::indicator {{
+            width: 0px;
+        }}
+
+        QMenu::item:checked {{
+            color: {ACCENT_HOVER};
+            font-weight: 700;
         }}
 
         #chatArea, #chatScroll, #chatContainer, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {{
@@ -970,8 +1223,11 @@ class NovaWindow(QMainWindow):
         self.activity_panel.setMaximumWidth(activity_width)
 
         available_main = max(1, width - sidebar_width)
-        chat_width = max(1, available_main - activity_width)
-        self.main_splitter.setSizes([chat_width, activity_width])
+        if self.activity_panel.isVisible():
+            chat_width = max(1, available_main - activity_width)
+            self.main_splitter.setSizes([chat_width, activity_width])
+        else:
+            chat_width = available_main
 
         side_pad = max(12, min(20, int(sidebar_width * 0.06)))
         self._set_layout_margins(
@@ -983,7 +1239,6 @@ class NovaWindow(QMainWindow):
         )
 
         self.header.setFixedHeight(max(58, min(72, int(height * 0.082))))
-        self.header.hide()
 
         chat_margin_x = max(24, min(64, int(chat_width * 0.055)))
         self.chat_container_layout.setContentsMargins(
@@ -1001,12 +1256,7 @@ class NovaWindow(QMainWindow):
             max(16, min(24, int(height * 0.026))),
         )
 
-        control_height = max(42, min(52, int(height * 0.065)))
-        self.input.setFixedHeight(control_height)
-        self.send_button.setFixedSize(control_height, control_height)
-        if hasattr(self, "model_selector"):
-            self.model_selector.setFixedHeight(control_height - 4)
-            self.model_selector.setMinimumWidth(125)
+        self.input.set_min_height(30)
 
         capability_height = max(48, min(58, int(height * 0.067)))
         for button in (self.web_button, self.git_button, self.pc_button):
@@ -1037,6 +1287,14 @@ class NovaWindow(QMainWindow):
         self.web_button.blockSignals(False)
         self.git_button.blockSignals(False)
         self.pc_button.blockSignals(False)
+
+        for button in (self.web_button, self.git_button, self.pc_button):
+            button._refresh()
+
+        self.globe_button.blockSignals(True)
+        self.globe_button.setChecked(self.web_button.isChecked())
+        self.globe_button.blockSignals(False)
+        self._refresh_globe()
 
         self._refresh_capability_styles()
 
@@ -1093,9 +1351,16 @@ class NovaWindow(QMainWindow):
         if self.busy:
             return
 
+        access = self.core.get_access() if self.core else dict(DEFAULT_ACCESS)
         self.core = NovaCore()
-        # The temporary testing build must stay web-search-only for every chat.
-        self.core.set_access(web=True, git=False, pc=False)
+        self.core.set_access(
+            web=access.get("web", DEFAULT_ACCESS["web"]),
+            git=access.get("git", DEFAULT_ACCESS["git"]),
+            pc=access.get("pc", DEFAULT_ACCESS["pc"]),
+        )
+
+        if getattr(self, "current_model", None):
+            self.core.brain.model = self.current_model
 
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
@@ -1160,22 +1425,43 @@ class NovaWindow(QMainWindow):
         self._scroll_activity()
 
     def _scroll_chat(self):
+        self._autoscroll = True
+        QTimer.singleShot(0, self._chat_to_bottom)
+        QTimer.singleShot(80, self._chat_to_bottom)
+
+    def _chat_to_bottom(self):
+        if self._autoscroll:
+            bar = self.chat_scroll.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
+    def _on_chat_range_changed(self, _minimum, _maximum):
+        # Content height changes after layout (wrapped text); keep following the end.
+        self._chat_to_bottom()
+
+    def _on_chat_scrolled(self, value):
         bar = self.chat_scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        # If the user scrolls up to read, stop auto-following until the next message.
+        self._autoscroll = value >= bar.maximum() - 24
 
     def _scroll_activity(self):
+        QTimer.singleShot(0, self._activity_to_bottom)
+
+    def _activity_to_bottom(self):
         bar = self.activity_scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
 
     def _focus_activity(self):
-        self.activity_scroll.setFocus()
-        self._scroll_activity()
+        """Show or hide the Activity / Capabilities panel."""
+        self.activity_panel.setVisible(not self.activity_panel.isVisible())
+        self._sync_responsive_layout()
+        if self.activity_panel.isVisible():
+            self._scroll_activity()
 
     def _send(self):
         if self.busy:
             return
 
-        message = self.input.text().strip()
+        message = self.input.toPlainText().strip()
         if not message:
             return
 
@@ -1200,19 +1486,14 @@ class NovaWindow(QMainWindow):
         self.busy = True
         self.input.setEnabled(False)
         self.send_button.setEnabled(False)
-        self.thread = QThread()
         self.worker = AgentWorker(self.core, message)
-        self.worker.moveToThread(self.thread)
-
-        self.thread.started.connect(self.worker.run)
         self.worker.status.connect(self._on_status)
         self.worker.finished.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
 
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.failed.connect(self.thread.quit)
-        self.thread.finished.connect(self._thread_cleanup)
-
+        # Daemon thread: a long model call can never keep the app alive after the
+        # window is closed (a QThread would crash with "destroyed while running").
+        self.thread = threading.Thread(target=self.worker.run, daemon=True)
         self.thread.start()
 
     def _on_status(self, message):
@@ -1261,14 +1542,11 @@ class NovaWindow(QMainWindow):
             """
         )
         self.input.setFocus()
-
-    def _thread_cleanup(self):
-        if self.worker:
-            self.worker.deleteLater()
-        if self.thread:
-            self.thread.deleteLater()
         self.worker = None
         self.thread = None
+
+    def closeEvent(self, event):
+        super().closeEvent(event)
 
 
 def main():

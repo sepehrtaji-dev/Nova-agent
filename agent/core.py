@@ -1,5 +1,6 @@
 import ast
 import json
+import logging
 import os
 import re
 
@@ -1390,6 +1391,139 @@ If nothing reliable can be extracted:
             return unclear
         return answer
 
+    # ── Explicit user commands ─────────────────────────────────────────────
+    # A small local model is unreliable at deciding "should I use a tool?".
+    # When the user plainly commands an action ("search the web about X",
+    # "list files", "git status"), the decision is made here in code, not by the
+    # model. The model is only used for what it is good at.
+    _POLITE = (
+        r"^\s*(?:(?:hey|hi|ok|okay|so|nova|please|pls|kindly|can you|could you|would you|"
+        r"will you|i want you to|i need you to|go ahead and|try to|just)[\s,]+)*"
+    )
+    _WEB_INTENT = re.compile(
+        _POLITE
+        + r"(?:search|look\s*up|lookup|google|browse|find\s+out|research)\b\s*"
+        r"(?:(?:the\s+)?(?:web|internet|online|net)\b)?\s*"
+        r"(?:for|about|on|up)?\s*(?P<query>.*)$",
+        re.IGNORECASE | re.DOTALL,
+    )
+    _NOT_A_QUERY = {
+        "", "it", "that", "this", "them", "something", "anything", "the web", "web",
+        "the internet", "internet", "online", "the net", "net", "for me", "me",
+    }
+    _PC_INTENT = re.compile(
+        _POLITE
+        + r"(?:(?:list|show|read|open|create|make|write|save|edit|delete|remove|find)\b[^.?!\n]{0,60}"
+        r"\b(?:files?|folders?|directory|directories)\b"
+        r"|(?:run|execute)\b[^.?!\n]{0,60}\b(?:command|script|python|pip|npm|node)\b)",
+        re.IGNORECASE,
+    )
+    _GIT_INTENT = re.compile(
+        _POLITE
+        + r"(?:git\s+(?:status|log|diff|branch|commit|pull|push|stash)\b"
+        r"|(?:show|list|get|check)\b[^.?!\n]{0,40}\b(?:github|issues?|pull\s+requests?|prs?|releases?|workflows?)\b)",
+        re.IGNORECASE,
+    )
+
+    def _explicit_web_query(self, message):
+        """Return the search query if the user explicitly commanded a web search."""
+        text = " ".join(str(message or "").split())
+        if not text or len(text) > 600:
+            return None
+        match = self._WEB_INTENT.match(text)
+        if not match:
+            return None
+        query = match.group("query").strip(" \t.,;:!?\"'")
+        query = re.sub(
+            r"\s+(?:for me|please|pls|and (?:tell|show|give|summari[sz]e)\b.*)$",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip(" \t.,;:!?\"'")
+        if query.lower() in self._NOT_A_QUERY or len(query) < 2:
+            return None
+        return query
+
+    def _explicit_capability(self, message):
+        """Return 'pc' or 'git' when the user plainly commands a tool action."""
+        text = " ".join(str(message or "").split())
+        if not text or len(text) > 600 or text.endswith("?"):
+            return None
+        if self._GIT_INTENT.match(text):
+            return "git"
+        if self._PC_INTENT.match(text):
+            return "pc"
+        return None
+
+    def _disabled_capability_message(self, capability):
+        labels = {"web": "WEB SEARCH", "git": "GIT", "pc": "PC USE"}
+        return (
+            f"{labels.get(capability, capability.upper())} is turned off, so I can't do that yet. "
+            f"Turn it on under Activity > Capabilities and ask again."
+        )
+
+    def _run_explicit_web_search(self, message, query):
+        """Run web_search directly, verify it, and answer only from real results."""
+        tool_name = "web_search"
+        tool_input = json.dumps({"query": query}, ensure_ascii=False)
+
+        self._status(f"Searching the web: {query[:60]}")
+        try:
+            result = self.tools.execute(tool_name, tool_input)
+        except Exception as exc:
+            result = f"TOOL_EXECUTION_EXCEPTION\n{type(exc).__name__}: {exc}"
+        if not isinstance(result, str):
+            result = str(result)
+
+        self._status("Verifying web_search result...")
+        verification = self.verifier.verify(tool_name, tool_input, result)
+        succeeded = verification.confirmed()
+        self._status(
+            f"{'✓ Confirmed' if succeeded else '✗ Failed'}: {verification.message}"
+        )
+
+        if succeeded:
+            try:
+                self._remember_verified_tool_result(tool_name, tool_input, result, verification)
+            except Exception:
+                pass
+            try:
+                self._status("Learning from search...")
+                self._learn_from_search(query, result)
+            except Exception as exc:
+                logging.debug("Learning from search failed: %s", exc)
+            formatted = self._format_verified_web_results(
+                "TOOL_NAME: web_search\n"
+                f"INPUT:\n{tool_input}\n"
+                "BEGIN_RAW_TOOL_RESULT\n"
+                f"{result}\n"
+                "END_RAW_TOOL_RESULT\n"
+                "VERIFIER_STATUS: CONFIRMED"
+            )
+            response = formatted or (
+                "The search ran, but I couldn't read structured results from it.\n\n"
+                + result[:3000]
+            )
+        else:
+            response = (
+                f"I tried to search the web for \"{query}\" but the search failed, "
+                "so I won't guess an answer.\n\n"
+                f"Reason: {verification.message}\n"
+                f"{result[:800]}"
+            )
+
+        try:
+            self.episodic_memory.record(
+                goal=message,
+                tool_name=tool_name,
+                status=getattr(verification, "status", "unverifiable"),
+                evidence=getattr(verification, "evidence", ""),
+                message=getattr(verification, "message", ""),
+            )
+        except Exception:
+            pass
+        return response
+
     def ask(self, message):
 
         self._status(
@@ -1411,6 +1545,24 @@ If nothing reliable can be extracted:
             "user",
             message
         )
+
+        # Explicit commands never go through the model's "should I use a tool?" guess.
+        explicit_query = self._explicit_web_query(message)
+        if explicit_query is not None:
+            if "web_search" in self._allowed_tools():
+                response = self._run_explicit_web_search(message, explicit_query)
+            else:
+                response = self._disabled_capability_message("web")
+            self._status("Done")
+            self.short_memory.add("assistant", response)
+            return response
+
+        explicit_capability = self._explicit_capability(message)
+        if explicit_capability and not self.access.get(explicit_capability, False):
+            response = self._disabled_capability_message(explicit_capability)
+            self._status("Done")
+            self.short_memory.add("assistant", response)
+            return response
 
         direct_identity_answer = self._direct_identity_answer(message)
         if direct_identity_answer is not None:
@@ -1558,6 +1710,9 @@ If nothing reliable can be extracted:
             "computer"
         }:
             task_type = "conversation"
+
+        if task_type == "conversation" and explicit_capability:
+            task_type = "computer"
 
         self._status(
             f"Task type: {task_type}"
@@ -2308,6 +2463,7 @@ Nova must choose another useful action.
                     web_search_used = True
                     direct_web_response = self._format_verified_web_results(
                         "TOOL_NAME: web_search\n"
+                        f"INPUT:\n{tool_input}\n"
                         "BEGIN_RAW_TOOL_RESULT\n"
                         f"{result}\n"
                         "END_RAW_TOOL_RESULT\n"
