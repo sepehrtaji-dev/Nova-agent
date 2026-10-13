@@ -63,10 +63,9 @@ class WebSearchTool:
         from html.parser import HTMLParser
 
         query = self._parse_input(input_data)
-        query = " ".join(query.split()) if isinstance(query, str) else ""
         if not query:
             return "Web search error: Search query is empty."
-        query = query[:500]
+        query = " ".join(query.split())[:500]
 
         class SearchResultParser(HTMLParser):
             def __init__(self, provider):
@@ -219,8 +218,8 @@ class WebSearchTool:
                     if len(cleaned) >= 8:
                         break
                 if cleaned:
-                    return "\n\n".join(
-                        f"[{index}]\nTitle: {title}\nURL: {result_url}\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
+                    return "\\n\\n".join(
+                        f"[{index}]\\nTitle: {title}\\nURL: {result_url}\\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
                         for index, (title, result_url, snippet) in enumerate(cleaned, start=1)
                     )
                 errors.append(f"{provider}: no parseable results")
