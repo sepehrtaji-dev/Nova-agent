@@ -549,23 +549,47 @@ class NovaWindow(QMainWindow):
         wrapper.setObjectName("composerArea")
         self.composer_area = wrapper
 
-        layout = QHBoxLayout(wrapper)
+        layout = QVBoxLayout(wrapper)
         self.composer_layout = layout
-        layout.setContentsMargins(34, 14, 34, 22)
-        layout.setSpacing(10)
+        layout.setContentsMargins(34, 12, 34, 22)
+        layout.setSpacing(8)
 
         self.input = QLineEdit()
         self.input.setObjectName("composer")
-        self.input.setPlaceholderText("Message Nova...")
+        self.input.setPlaceholderText("Send a message")
         self.input.returnPressed.connect(self._send)
         layout.addWidget(self.input, 1)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(4, 0, 4, 0)
+        controls.setSpacing(8)
+
+        add_button = QPushButton("+")
+        add_button.setObjectName("composerUtility")
+        add_button.setEnabled(False)
+        controls.addWidget(add_button)
+
+        search_button = QPushButton("◎")
+        search_button.setObjectName("searchIndicator")
+        search_button.setToolTip("Web search is the only enabled tool.")
+        search_button.setEnabled(False)
+        controls.addWidget(search_button)
+        controls.addStretch(1)
+
+        self.model_selector = QComboBox()
+        self.model_selector.setObjectName("modelSelector")
+        model_name = str(getattr(getattr(self.core, "brain", None), "model", "") or "Configured local model").strip()
+        self.model_selector.addItem(model_name)
+        self.model_selector.setToolTip("Model switching will be added with Model Manager.")
+        controls.addWidget(self.model_selector)
 
         self.send_button = QPushButton("↑")
         self.send_button.setObjectName("sendButton")
         self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.clicked.connect(self._send)
-        layout.addWidget(self.send_button)
+        controls.addWidget(self.send_button)
 
+        layout.addLayout(controls)
         return wrapper
 
     def _welcome(self):
