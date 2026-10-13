@@ -5,6 +5,7 @@ class ToolRegistry:
 
     def __init__(self):
         self.tools = {}
+        self.default_access = {}
 
     def register(
         self,
