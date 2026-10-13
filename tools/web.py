@@ -54,162 +54,168 @@ class WebSearchTool:
         return text
 
     def run(self, input_data):
-        """Input object: {\"query\": \"search terms\"}. Searches the public web; query must be non-empty."""
-        query = self._parse_input(input_data)
+        """Search the public web and return bounded, source-linked results.
 
+        Accepts a string or a dict containing query/search/q. The output keeps
+        Nova's existing numbered Title/URL/Snippet contract for its planner and
+        verifier. No search results are fabricated when a provider fails.
+        """
+        from html.parser import HTMLParser
+
+        query = self._parse_input(input_data)
         if not query:
             return "Web search error: Search query is empty."
+        query = " ".join(query.split())[:500]
 
-        encoded = urllib.parse.urlencode({
-            "q": query
-        })
+        class SearchResultParser(HTMLParser):
+            def __init__(self, provider):
+                super().__init__(convert_charrefs=True)
+                self.provider = provider
+                self.results = []
+                self._current = None
+                self._capture = None
+                self._buffer = []
+                self._in_result = False
 
-        url = (
-            "https://html.duckduckgo.com/html/"
-            f"?{encoded}"
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                classes = set((attrs.get("class") or "").split())
+                if self.provider == "ddg":
+                    if tag == "div" and "result" in classes and "result--ad" not in classes:
+                        self._in_result = True
+                        self._current = {"title": "", "url": "", "snippet": ""}
+                    elif self._in_result and tag == "a" and "result__a" in classes:
+                        self._current["url"] = attrs.get("href", "")
+                        self._capture = "title"
+                        self._buffer = []
+                    elif self._in_result and tag in {"a", "div"} and (
+                        "result__snippet" in classes or "result__body" in classes
+                    ):
+                        self._capture = "snippet"
+                        self._buffer = []
+                else:
+                    if tag == "li" and "b_algo" in classes:
+                        self._in_result = True
+                        self._current = {"title": "", "url": "", "snippet": ""}
+                    elif self._in_result and tag == "a" and not self._current.get("url"):
+                        href = attrs.get("href", "")
+                        if href.startswith(("https://", "http://")):
+                            self._current["url"] = href
+                            self._capture = "title"
+                            self._buffer = []
+                    elif self._in_result and tag in {"p", "div"} and (
+                        tag == "p" or "b_caption" in classes
+                    ):
+                        self._capture = "snippet"
+                        self._buffer = []
+
+            def handle_data(self, data):
+                if self._capture:
+                    self._buffer.append(data)
+
+            def handle_endtag(self, tag):
+                if self._capture and (
+                    (self._capture == "title" and tag == "a")
+                    or (self._capture == "snippet" and tag in {"a", "div", "p"})
+                ):
+                    value = " ".join(" ".join(self._buffer).split())
+                    if self._current is not None and value:
+                        if not self._current.get(self._capture):
+                            self._current[self._capture] = value
+                    self._capture = None
+                    self._buffer = []
+                if self._in_result and (
+                    (self.provider == "ddg" and tag == "div")
+                    or (self.provider == "bing" and tag == "li")
+                ):
+                    if self._current and self._current.get("url") and self._current.get("title"):
+                        self.results.append(self._current)
+                    self._current = None
+                    self._in_result = False
+                    self._capture = None
+                    self._buffer = []
+
+        providers = (
+            (
+                "ddg",
+                "https://html.duckduckgo.com/html/",
+                {"q": query},
+            ),
+            (
+                "bing",
+                "https://www.bing.com/search",
+                {"q": query, "count": "10"},
+            ),
         )
+        errors = []
+        for provider, endpoint, params in providers:
+            url = endpoint + "?" + urllib.parse.urlencode(params)
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": self.user_agent,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.8",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=12) as response:
+                    if response.status != 200:
+                        errors.append(f"{provider}: HTTP {response.status}")
+                        continue
+                    raw = response.read(2_000_001)
+                if len(raw) > 2_000_000:
+                    errors.append(f"{provider}: response exceeded 2 MB")
+                    continue
+                parser = SearchResultParser(provider)
+                parser.feed(raw.decode("utf-8", errors="replace"))
+                parser.close()
+                cleaned = []
+                seen = set()
+                for item in parser.results:
+                    result_url = html.unescape(item.get("url", "")).strip()
+                    if provider == "ddg":
+                        parsed_link = urllib.parse.urlsplit(result_url)
+                        if parsed_link.hostname and parsed_link.hostname.endswith("duckduckgo.com"):
+                            target = urllib.parse.parse_qs(parsed_link.query).get("uddg", [""])[0]
+                            if target:
+                                result_url = urllib.parse.unquote(target)
+                    parsed = urllib.parse.urlsplit(result_url)
+                    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                        continue
+                    if parsed.username or parsed.password:
+                        continue
+                    host = parsed.hostname.lower().rstrip(".")
+                    if host in {"duckduckgo.com", "www.duckduckgo.com", "bing.com", "www.bing.com"}:
+                        continue
+                    normalized = urllib.parse.urlunsplit(
+                        (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path or "/", parsed.query, "")
+                    )
+                    if normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    title = " ".join(html.unescape(item.get("title", "")).split())
+                    snippet = " ".join(html.unescape(item.get("snippet", "")).split())
+                    if not title:
+                        continue
+                    cleaned.append((title[:300], normalized[:2000], snippet[:1000]))
+                    if len(cleaned) >= 8:
+                        break
+                if cleaned:
+                    return "\\n\\n".join(
+                        f"[{index}]\\nTitle: {title}\\nURL: {result_url}\\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
+                        for index, (title, result_url, snippet) in enumerate(cleaned, start=1)
+                    )
+                errors.append(f"{provider}: no parseable results")
+            except Exception as exc:
+                errors.append(f"{provider}: {type(exc).__name__}: {exc}")
 
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": self.user_agent
-            }
+        details = "; ".join(errors)[:1200]
+        return (
+            "Web search error: Search providers returned no usable results. "
+            "No results were invented."
+            + (f" Details: {details}" if details else "")
         )
-
-        try:
-            with urllib.request.urlopen(
-                request,
-                timeout=15
-            ) as response:
-                raw = response.read().decode(
-                    "utf-8",
-                    errors="replace"
-                )
-
-        except Exception as e:
-            return (
-                "Web search error: "
-                f"{type(e).__name__}: {e}"
-            )
-
-        result_pattern = re.compile(
-            r'<div[^>]+class="result[^"]*"[^>]*>'
-            r'.*?'
-            r'<a[^>]+class="result__a"[^>]+'
-            r'href="([^"]+)"[^>]*>'
-            r'(.*?)'
-            r'</a>'
-            r'.*?'
-            r'<a[^>]+class="result__snippet"[^>]*>'
-            r'(.*?)'
-            r'</a>',
-            re.IGNORECASE | re.DOTALL
-        )
-
-        matches = result_pattern.findall(raw)
-
-        if not matches:
-            # Fallback 1: simpler pattern for result links
-            fallback_pattern = re.compile(
-                r'<a[^>]+class="result__a"[^>]+'
-                r'href="([^"]+)"[^>]*>'
-                r'(.*?)'
-                r'</a>',
-                re.IGNORECASE | re.DOTALL
-            )
-
-            matches = [
-                (link, title, "")
-                for link, title
-                in fallback_pattern.findall(raw)
-            ]
-
-        if not matches:
-            # Fallback 2: generic pattern for any links with result-like classes
-            generic_pattern = re.compile(
-                r'<a[^>]+class="[^"]*result[^"]*"[^>]+'
-                r'href="([^"]+)"[^>]*>'
-                r'(.*?)'
-                r'</a>',
-                re.IGNORECASE | re.DOTALL
-            )
-
-            matches = [
-                (link, title, "")
-                for link, title
-                in generic_pattern.findall(raw)
-            ]
-
-        if not matches:
-            # Fallback 3: try to find any external links in the page
-            any_link_pattern = re.compile(
-                r'<a[^>]+href="(https?://[^"]+)"[^>]*>'
-                r'(.*?)'
-                r'</a>',
-                re.IGNORECASE | re.DOTALL
-            )
-
-            matches = [
-                (link, title, "")
-                for link, title
-                in any_link_pattern.findall(raw)
-                if "duckduckgo" not in link.lower()
-            ]
-
-        if not matches:
-            return (
-                "Web search error: "
-                "No web search results found."
-            )
-
-        results = []
-        base_url = "https://html.duckduckgo.com"
-
-        for index, (link, title, snippet) in enumerate(
-            matches[:6],
-            start=1
-        ):
-            title = re.sub(
-                r"<.*?>",
-                "",
-                title
-            )
-
-            snippet = re.sub(
-                r"<.*?>",
-                "",
-                snippet
-            )
-
-            title = html.unescape(
-                title
-            ).strip()
-
-            snippet = html.unescape(
-                snippet
-            ).strip()
-
-            link = html.unescape(
-                link
-            ).strip()
-
-            # Handle relative URLs by converting to absolute
-            if link.startswith("//"):
-                link = "https:" + link
-            elif link.startswith("/"):
-                link = base_url + link
-            elif not link.startswith(("http://", "https://")):
-                link = base_url + "/" + link
-
-            results.append(
-                f"[{index}]\n"
-                f"Title: {title}\n"
-                f"URL: {link}\n"
-                f"Snippet: {snippet}"
-            )
-
-        return "\n\n".join(results)
-
 
     def _resolve_public_url(self, url):
         """Validate a URL and return its resolved public IPs for connection pinning."""
