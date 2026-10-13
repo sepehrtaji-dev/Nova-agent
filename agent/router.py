@@ -393,295 +393,26 @@ class ToolRouter:
 
         return False
 
-    def _normalize_web_search_input(self, tool_input):
+    def _validate_basic_tool_input(self, tool_name, tool_input):
+        """Validate only the generic transport contract.
 
-        if isinstance(tool_input, str):
-
-            stripped = tool_input.strip()
-
-            if not stripped:
-                return None
-
-            try:
-
-                parsed = json.loads(
-                    stripped
-                )
-
-                if isinstance(parsed, dict):
-                    tool_input = parsed
-
-                else:
-
-                    return json.dumps(
-                        {
-                            "query": stripped
-                        },
-                        ensure_ascii=False
-                    )
-
-            except json.JSONDecodeError:
-
-                return json.dumps(
-                    {
-                        "query": stripped
-                    },
-                    ensure_ascii=False
-                )
-
-        if not isinstance(tool_input, dict):
-            return None
-
-        query = (
-            tool_input.get("query")
-            or tool_input.get("search")
-            or tool_input.get("q")
-            or tool_input.get("text")
-        )
-
-        if not isinstance(query, str):
-            return None
-
-        query = query.strip()
-
-        if not query:
-            return None
-
-        return json.dumps(
-            {
-                "query": query
-            },
-            ensure_ascii=False
-        )
-
-    def _validate_basic_tool_input(
-        self,
-        tool_name,
-        tool_input
-    ):
-
-        if not isinstance(
-            tool_input,
-            dict
-        ):
+        Tool-specific argument validation belongs to the registered tool itself,
+        not to a growing list of tool-name conditionals in the router.
+        """
+        if not self.tools.exists(tool_name):
             return False
-
-        if tool_name == "write_file":
-
-            path = tool_input.get(
-                "path"
-            )
-
-            location = tool_input.get(
-                "location",
-                "projects"
-            )
-
-            if not isinstance(
-                path,
-                str
-            ):
+        if isinstance(tool_input, str):
+            return bool(tool_input.strip())
+        if isinstance(tool_input, dict):
+            if not tool_input:
                 return False
-
-            if not path.strip():
+            if any(not isinstance(key, str) or not key.strip() for key in tool_input):
                 return False
-
-            if location not in {
-                "projects",
-                "desktop",
-                "system"
-            }:
-                return False
-
-            return True
-
-        if tool_name == "find_files":
-            path = tool_input.get("path", ".")
-            location = tool_input.get("location", "projects")
-            if not isinstance(path, str):
-                return False
-            if location not in {"projects", "desktop", "system"}:
-                return False
-            for key in ("created_within_hours", "modified_within_hours"):
-                if key in tool_input and tool_input.get(key) is not None:
-                    try:
-                        if float(tool_input.get(key)) < 0:
-                            return False
-                    except (TypeError, ValueError):
-                        return False
-            return True
-
-        if tool_name == "read_file":
-
-            path = tool_input.get(
-                "path"
-            )
-
-            location = tool_input.get(
-                "location",
-                "projects"
-            )
-
-            if not isinstance(
-                path,
-                str
-            ):
-                return False
-
-            if not path.strip():
-                return False
-
-            if location not in {
-                "projects",
-                "desktop",
-                "system"
-            }:
-                return False
-
-            return True
-
-        if tool_name == "list_files":
-
-            path = tool_input.get(
-                "path",
-                "."
-            )
-
-            location = tool_input.get(
-                "location",
-                "projects"
-            )
-
-            if not isinstance(
-                path,
-                str
-            ):
-                return False
-
-            if location not in {
-                "projects",
-                "desktop",
-                "system"
-            }:
-                return False
-
-            return True
-
-        if tool_name == "create_directory":
-
-            path = tool_input.get(
-                "path"
-            )
-
-            location = tool_input.get(
-                "location",
-                "projects"
-            )
-
-            if not isinstance(
-                path,
-                str
-            ):
-                return False
-
-            path = path.strip()
-
-            if not path:
-                return False
-
-            if path in {
-                "~",
-                "/",
-                "\\",
-                ".",
-                ".."
-            }:
-                return False
-
-            if location not in {
-                "projects",
-                "desktop",
-                "system"
-            }:
-                return False
-
-            return True
-
-        if tool_name == "terminal":
-
-            command = tool_input.get(
-                "command"
-            )
-
-            location = tool_input.get(
-                "location",
-                "projects"
-            )
-
-            if not isinstance(
-                command,
-                str
-            ):
-                return False
-
-            if not command.strip():
-                return False
-
-            if location not in {
-                "projects",
-                "desktop"
-            }:
-                return False
-
-            return True
-
-        if tool_name == "web_search":
-
-            query = (
-                tool_input.get("query")
-                or tool_input.get("search")
-                or tool_input.get("q")
-                or tool_input.get("text")
-            )
-
-            return (
-                isinstance(query, str)
-                and bool(query.strip())
-            )
-
-        if tool_name == "git":
-            action = tool_input.get("action")
-            if not isinstance(action, str) or not action.strip():
-                return False
-            valid_actions = {
-                "init", "clone", "status", "add",
-                "commit", "push", "pull", "log",
-                "diff", "branch", "checkout",
-                "create_branch", "stash", "create_repo"
-            }
-            if action.strip().lower() not in valid_actions:
+            try:
+                json.dumps(tool_input, ensure_ascii=False)
+            except (TypeError, ValueError):
                 return False
             return True
-
-        if tool_name == "generate_image":
-            prompt = tool_input.get("prompt")
-            return isinstance(prompt, str) and bool(prompt.strip())
-
-        if tool_name == "desktop":
-            action = tool_input.get("action")
-            return isinstance(action, str) and bool(action.strip())
-
-        if tool_name in {"edit_file", "delete_file"}:
-            path = tool_input.get("path")
-            location = tool_input.get("location", "projects")
-            return (
-                isinstance(path, str)
-                and bool(path.strip())
-                and location in {"projects", "desktop", "system"}
-            )
-
-        # BUG 20: Unknown tools should return False
-        logging.warning("Unknown tool encountered in validation: %s", tool_name)
         return False
 
     def classify_task(self, message, conversation="", allowed_tools=None):
@@ -1165,12 +896,14 @@ Return JSON only.
         if isinstance(raw_input, dict):
             tool_input_object = raw_input
         elif isinstance(raw_input, str):
+            stripped = raw_input.strip()
+            if not stripped:
+                return None
             try:
-                tool_input_object = json.loads(raw_input)
+                parsed_input = json.loads(stripped)
             except json.JSONDecodeError:
-                return None
-            if not isinstance(tool_input_object, dict):
-                return None
+                parsed_input = stripped
+            tool_input_object = parsed_input
         else:
             return None
 
