@@ -14,6 +14,7 @@ class ToolRegistry:
         capability="pc",
         input_schema=None,
         prepare_input=None,
+        verifier_method=None,
     ):
 
         self.tools[name] = {
@@ -22,6 +23,7 @@ class ToolRegistry:
             "capability": capability,
             "input_schema": input_schema,
             "prepare_input": prepare_input,
+            "verifier_method": verifier_method,
         }
 
     def validate_input(self, name, input_data):
