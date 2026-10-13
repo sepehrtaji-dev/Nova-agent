@@ -143,7 +143,8 @@ def add_markdown_content(layout, text):
         body.setFrameShape(QFrame.NoFrame)
         body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        body.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
         body.setHtml(_render_markdown_text(value))
         body.document().setDocumentMargin(0)
         body.document().setDefaultStyleSheet("""
@@ -156,6 +157,10 @@ def add_markdown_content(layout, text):
             code { background: #171b22; color: #d7d2ff; padding: 2px 4px; }
             a { color: #a99fff; }
         """)
+        # QTextBrowser otherwise expands vertically and paints a large opaque
+        # viewport for even a one-line answer. Keep each message content-sized.
+        body.document().setTextWidth(900)
+        body.setFixedHeight(max(24, min(480, int(body.document().size().height()) + 8)))
         layout.addWidget(body)
 
 def make_avatar(letter="N", size=34):
@@ -343,16 +348,19 @@ class NovaWindow(QMainWindow):
         splitter.setHandleWidth(1)
 
         chat = QWidget()
+        chat.setObjectName("chatArea")
         chat_layout = QVBoxLayout(chat)
         chat_layout.setContentsMargins(0, 0, 0, 0)
         chat_layout.setSpacing(0)
 
         self.chat_scroll = QScrollArea()
+        self.chat_scroll.setObjectName("chatScroll")
         self.chat_scroll.setWidgetResizable(True)
         self.chat_scroll.setFrameShape(QFrame.NoFrame)
         self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.chat_container = QWidget()
+        self.chat_container.setObjectName("chatContainer")
         self.chat_container_layout = QVBoxLayout(self.chat_container)
         self.chat_container_layout.setContentsMargins(42, 30, 42, 24)
         self.chat_container_layout.setSpacing(0)
@@ -811,8 +819,8 @@ class NovaWindow(QMainWindow):
         }}
 
         #composer {{
-            background: #242424;
-            border: 1px solid #292929;
+            background: #15171c;
+            border: 1px solid #2b3039;
             border-radius: 20px;
             padding: 0 16px;
             font-size: 13px;
@@ -824,7 +832,7 @@ class NovaWindow(QMainWindow):
         }}
 
         #composerUtility, #searchIndicator {{
-            background: #343434;
+            background: #1b1e26;
             color: #aeb5c1;
             border: none;
             border-radius: 18px;
@@ -832,7 +840,7 @@ class NovaWindow(QMainWindow):
         }}
 
         #modelSelector {{
-            background: #343434;
+            background: #1b1e26;
             color: #f5f7fa;
             border: none;
             border-radius: 18px;
@@ -841,8 +849,8 @@ class NovaWindow(QMainWindow):
         }}
 
         #sendButton {{
-            background: #343434;
-            color: #171717;
+            background: {ACCENT};
+            color: #ffffff;
             border: none;
             border-radius: 18px;
             font-size: 23px;
@@ -850,13 +858,18 @@ class NovaWindow(QMainWindow):
         }}
 
         #sendButton:hover {{
-            background: #555555;
+            background: {ACCENT_HOVER};
             color: #ffffff;
         }}
 
         #sendButton:disabled {{
             background: #292733;
             color: #666172;
+        }}
+
+        #chatArea, #chatScroll, #chatContainer, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {{
+            background: {APP_BG};
+            border: none;
         }}
 
         #messageName {{
@@ -1066,6 +1079,8 @@ class NovaWindow(QMainWindow):
             return
 
         self.core = NovaCore()
+        # The temporary testing build must stay web-search-only for every chat.
+        self.core.set_access(web=True, git=False, pc=False)
 
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
