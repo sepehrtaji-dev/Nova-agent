@@ -654,48 +654,6 @@ If nothing reliable can be extracted:
         )
 
 
-    def _direct_identity_answer(self, message):
-        """Answer Nova identity/developer questions without LLM guessing."""
-        if not isinstance(message, str):
-            return None
-
-        text = re.sub(r"\s+", " ", message.strip().lower())
-        if not text:
-            return None
-
-        identity = bool(re.search(
-            r"\b(?:who are you|what are you|introduce yourself|tell me about yourself)\b",
-            text,
-        ))
-        developer = bool(re.search(
-            r"\b(?:who (?:developed|built|created|made) you|who made you|who built you|who created you|developed by|built by|created by|made by)\b",
-            text,
-        ))
-        taji_soft = bool(re.search(r"\btaji[- ]?soft\b", text))
-        anthro = bool(re.search(r"\banthropic\b", text))
-
-        if identity and developer:
-            return (
-                "I'm Nova, a local AI assistant. "
-                "I'm developed by the Taji-Soft team."
-            )
-
-        if taji_soft and re.search(r"\b(?:sure|really|correct|right)\b", text):
-            return "Yes. Nova is developed by the Taji-Soft team."
-
-        if developer:
-            if anthro and not taji_soft:
-                return (
-                    "No. Nova is developed by the Taji-Soft team, "
-                    "not by Anthropic."
-                )
-            return "Nova is developed by the Taji-Soft team."
-
-        if identity:
-            return "I'm Nova, a local AI assistant developed by the Taji-Soft team."
-
-        return None
-
     def _direct_self_diagnostics_answer(self, message):
         """Run explicit local health checks from observable runtime state."""
         diagnostics = getattr(self, "diagnostics", None)
@@ -901,27 +859,6 @@ If nothing reliable can be extracted:
             response += nl + nl + "Paths:" + nl + nl.join(f"\u2022 {p}" for p in paths)
         return response
 
-    def _capability_enabled_by_description(self, keywords):
-        if not hasattr(self, "tools") or not hasattr(self.tools, "tools"):
-            return False
-
-        if isinstance(keywords, str):
-            keywords = (keywords,)
-
-        for data in self.tools.tools.values():
-            if not isinstance(data, dict):
-                continue
-
-            description = str(data.get("description", "")).lower()
-            if not all(str(keyword).lower() in description for keyword in keywords):
-                continue
-
-            capability = data.get("capability", "pc")
-            if self.access.get(capability, True):
-                return True
-
-        return False
-
     def _long_memory_context(self, query, limit=5):
         """Serialize saved facts as untrusted data, never as prompt instructions."""
         memory = getattr(self, "long_memory", None)
@@ -989,255 +926,6 @@ If nothing reliable can be extracted:
             f"{key.replace('.', ' ')} is {value}."
         )
 
-    def _direct_capability_answer(self, message):
-        """Answer simple capability questions without asking the LLM to guess."""
-        if not isinstance(message, str):
-            return None
-
-        text = re.sub(r"\s+", " ", message.strip().lower())
-        if not text:
-            return None
-
-        capability_request = bool(re.search(
-            r"\b(?:what can you do|what are your capabilities|what tools do you have|what can i ask you to do|what can you help me with)\b",
-            text,
-        ))
-
-        if capability_request:
-            tool_labels = []
-            for name in self._allowed_tools():
-                label = str(name).replace("_", " ").strip()
-                if label and label not in tool_labels:
-                    tool_labels.append(label)
-            if tool_labels:
-                return "I can work with " + ", ".join(tool_labels) + "."
-            return "My available capabilities are currently disabled."
-        if not re.search(r"\bcan you\b|\bdo you\b", text):
-            return None
-
-        if re.search(r"\b(?:read|open|inspect|view)\s+files?\b", text):
-            return (
-                "Yes."
-                if self._capability_enabled_by_description(("file", "read"))
-                else "No."
-            )
-
-        if re.search(r"\b(?:run|execute)\b.*\b(?:commands?|cmd|terminal|powershell|shell)\b", text):
-            return (
-                "Yes."
-                if self._capability_enabled_by_description(("terminal",))
-                else "No."
-            )
-
-        if re.search(r"\b(?:use|control|access|operate)\b.*\b(?:my\s+)?(?:os|operating\s+system|pc|computer)\b", text):
-            return (
-                "Yes."
-                if self._capability_enabled_by_description(("desktop",))
-                else "No."
-            )
-
-        # Resolve other capability questions semantically against the live tool
-        # registry. This avoids a separate phrase/verb rule for each tool.
-        allowed = self._allowed_tools()
-        available = []
-        registry = getattr(self.tools, "tools", {}) or {}
-        for name in allowed:
-            metadata = registry.get(name, {})
-            description = (
-                metadata.get("description", "")
-                if isinstance(metadata, dict)
-                else ""
-            )
-            available.append(f"- {name}: {description}")
-
-        prompt = (
-            "Resolve the meaning of the user's message without executing tools.\n"
-            "Return JSON only, using one of these forms:\n"
-            '{"kind":"capability_question","tools":["registered_tool"],"answer":"Yes."}\n'
-            '{"kind":"capability_question","tools":[],"answer":"No."}\n'
-            '{"kind":"action_request"}\n'
-            "A capability question asks whether Nova has an ability. An action request "
-            "asks Nova to perform work now, including polite requests that specify a target "
-            "or search query. If the user asks for a yes/no answer or only whether an ability "
-            "exists, do not execute even if an example target is mentioned; execute only "
-            "when the user requests the action be performed now. Only name tools from the "
-            "enabled list. Base answers on the tool descriptions; do not guess.\n\n"
-            "ENABLED TOOLS:\n"
-            + ("\n".join(available) or "No tools enabled.")
-            + "\n\nUSER MESSAGE:\n"
-            + text
-        )
-        unclear = (
-            "I couldn't reliably determine whether you're asking about a capability "
-            "or asking me to act. I haven't run anything—do you want me to perform "
-            "the action?"
-        )
-        try:
-            raw = self.brain.generate(prompt, json_mode=True)
-            data = self._extract_json(raw)
-        except Exception as exc:
-            logging.debug("Capability intent resolution failed: %s", exc)
-            return unclear
-
-        if not isinstance(data, dict):
-            return unclear
-
-        kind = data.get("kind")
-        if kind == "action_request":
-            return None
-        if kind != "capability_question":
-            return unclear
-
-        selected = data.get("tools", [])
-        if not isinstance(selected, list) or any(
-            not isinstance(name, str) or name not in allowed
-            for name in selected
-        ):
-            return unclear
-
-        answer = data.get("answer")
-        if not isinstance(answer, str) or not answer.strip():
-            return unclear
-        answer = answer.strip()
-        if answer.casefold().startswith("yes") and not selected:
-            return unclear
-        if answer.casefold().startswith("no") and selected:
-            return unclear
-        return answer
-
-    # ── Explicit user commands ─────────────────────────────────────────────
-    # A small local model is unreliable at deciding "should I use a tool?".
-    # When the user plainly commands an action ("search the web about X",
-    # "list files", "git status"), the decision is made here in code, not by the
-    # model. The model is only used for what it is good at.
-    _POLITE = (
-        r"^\s*(?:(?:hey|hi|ok|okay|so|nova|please|pls|kindly|can you|could you|would you|"
-        r"will you|i want you to|i need you to|go ahead and|try to|just)[\s,]+)*"
-    )
-    _WEB_INTENT = re.compile(
-        _POLITE
-        + r"(?:search|look\s*up|lookup|google|browse|find\s+out|research)\b\s*"
-        r"(?:(?:the\s+)?(?:web|internet|online|net)\b)?\s*"
-        r"(?:for|about|on|up)?\s*(?P<query>.*)$",
-        re.IGNORECASE | re.DOTALL,
-    )
-    _NOT_A_QUERY = {
-        "", "it", "that", "this", "them", "something", "anything", "the web", "web",
-        "the internet", "internet", "online", "the net", "net", "for me", "me",
-    }
-    _PC_INTENT = re.compile(
-        _POLITE
-        + r"(?:(?:list|show|read|open|create|make|write|save|edit|delete|remove|find)\b[^.?!\n]{0,60}"
-        r"\b(?:files?|folders?|directory|directories)\b"
-        r"|(?:run|execute)\b[^.?!\n]{0,60}\b(?:command|script|python|pip|npm|node)\b)",
-        re.IGNORECASE,
-    )
-    _GIT_INTENT = re.compile(
-        _POLITE
-        + r"(?:git\s+(?:status|log|diff|branch|commit|pull|push|stash)\b"
-        r"|(?:show|list|get|check)\b[^.?!\n]{0,40}\b(?:github|issues?|pull\s+requests?|prs?|releases?|workflows?)\b)",
-        re.IGNORECASE,
-    )
-
-    def _explicit_web_query(self, message):
-        """Return the search query if the user explicitly commanded a web search."""
-        text = " ".join(str(message or "").split())
-        if not text or len(text) > 600:
-            return None
-        match = self._WEB_INTENT.match(text)
-        if not match:
-            return None
-        query = match.group("query").strip(" \t.,;:!?\"'")
-        query = re.sub(
-            r"\s+(?:for me|please|pls|and (?:tell|show|give|summari[sz]e)\b.*)$",
-            "",
-            query,
-            flags=re.IGNORECASE,
-        ).strip(" \t.,;:!?\"'")
-        if query.lower() in self._NOT_A_QUERY or len(query) < 2:
-            return None
-        return query
-
-    def _explicit_capability(self, message):
-        """Return 'pc' or 'git' when the user plainly commands a tool action."""
-        text = " ".join(str(message or "").split())
-        if not text or len(text) > 600 or text.endswith("?"):
-            return None
-        if self._GIT_INTENT.match(text):
-            return "git"
-        if self._PC_INTENT.match(text):
-            return "pc"
-        return None
-
-    def _disabled_capability_message(self, capability):
-        labels = {"web": "WEB SEARCH", "git": "GIT", "pc": "PC USE"}
-        return (
-            f"{labels.get(capability, capability.upper())} is turned off, so I can't do that yet. "
-            f"Turn it on under Activity > Capabilities and ask again."
-        )
-
-    def _run_explicit_web_search(self, message, query):
-        """Run web_search directly, verify it, and answer only from real results."""
-        tool_name = "web_search"
-        tool_input = json.dumps({"query": query}, ensure_ascii=False)
-
-        self._status(f"Searching the web: {query[:60]}")
-        try:
-            result = self.tools.execute(tool_name, tool_input)
-        except Exception as exc:
-            result = f"TOOL_EXECUTION_EXCEPTION\n{type(exc).__name__}: {exc}"
-        if not isinstance(result, str):
-            result = str(result)
-
-        self._status("Verifying web_search result...")
-        verification = self.verifier.verify(tool_name, tool_input, result)
-        succeeded = verification.confirmed()
-        self._status(
-            f"{'✓ Confirmed' if succeeded else '✗ Failed'}: {verification.message}"
-        )
-
-        if succeeded:
-            try:
-                self._remember_verified_tool_result(tool_name, tool_input, result, verification)
-            except Exception:
-                pass
-            try:
-                self._status("Learning from search...")
-                self._learn_from_search(query, result)
-            except Exception as exc:
-                logging.debug("Learning from search failed: %s", exc)
-            formatted = self._format_verified_web_results(
-                "TOOL_NAME: web_search\n"
-                f"INPUT:\n{tool_input}\n"
-                "BEGIN_RAW_TOOL_RESULT\n"
-                f"{result}\n"
-                "END_RAW_TOOL_RESULT\n"
-                "VERIFIER_STATUS: CONFIRMED"
-            )
-            response = formatted or (
-                "The search ran, but I couldn't read structured results from it.\n\n"
-                + result[:3000]
-            )
-        else:
-            response = (
-                f"I tried to search the web for \"{query}\" but the search failed, "
-                "so I won't guess an answer.\n\n"
-                f"Reason: {verification.message}\n"
-                f"{result[:800]}"
-            )
-
-        try:
-            self.episodic_memory.record(
-                goal=message,
-                tool_name=tool_name,
-                status=getattr(verification, "status", "unverifiable"),
-                evidence=getattr(verification, "evidence", ""),
-                message=getattr(verification, "message", ""),
-            )
-        except Exception:
-            pass
-        return response
-
     def ask(self, message):
 
         self._status(
@@ -1260,30 +948,6 @@ If nothing reliable can be extracted:
             message
         )
 
-        # Explicit commands never go through the model's "should I use a tool?" guess.
-        explicit_query = self._explicit_web_query(message)
-        if explicit_query is not None:
-            if "web_search" in self._allowed_tools():
-                response = self._run_explicit_web_search(message, explicit_query)
-            else:
-                response = self._disabled_capability_message("web")
-            self._status("Done")
-            self.short_memory.add("assistant", response)
-            return response
-
-        explicit_capability = self._explicit_capability(message)
-        if explicit_capability and not self.access.get(explicit_capability, False):
-            response = self._disabled_capability_message(explicit_capability)
-            self._status("Done")
-            self.short_memory.add("assistant", response)
-            return response
-
-        direct_identity_answer = self._direct_identity_answer(message)
-        if direct_identity_answer is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_identity_answer)
-            return direct_identity_answer
-
         direct_diagnostics_answer = self._direct_self_diagnostics_answer(message)
         if direct_diagnostics_answer is not None:
             self._status("Done")
@@ -1301,12 +965,6 @@ If nothing reliable can be extracted:
             self._status("Done")
             self.short_memory.add("assistant", direct_memory_answer)
             return direct_memory_answer
-
-        direct_capability_answer = self._direct_capability_answer(message)
-        if direct_capability_answer is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_capability_answer)
-            return direct_capability_answer
 
         try:
 
@@ -1418,9 +1076,6 @@ If nothing reliable can be extracted:
             "computer"
         }:
             task_type = "conversation"
-
-        if task_type == "conversation" and explicit_capability:
-            task_type = "computer"
 
         self._status(
             f"Task type: {task_type}"
