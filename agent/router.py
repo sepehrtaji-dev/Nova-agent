@@ -9,7 +9,6 @@ class ToolRouter:
     def __init__(self, brain, tools):
         self.brain = brain
         self.tools = tools
-        self._last_file_generation = None
 
     def _extract_json(self, response):
 
@@ -838,38 +837,6 @@ Return JSON only.
             return None
 
         return generated
-    def _remember_file_generation(
-        self,
-        tool_decision
-    ):
-
-        if (
-            not tool_decision
-            or tool_decision.get("tool")
-            != "write_file"
-        ):
-            return
-
-        try:
-
-            tool_input = json.loads(
-                tool_decision["input"]
-            )
-
-            self._last_file_generation = {
-                "path": tool_input.get(
-                    "path"
-                ),
-                "location": tool_input.get(
-                    "location",
-                    "projects"
-                )
-            }
-
-        except Exception:
-
-            self._last_file_generation = None
-
     def _validate_tool_decision(self, data, task_type):
         if not isinstance(data, dict):
             return None
@@ -1051,7 +1018,6 @@ Return JSON only.
             "tool": planned_tool,
             "input": json.dumps(planned_input, ensure_ascii=False),
         }
-        self._remember_file_generation(decision)
         return decision
 
     _MAX_RETRIES = 3
@@ -1090,7 +1056,6 @@ Return JSON only.
             allowed_tools=allowed_tools
         )
         if deterministic:
-            self._remember_file_generation(deterministic)
             return deterministic
 
         prompt = self._build_decision_prompt(
@@ -1159,9 +1124,6 @@ Return JSON only.
                 if allowed_tools is not None and tool_decision.get("tool") not in set(allowed_tools):
                     tool_decision = None
                 else:
-                    self._remember_file_generation(
-                        tool_decision
-                    )
 
                 return tool_decision
 
@@ -1187,9 +1149,6 @@ Return JSON only.
                     elif allowed_tools is not None and validated_function_call.get("tool") not in set(allowed_tools):
                         validated_function_call = None
                     else:
-                        self._remember_file_generation(
-                            validated_function_call
-                        )
                         return validated_function_call
 
             response_decision = (
@@ -1260,9 +1219,6 @@ Return JSON only.
                         )
                         return tool_decision
                 else:
-                    self._remember_file_generation(
-                        tool_decision
-                    )
                     return tool_decision
 
             function_call = (
@@ -1293,9 +1249,6 @@ Return JSON only.
                             )
                             return validated_function_call
                     else:
-                        self._remember_file_generation(
-                            validated_function_call
-                        )
                         return validated_function_call
 
             response_decision = (
