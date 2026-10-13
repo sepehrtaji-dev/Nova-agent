@@ -387,9 +387,49 @@ class NovaCore:
             valid, reason = validator(tool_name, data)
             if not valid:
                 return False, reason or "Tool input does not match its declared contract."
+        else:
+            metadata = getattr(self.tools, "tools", {}).get(tool_name, {})
+            schema = metadata.get("input_schema") if isinstance(metadata, dict) else None
+            if isinstance(schema, dict):
+                properties = schema.get("properties", {})
+                required = schema.get("required", [])
+                if not isinstance(properties, dict) or not isinstance(required, list):
+                    return False, "Tool input schema is invalid."
+                if any(key not in data or data[key] is None for key in required if isinstance(key, str)):
+                    return False, "Required tool input is missing."
+                if schema.get("additionalProperties") is False and set(data) - set(properties):
+                    return False, "Tool input contains fields outside its declared schema."
+                checks = {
+                    "string": lambda value: isinstance(value, str),
+                    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+                    "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+                    "boolean": lambda value: isinstance(value, bool),
+                    "object": lambda value: isinstance(value, dict),
+                    "array": lambda value: isinstance(value, list),
+                }
+                for key, value in data.items():
+                    definition = properties.get(key)
+                    if not isinstance(definition, dict):
+                        continue
+                    check = checks.get(definition.get("type"))
+                    if check and not check(value):
+                        return False, f"Input field '{key}' has the wrong type."
+                    if isinstance(value, str) and len(value) < int(definition.get("minLength", 0)):
+                        return False, f"Input field '{key}' is too short."
 
-        # Tool handlers own domain-specific checks. The core does not maintain
-        # a second, tool-name-specific list of argument rules.
+        # Content checks are data-driven and apply to any registered writer
+        # that declares a path and content, rather than to a named tool.
+        path = data.get("path")
+        content = data.get("content")
+        if isinstance(path, str) and path.lower().endswith(".py") and isinstance(content, str):
+            try:
+                ast.parse(content, filename=path)
+            except SyntaxError as exc:
+                return False, (
+                    f"Generated Python has a syntax error at line {exc.lineno}, "
+                    f"column {exc.offset}: {exc.msg}."
+                )
+
         return True, None
 
     def _build_final_prompt(
