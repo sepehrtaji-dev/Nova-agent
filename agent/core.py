@@ -1565,6 +1565,8 @@ If nothing reliable can be extracted:
 
         # Conversation is a first-class path. It does not require a plan,
         # tool execution, or verification because there is no computer action.
+        detected_call = None
+
         if task_type == "conversation":
             self._status("Preparing conversational answer...")
 
@@ -1598,9 +1600,22 @@ If nothing reliable can be extracted:
             if not isinstance(response, str):
                 response = str(response)
 
-            self._status("Done")
-            self.short_memory.add("assistant", response)
-            return response
+            # Small local models sometimes emit a registered tool call as if it
+            # were a conversational answer. Treat that model-produced call as
+            # an intent signal and send the original request through the normal
+            # planner/router/verifier pipeline; do not execute it directly here.
+            emitted_call = self.router._extract_function_call(response)
+            enabled_tools = set(self._allowed_tools())
+            if (
+                isinstance(emitted_call, dict)
+                and emitted_call.get("tool") in enabled_tools
+            ):
+                detected_call = emitted_call
+                task_type = "computer"
+            else:
+                self._status("Done")
+                self.short_memory.add("assistant", response)
+                return response
 
         plan = {
             "goal": message,
@@ -1612,10 +1627,35 @@ If nothing reliable can be extracted:
                 "Creating task plan..."
             )
 
-            plan = self.planner.create_plan(
-                goal=message,
-                context=self._conversation_context(max_chars=10000)
+            detected_input = (
+                self._parse_tool_input(detected_call.get("input"))
+                if isinstance(detected_call, dict)
+                else None
             )
+            if (
+                isinstance(detected_call, dict)
+                and isinstance(detected_call.get("tool"), str)
+                and isinstance(detected_input, dict)
+            ):
+                # A valid model-emitted tool call is already a structured plan
+                # step. Preserve its arguments instead of asking a second model
+                # pass to reinterpret the same request.
+                plan = {
+                    "goal": message,
+                    "steps": [{
+                        "id": 1,
+                        "description": f"Use {detected_call['tool']} to fulfill the request",
+                        "status": "pending",
+                        "result": None,
+                        "tool": detected_call["tool"],
+                        "input": detected_input,
+                    }],
+                }
+            else:
+                plan = self.planner.create_plan(
+                    goal=message,
+                    context=self._conversation_context(max_chars=10000)
+                )
             state = getattr(self, "execution_state", None)
             if not isinstance(state, dict):
                 state = {
