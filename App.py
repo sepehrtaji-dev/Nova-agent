@@ -2,6 +2,8 @@ import sys
 import threading
 from datetime import datetime
 
+from config.runtime import load_default_access
+
 from PySide6.QtCore import QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
@@ -38,8 +40,8 @@ ACCENT = "#8b7cff"
 ACCENT_HOVER = "#9d91ff"
 GREEN = "#5fe09b"
 
-# Capabilities every new Nova session starts with (toggle them in the Activity panel).
-DEFAULT_ACCESS = {"web": True, "git": False, "pc": False}
+# Default permissions come from the declarative tool manifest.
+DEFAULT_ACCESS = load_default_access()
 
 
 def split_markdown_blocks(text):
@@ -1353,11 +1355,10 @@ class NovaWindow(QMainWindow):
 
         access = self.core.get_access() if self.core else dict(DEFAULT_ACCESS)
         self.core = NovaCore()
-        self.core.set_access(
-            web=access.get("web", DEFAULT_ACCESS["web"]),
-            git=access.get("git", DEFAULT_ACCESS["git"]),
-            pc=access.get("pc", DEFAULT_ACCESS["pc"]),
-        )
+        self.core.set_access(**{
+            capability: access.get(capability, default)
+            for capability, default in DEFAULT_ACCESS.items()
+        })
 
         if getattr(self, "current_model", None):
             self.core.brain.model = self.current_model
