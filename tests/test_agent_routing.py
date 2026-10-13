@@ -74,7 +74,18 @@ class FakeTools:
             "find_files": {"description": "Find files recursively with optional filename/time filters", "function": lambda x: None},
             "list_files": {"description": "List files and directories in the projects folder or desktop", "function": lambda x: None},
             "create_directory": {"description": "Create a directory", "function": lambda x: None},
-            "terminal": {"description": "Execute terminal shell commands", "function": lambda x: None},
+            "terminal": {
+                "description": "Execute terminal shell commands",
+                "function": lambda x: None,
+                "input_schema": {
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                        "command": {"type": "string", "minLength": 1},
+                        "location": {"type": "string", "enum": ["projects", "desktop"]},
+                    },
+                },
+            },
             "web_search": {"description": "Search the public web for current information", "function": lambda x: None},
             "generate_image": {"description": "Generate an image", "function": lambda x: None},
                         "git": {"description": "Run git operations on a local repository", "function": lambda x: None},
