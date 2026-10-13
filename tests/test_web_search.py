@@ -43,6 +43,8 @@ class WebSearchTests(unittest.TestCase):
         self.assertIn("Title: Example Article", result)
         self.assertIn("URL: https://example.org/article", result)
         self.assertIn("Snippet: A useful search result snippet.", result)
+        self.assertIn("\nTitle: Example Article", result)
+        self.assertNotIn("\\nTitle: Example Article", result)
         self.assertEqual(urlopen.call_count, 1)
 
     @patch("urllib.request.urlopen")
