@@ -89,6 +89,30 @@ class ToolRouter:
 
         return None
 
+    def _input_from_positional(self, tool_name, value):
+        """Adapt a positional argument using the selected tool's declared schema."""
+        metadata = getattr(self.tools, "tools", {}).get(tool_name, {})
+        schema = metadata.get("input_schema", {}) if isinstance(metadata, dict) else {}
+        if isinstance(value, str) and isinstance(schema, dict) and schema.get("type") == "object":
+            required = schema.get("required", [])
+            properties = schema.get("properties", {})
+            candidates = required if isinstance(required, list) else []
+            field = next(
+                (
+                    name for name in candidates
+                    if isinstance(name, str)
+                    and isinstance(properties, dict)
+                    and isinstance(properties.get(name), dict)
+                    and properties[name].get("type") == "string"
+                ),
+                None,
+            )
+            if field:
+                return json.dumps({field: value}, ensure_ascii=False)
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False)
+
     def _extract_function_call(self, response):
         """Parse a model-emitted call for any registered tool, without tool-specific branches.
 
@@ -129,10 +153,7 @@ class ToolRouter:
 
             if len(positional) == 1 and not keywords:
                 value = positional[0]
-                if isinstance(value, str):
-                    tool_input = value
-                else:
-                    tool_input = json.dumps(value, ensure_ascii=False)
+                tool_input = self._input_from_positional(tool_name, value)
             elif not positional and keywords:
                 tool_input = json.dumps(keywords, ensure_ascii=False)
             elif len(positional) == 1 and isinstance(positional[0], dict) and not keywords:
@@ -191,11 +212,16 @@ class ToolRouter:
             raw_argument = candidate[open_paren + 1:close_paren].strip()
             if not raw_argument:
                 return None
+            try:
+                positional_value = ast.literal_eval(raw_argument)
+            except (ValueError, TypeError, SyntaxError):
+                positional_value = raw_argument
+            tool_input = self._input_from_positional(tool_name, positional_value)
             return {
                 "action": "tool",
                 "task_type": "computer",
                 "tool": tool_name,
-                "input": raw_argument,
+                "input": tool_input,
             }
 
         return None
