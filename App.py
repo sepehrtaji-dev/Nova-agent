@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -302,14 +303,15 @@ class NovaWindow(QMainWindow):
         super().__init__()
 
         self.core = NovaCore()
+        self.core.set_access(web=True, git=False, pc=False)
         self.thread = None
         self.worker = None
         self.busy = False
         self.current_turn_status = None
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(980, 640)
-        self.resize(1400, 860)
+        self.setMinimumSize(760, 560)
+        self.resize(1100, 760)
 
         self._build_ui()
         self._apply_style()
@@ -362,7 +364,9 @@ class NovaWindow(QMainWindow):
 
         self.main_splitter = splitter
         splitter.addWidget(chat)
-        splitter.addWidget(self._build_activity_panel())
+        self.activity_panel = self._build_activity_panel()
+        splitter.addWidget(self.activity_panel)
+        self.activity_panel.hide()
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
 
@@ -545,23 +549,47 @@ class NovaWindow(QMainWindow):
         wrapper.setObjectName("composerArea")
         self.composer_area = wrapper
 
-        layout = QHBoxLayout(wrapper)
+        layout = QVBoxLayout(wrapper)
         self.composer_layout = layout
-        layout.setContentsMargins(34, 14, 34, 22)
-        layout.setSpacing(10)
+        layout.setContentsMargins(34, 12, 34, 22)
+        layout.setSpacing(8)
 
         self.input = QLineEdit()
         self.input.setObjectName("composer")
-        self.input.setPlaceholderText("Message Nova...")
+        self.input.setPlaceholderText("Send a message")
         self.input.returnPressed.connect(self._send)
         layout.addWidget(self.input, 1)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(4, 0, 4, 0)
+        controls.setSpacing(8)
+
+        add_button = QPushButton("+")
+        add_button.setObjectName("composerUtility")
+        add_button.setEnabled(False)
+        controls.addWidget(add_button)
+
+        search_button = QPushButton("◎")
+        search_button.setObjectName("searchIndicator")
+        search_button.setToolTip("Web search is the only enabled tool.")
+        search_button.setEnabled(False)
+        controls.addWidget(search_button)
+        controls.addStretch(1)
+
+        self.model_selector = QComboBox()
+        self.model_selector.setObjectName("modelSelector")
+        model_name = str(getattr(getattr(self.core, "brain", None), "model", "") or "Configured local model").strip()
+        self.model_selector.addItem(model_name)
+        self.model_selector.setToolTip("Model switching will be added with Model Manager.")
+        controls.addWidget(self.model_selector)
 
         self.send_button = QPushButton("↑")
         self.send_button.setObjectName("sendButton")
         self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.clicked.connect(self._send)
-        layout.addWidget(self.send_button)
+        controls.addWidget(self.send_button)
 
+        layout.addLayout(controls)
         return wrapper
 
     def _welcome(self):
@@ -779,13 +807,13 @@ class NovaWindow(QMainWindow):
 
         #composerArea {{
             background: {APP_BG};
-            border-top: 1px solid {BORDER};
+            border-top: none;
         }}
 
         #composer {{
-            background: #15181f;
-            border: 1px solid #2b3039;
-            border-radius: 15px;
+            background: #242424;
+            border: 1px solid #292929;
+            border-radius: 20px;
             padding: 0 16px;
             font-size: 13px;
             selection-background-color: #4a426f;
@@ -795,17 +823,35 @@ class NovaWindow(QMainWindow):
             border-color: #514a72;
         }}
 
-        #sendButton {{
-            background: {ACCENT};
-            color: #0b0c0f;
+        #composerUtility, #searchIndicator {{
+            background: #343434;
+            color: #aeb5c1;
             border: none;
-            border-radius: 14px;
+            border-radius: 18px;
+            font-size: 18px;
+        }}
+
+        #modelSelector {{
+            background: #343434;
+            color: #f5f7fa;
+            border: none;
+            border-radius: 18px;
+            padding: 0 12px;
+            font-size: 12px;
+        }}
+
+        #sendButton {{
+            background: #343434;
+            color: #171717;
+            border: none;
+            border-radius: 18px;
             font-size: 23px;
             font-weight: 700;
         }}
 
         #sendButton:hover {{
-            background: {ACCENT_HOVER};
+            background: #555555;
+            color: #ffffff;
         }}
 
         #sendButton:disabled {{
@@ -909,6 +955,7 @@ class NovaWindow(QMainWindow):
         )
 
         self.header.setFixedHeight(max(58, min(72, int(height * 0.082))))
+        self.header.hide()
 
         chat_margin_x = max(24, min(64, int(chat_width * 0.055)))
         self.chat_container_layout.setContentsMargins(
@@ -926,9 +973,12 @@ class NovaWindow(QMainWindow):
             max(16, min(24, int(height * 0.026))),
         )
 
-        control_height = max(46, min(56, int(height * 0.065)))
+        control_height = max(42, min(52, int(height * 0.065)))
         self.input.setFixedHeight(control_height)
         self.send_button.setFixedSize(control_height, control_height)
+        if hasattr(self, "model_selector"):
+            self.model_selector.setFixedHeight(control_height - 4)
+            self.model_selector.setMinimumWidth(125)
 
         capability_height = max(48, min(58, int(height * 0.067)))
         for button in (self.web_button, self.git_button, self.pc_button):
