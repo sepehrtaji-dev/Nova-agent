@@ -1123,8 +1123,6 @@ Return JSON only.
 
                 if allowed_tools is not None and tool_decision.get("tool") not in set(allowed_tools):
                     tool_decision = None
-                else:
-
                 return tool_decision
 
             function_call = (
