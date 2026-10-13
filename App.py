@@ -310,8 +310,8 @@ class NovaWindow(QMainWindow):
         self.current_turn_status = None
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(980, 640)
-        self.resize(1400, 860)
+        self.setMinimumSize(760, 560)
+        self.resize(1100, 760)
 
         self._build_ui()
         self._apply_style()
@@ -807,13 +807,13 @@ class NovaWindow(QMainWindow):
 
         #composerArea {{
             background: {APP_BG};
-            border-top: 1px solid {BORDER};
+            border-top: none;
         }}
 
         #composer {{
-            background: #15181f;
-            border: 1px solid #2b3039;
-            border-radius: 15px;
+            background: #242424;
+            border: 1px solid #292929;
+            border-radius: 20px;
             padding: 0 16px;
             font-size: 13px;
             selection-background-color: #4a426f;
@@ -823,17 +823,35 @@ class NovaWindow(QMainWindow):
             border-color: #514a72;
         }}
 
-        #sendButton {{
-            background: {ACCENT};
-            color: #0b0c0f;
+        #composerUtility, #searchIndicator {{
+            background: #343434;
+            color: #aeb5c1;
             border: none;
-            border-radius: 14px;
+            border-radius: 18px;
+            font-size: 18px;
+        }}
+
+        #modelSelector {{
+            background: #343434;
+            color: #f5f7fa;
+            border: none;
+            border-radius: 18px;
+            padding: 0 12px;
+            font-size: 12px;
+        }}
+
+        #sendButton {{
+            background: #343434;
+            color: #171717;
+            border: none;
+            border-radius: 18px;
             font-size: 23px;
             font-weight: 700;
         }}
 
         #sendButton:hover {{
-            background: {ACCENT_HOVER};
+            background: #555555;
+            color: #ffffff;
         }}
 
         #sendButton:disabled {{
@@ -937,6 +955,7 @@ class NovaWindow(QMainWindow):
         )
 
         self.header.setFixedHeight(max(58, min(72, int(height * 0.082))))
+        self.header.hide()
 
         chat_margin_x = max(24, min(64, int(chat_width * 0.055)))
         self.chat_container_layout.setContentsMargins(
@@ -954,9 +973,12 @@ class NovaWindow(QMainWindow):
             max(16, min(24, int(height * 0.026))),
         )
 
-        control_height = max(46, min(56, int(height * 0.065)))
+        control_height = max(42, min(52, int(height * 0.065)))
         self.input.setFixedHeight(control_height)
         self.send_button.setFixedSize(control_height, control_height)
+        if hasattr(self, "model_selector"):
+            self.model_selector.setFixedHeight(control_height - 4)
+            self.model_selector.setMinimumWidth(125)
 
         capability_height = max(48, min(58, int(height * 0.067)))
         for button in (self.web_button, self.git_button, self.pc_button):
