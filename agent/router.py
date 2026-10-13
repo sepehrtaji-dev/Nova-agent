@@ -1214,9 +1214,6 @@ Return JSON only.
                     if len(allowed_tools) == 0 or tool_decision.get("tool") not in set(allowed_tools):
                         tool_decision = None
                     else:
-                        self._remember_file_generation(
-                            tool_decision
-                        )
                         return tool_decision
                 else:
                     return tool_decision
@@ -1244,9 +1241,6 @@ Return JSON only.
                         if len(allowed_tools) == 0 or validated_function_call.get("tool") not in set(allowed_tools):
                             validated_function_call = None
                         else:
-                            self._remember_file_generation(
-                                validated_function_call
-                            )
                             return validated_function_call
                     else:
                         return validated_function_call
