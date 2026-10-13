@@ -1,0 +1,24 @@
+{
+  "tools": [
+    {
+      "name": "web_search",
+      "description": "Search the public web for current information. Return real titles, URLs, and snippets.",
+      "module": "tools.web",
+      "class": "WebSearchTool",
+      "method": "run",
+      "capability": "web",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}
