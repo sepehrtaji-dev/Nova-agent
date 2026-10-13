@@ -30,7 +30,7 @@ class AuditRegressionTests(unittest.TestCase):
     def test_ollama_chat_response_model_is_supported(self):
         response = SimpleNamespace(message=SimpleNamespace(content="  hello Nova  "))
         with mock.patch("model.ollama.ollama.chat", return_value=response):
-            self.assertEqual(OllamaBrain().generate("hi"), "hello Nova")
+            self.assertEqual(OllamaBrain(model="test-model").generate("hi"), "hello Nova")
 
     def test_git_rejects_option_like_remote_names(self):
         with self.assertRaises(ValueError):
