@@ -455,6 +455,8 @@ class ToolRouter:
                     return False
                 if isinstance(value, str) and len(value) < int(definition.get("minLength", 0)):
                     return False
+                if "enum" in definition and value not in definition["enum"]:
+                    return False
             return True
         return self.tools.exists(tool_name) and bool(tool_input)
 
