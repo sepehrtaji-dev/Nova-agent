@@ -178,7 +178,7 @@ class ToolRouter:
         )
         for tool_name in registered:
             match = re.search(
-                rf"(?<![\\w.]){re.escape(tool_name)}\\s*\\(",
+                rf"(?<![\w.]){re.escape(tool_name)}\s*\(",
                 candidate,
             )
             if not match:
@@ -193,7 +193,7 @@ class ToolRouter:
                 if quote:
                     if escaped:
                         escaped = False
-                    elif char == "\\\\":
+                    elif char == "\\":
                         escaped = True
                     elif char == quote:
                         quote = None
