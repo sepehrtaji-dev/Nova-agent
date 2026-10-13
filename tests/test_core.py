@@ -52,6 +52,7 @@ class FakeTools:
             "write_file": {
                 "capability": "pc",
                 "description": "Create or overwrite a file",
+                "prepare_input": self.prepare_write_input,
                 "input_schema": {
                     "type": "object",
                     "required": ["path"],
@@ -78,6 +79,18 @@ class FakeTools:
             "web_search": {"capability": "web", "description": "Search the public web"},
             "git": {"capability": "git", "description": "Run git operations"},
         }
+
+    def prepare_write_input(self, data, context):
+        prepared = dict(data)
+        if not isinstance(prepared.get("content"), str) or not prepared["content"].strip():
+            prepared["content"] = context["router"].generate_file_content(
+                user_request=context["message"],
+                path=prepared["path"],
+                location=prepared.get("location", "projects"),
+                conversation=context["conversation"],
+                tool_history=context["tool_history"],
+            )
+        return prepared
 
     def exists(self, name):
         return name == "write_file"
