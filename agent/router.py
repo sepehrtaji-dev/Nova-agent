@@ -90,195 +90,112 @@ class ToolRouter:
         return None
 
     def _extract_function_call(self, response):
+        """Parse a model-emitted call for any registered tool, without tool-specific branches.
 
-        if not response:
+        Preferred model output is the normal JSON decision handled elsewhere.
+        This compatibility parser accepts Python-like calls such as
+        tool_name(query="..."), tool_name("..."), or tool_name({...}).
+        """
+        import ast
+
+        if not response or not isinstance(response, str):
             return None
 
-        text = str(response).strip()
+        source = response.strip()
+        # Models sometimes wrap a call in a list-like marker.
+        candidate = source
+        if candidate.startswith("[") and candidate.endswith("]"):
+            candidate = candidate[1:-1].strip()
 
-        # BUG 4: Handle nested parentheses by finding the outer bracket
-        # and using balanced parenthesis matching
-        match = re.search(r"\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", text)
-        if not match:
-            return None
+        try:
+            expression = ast.parse(candidate, mode="eval").body
+        except (SyntaxError, ValueError):
+            expression = None
 
-        tool_name = match.group(1).strip()
-        # Find the matching closing parenthesis
-        start = match.end() - 1  # position of '('
-        depth = 0
-        end = -1
-        for i in range(start, len(text)):
-            if text[i] == '(':
-                depth += 1
-            elif text[i] == ')':
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
+        if isinstance(expression, ast.Call) and isinstance(expression.func, ast.Name):
+            tool_name = expression.func.id
+            if not self.tools.exists(tool_name):
+                return None
 
-        if end == -1:
-            return None
+            try:
+                positional = [ast.literal_eval(arg) for arg in expression.args]
+                keywords = {
+                    item.arg: ast.literal_eval(item.value)
+                    for item in expression.keywords
+                    if item.arg is not None
+                }
+            except (ValueError, TypeError, SyntaxError):
+                positional, keywords = [], {}
 
-        # Find the closing bracket after the parenthesis
-        bracket_end = text.find(']', end)
-        if bracket_end == -1:
-            return None
+            if len(positional) == 1 and not keywords:
+                value = positional[0]
+                if isinstance(value, str):
+                    tool_input = value
+                else:
+                    tool_input = json.dumps(value, ensure_ascii=False)
+            elif not positional and keywords:
+                tool_input = json.dumps(keywords, ensure_ascii=False)
+            elif len(positional) == 1 and isinstance(positional[0], dict) and not keywords:
+                tool_input = json.dumps(positional[0], ensure_ascii=False)
+            else:
+                return None
 
-        # The balanced-parenthesis scan above already extracted the call.
-        # Do not run a second regex against an undefined pattern variable.
-        arguments = text[start + 1:end].strip()
-
-        if not self.tools.exists(tool_name):
-            return None
-
-        if tool_name == "web_search":
-
-            query_match = re.search(
-                r"""
-                (?:query|search|q|text)
-                \s*=\s*
-                (?:
-                    "([^"]*)"
-                    |
-                    '([^']*)'
-                )
-                """,
-                arguments,
-                flags=re.IGNORECASE | re.VERBOSE
-            )
-
-            if query_match:
-
-                query = (
-                    query_match.group(1)
-                    if query_match.group(1) is not None
-                    else query_match.group(2)
-                )
-
-                query = query.strip()
-
-                if query:
-
-                    return {
-                        "action": "tool",
-                        "task_type": "computer",
-                        "tool": "web_search",
-                        "input": json.dumps(
-                            {
-                                "query": query
-                            },
-                            ensure_ascii=False
-                        )
-                    }
-
-            if arguments:
-
-                cleaned = arguments.strip()
-
-                if (
-                    cleaned.startswith('"')
-                    and cleaned.endswith('"')
-                ):
-                    cleaned = cleaned[1:-1]
-
-                elif (
-                    cleaned.startswith("'")
-                    and cleaned.endswith("'")
-                ):
-                    cleaned = cleaned[1:-1]
-
-                cleaned = cleaned.strip()
-
-                if cleaned:
-
-                    return {
-                        "action": "tool",
-                        "task_type": "computer",
-                        "tool": "web_search",
-                        "input": json.dumps(
-                            {
-                                "query": cleaned
-                            },
-                            ensure_ascii=False
-                        )
-                    }
-
-        if tool_name == "terminal":
-
-            command_match = re.search(
-                r"""
-                (?:command|cmd)
-                \s*=\s*
-                (?:
-                    "([^"]*)"
-                    |
-                    '([^']*)'
-                )
-                """,
-                arguments,
-                flags=re.IGNORECASE | re.VERBOSE
-            )
-
-            if command_match:
-
-                command = (
-                    command_match.group(1)
-                    if command_match.group(1) is not None
-                    else command_match.group(2)
-                )
-
-                command = command.strip()
-
-                if command:
-
-                    stdin_match = re.search(
-                        r"""
-                        (?:input|stdin)
-                        \s*=\s*
-                        (?:
-                            "([^"]*)"
-                            |
-                            '([^']*)'
-                        )
-                        """,
-                        arguments,
-                        flags=re.IGNORECASE | re.VERBOSE
-                    )
-
-                    payload = {
-                        "command": command,
-                        "location": "projects"
-                    }
-
-                    if stdin_match:
-                        payload["input"] = (
-                            stdin_match.group(1)
-                            if stdin_match.group(1) is not None
-                            else stdin_match.group(2)
-                        )
-
-                    return {
-                        "action": "tool",
-                        "task_type": "computer",
-                        "tool": "terminal",
-                        "input": json.dumps(
-                            payload,
-                            ensure_ascii=False
-                        )
-                    }
-
-        # Generic handler for all other tools (git, write_file, read_file,
-        # list_files, create_directory, etc.): parse key="value" arguments.
-        parsed = self._parse_key_value_arguments(arguments)
-        if parsed:
             return {
                 "action": "tool",
                 "task_type": "computer",
                 "tool": tool_name,
-                "input": json.dumps(
-                    parsed,
-                    ensure_ascii=False
-                )
+                "input": tool_input,
+            }
+
+        # Some small local models omit quotes around a plain-text argument.
+        # Discover the tool name from the registry rather than maintaining a
+        # list of tool-specific parsing rules.
+        registered = sorted(
+            (name for name in self.tools.tools if isinstance(name, str)),
+            key=len,
+            reverse=True,
+        )
+        for tool_name in registered:
+            match = re.search(
+                rf"(?<![\\w.]){re.escape(tool_name)}\\s*\\(",
+                candidate,
+            )
+            if not match:
+                continue
+            open_paren = candidate.find("(", match.start())
+            depth = 0
+            quote = None
+            escaped = False
+            close_paren = None
+            for index in range(open_paren, len(candidate)):
+                char = candidate[index]
+                if quote:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\\\":
+                        escaped = True
+                    elif char == quote:
+                        quote = None
+                    continue
+                if char in {"'", '"'}:
+                    quote = char
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth == 0:
+                        close_paren = index
+                        break
+            if close_paren is None:
+                continue
+            raw_argument = candidate[open_paren + 1:close_paren].strip()
+            if not raw_argument:
+                return None
+            return {
+                "action": "tool",
+                "task_type": "computer",
+                "tool": tool_name,
+                "input": raw_argument,
             }
 
         return None
