@@ -131,6 +131,31 @@ class CodeBlock(QFrame):
         outer.addWidget(self.editor)
 
 
+class MessageTextBrowser(QTextBrowser):
+    """Rich-text message view whose height follows its actual wrapped content."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setOpenExternalLinks(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
+        self.document().setDocumentMargin(0)
+
+    def update_content_height(self):
+        width = max(1, self.viewport().width())
+        self.document().setTextWidth(width)
+        # Include a small rounding allowance so the last line is never clipped.
+        height = int(self.document().size().height() + 10)
+        self.setFixedHeight(max(24, height))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_content_height()
+
+
 def add_markdown_content(layout, text):
     for kind, value, language in split_markdown_blocks(text):
         if kind == "code":
@@ -138,15 +163,7 @@ def add_markdown_content(layout, text):
             continue
         if not value.strip():
             continue
-        body = QTextBrowser()
-        body.setOpenExternalLinks(True)
-        body.setFrameShape(QFrame.NoFrame)
-        body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        body.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
-        body.setHtml(_render_markdown_text(value))
-        body.document().setDocumentMargin(0)
+        body = MessageTextBrowser()
         body.document().setDefaultStyleSheet("""
             body { font-family: "Segoe UI"; font-size: 13px; color: #f5f7fa; }
             h1, h2, h3 { color: #f5f7fa; margin: 8px 0 5px 0; }
@@ -157,10 +174,8 @@ def add_markdown_content(layout, text):
             code { background: #171b22; color: #d7d2ff; padding: 2px 4px; }
             a { color: #a99fff; }
         """)
-        # QTextBrowser otherwise expands vertically and paints a large opaque
-        # viewport for even a one-line answer. Keep each message content-sized.
-        body.document().setTextWidth(900)
-        body.setFixedHeight(max(24, min(480, int(body.document().size().height()) + 8)))
+        body.setHtml(_render_markdown_text(value))
+        body.update_content_height()
         layout.addWidget(body)
 
 def make_avatar(letter="N", size=34):
@@ -1220,8 +1235,13 @@ class NovaWindow(QMainWindow):
         self._finish_request("Error")
 
     def _finish_request(self, status):
+        # Turn status is temporary progress UI, not a permanent chat message.
         if getattr(self, "current_turn_status", None):
-            self.current_turn_status.update_status(status)
+            item = self.chat_container_layout.indexOf(self.current_turn_status)
+            if item >= 0:
+                self.chat_container_layout.takeAt(item)
+            self.current_turn_status.deleteLater()
+            self.current_turn_status = None
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
