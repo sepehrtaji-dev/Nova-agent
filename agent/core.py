@@ -1728,8 +1728,7 @@ Nova must choose another useful action.
         prompt = self._build_final_prompt(
             message=message,
             tool_context=tool_context,
-            knowledge_context=knowledge_context,
-            verified_tool_execution=successful_tool_execution
+            knowledge_context=knowledge_context
         )
 
         self._status(
