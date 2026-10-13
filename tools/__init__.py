@@ -60,15 +60,21 @@ def load_tools():
                 module = importlib.import_module(module_name)
                 factory = getattr(module, class_name)
                 instances[key] = factory()
-            handler = getattr(instances[key], method_name)
+            instance = instances[key]
+            handler = getattr(instance, method_name)
             if not callable(handler):
                 raise TypeError("Configured tool method is not callable.")
+            preparer_name = definition.get("prepare_input")
+            preparer = getattr(instance, preparer_name) if isinstance(preparer_name, str) else None
+            if preparer is not None and not callable(preparer):
+                raise TypeError("Configured input preparer is not callable.")
             registry.register(
                 name,
                 description,
                 handler,
                 capability=capability,
                 input_schema=schema,
+                prepare_input=preparer,
             )
         except Exception as exc:
             logging.warning(
