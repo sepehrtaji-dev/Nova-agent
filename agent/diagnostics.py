@@ -43,8 +43,8 @@ class RuntimeDiagnostics:
 
         for name, raw in sorted(registered.items()):
             data = raw if isinstance(raw, dict) else {}
-            capability = str(data.get("capability", "pc"))
-            enabled = bool(access.get(capability, True))
+            capability = data.get("capability")
+            enabled = bool(capability and access.get(capability, False))
             observed_status, evidence = self._tool_status(core, str(name))
             if not enabled:
                 status = "disabled"
@@ -53,7 +53,7 @@ class RuntimeDiagnostics:
             capabilities.append({
                 "name": str(name),
                 "description": str(data.get("description", "")).strip(),
-                "capability": capability,
+                "capability": capability or "Unknown",
                 "enabled": enabled,
                 "status": status,
                 "evidence": evidence,
