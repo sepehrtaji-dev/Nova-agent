@@ -25,6 +25,14 @@ def load_tools():
         logging.error("Could not load tool manifest '%s': %s", path, exc)
         return registry
 
+    defaults = manifest.get("default_access", {}) if isinstance(manifest, dict) else {}
+    if isinstance(defaults, dict):
+        registry.default_access = {
+            str(name): bool(enabled)
+            for name, enabled in defaults.items()
+            if isinstance(name, str)
+        }
+
     definitions = manifest.get("tools", []) if isinstance(manifest, dict) else []
     if not isinstance(definitions, list):
         logging.error("Tool manifest '%s' must contain a tools list.", path)
