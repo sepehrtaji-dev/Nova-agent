@@ -377,8 +377,7 @@ class NovaCore:
         self,
         message,
         tool_context,
-        knowledge_context,
-        web_search_used=False
+        knowledge_context
     ):
         if not tool_context:
             tool_context = "No tool data."
@@ -388,7 +387,7 @@ class NovaCore:
         diagnostics_context = RuntimeDiagnostics().context(self)
 
         return (
-            f"You are Nova, a local AI agent.\n\n"
+            f"You are a local AI assistant.\n\n"
             f"RUNTIME DIAGNOSTICS AND CAPABILITY MAP:\n{diagnostics_context}\n\n"
             f"User request:\n{message}\n\n"
             f"RECENT CONVERSATION / CONTEXT:\n{self._conversation_context(max_chars=12000)}\n\n"
@@ -1739,7 +1738,7 @@ Nova must choose another useful action.
 
         response = self.brain.generate(
             prompt,
-            system_prompt="You are Nova, a helpful local AI agent. Be direct and concise."
+            system_prompt="You are a local AI assistant. Be direct and concise."
         )
 
         if not isinstance(
