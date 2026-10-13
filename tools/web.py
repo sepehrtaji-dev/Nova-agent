@@ -64,10 +64,9 @@ class WebSearchTool:
         from html.parser import HTMLParser
 
         query = self._parse_input(input_data)
-        query = " ".join(query.split()) if isinstance(query, str) else ""
         if not query:
             return "Web search error: Search query is empty."
-        query = query[:500]
+        query = " ".join(query.split())[:500]
 
         class SearchResultParser(HTMLParser):
             def __init__(self, provider):
