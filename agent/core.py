@@ -1598,9 +1598,21 @@ If nothing reliable can be extracted:
             if not isinstance(response, str):
                 response = str(response)
 
-            self._status("Done")
-            self.short_memory.add("assistant", response)
-            return response
+            # Small local models sometimes emit a registered tool call as if it
+            # were a conversational answer. Treat that model-produced call as
+            # an intent signal and send the original request through the normal
+            # planner/router/verifier pipeline; do not execute it directly here.
+            emitted_call = self.router._extract_function_call(response)
+            enabled_tools = set(self._allowed_tools())
+            if (
+                isinstance(emitted_call, dict)
+                and emitted_call.get("tool") in enabled_tools
+            ):
+                task_type = "computer"
+            else:
+                self._status("Done")
+                self.short_memory.add("assistant", response)
+                return response
 
         plan = {
             "goal": message,
