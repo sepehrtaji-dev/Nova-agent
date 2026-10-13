@@ -162,22 +162,23 @@ class Planner:
 
             description = step.get("description")
 
-            if not isinstance(description, str):
-                dropped += 1
-                continue
-
-            description = description.strip()
-
-            if not description:
-                dropped += 1
-                continue
-
             tool = step.get("tool")
             raw_input = step.get("input")
 
-            # Every plan step is executable, so a description alone is not a
-            # valid step. Missing/unknown tools or non-object inputs must not
-            # leak into the execution loop as phantom pending actions.
+            # A step is executable when it names a registered tool with an
+            # object input. The description is cosmetic narration, so synthesize
+            # one instead of discarding an otherwise valid tool call: models
+            # frequently emit {tool, input} alone, and dropping those silently
+            # turned real tool requests into no-ops.
+            if not isinstance(description, str) or not description.strip():
+                if isinstance(tool, str) and tool.strip():
+                    description = f"Use {tool.strip()} to fulfill the request"
+                else:
+                    dropped += 1
+                    continue
+
+            description = description.strip()
+
             if not isinstance(tool, str) or not tool.strip():
                 dropped += 1
                 continue

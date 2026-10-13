@@ -20,7 +20,7 @@ class WebSearchTool:
             "Chrome/145.0 Safari/537.36"
         )
 
-    def _parse_input(self, input_data):
+    def _parse_input(self, input_data: str):
         if isinstance(input_data, dict):
             return input_data.get("query", "")
 
@@ -33,7 +33,7 @@ class WebSearchTool:
             return ""
 
         try:
-            data = json.loads(text)
+            data: dict = json.loads(text)
 
             if isinstance(data, dict):
                 query = (
@@ -64,10 +64,9 @@ class WebSearchTool:
         from html.parser import HTMLParser
 
         query = self._parse_input(input_data)
-        query = " ".join(query.split()) if isinstance(query, str) else ""
         if not query:
             return "Web search error: Search query is empty."
-        query = query[:500]
+        query = " ".join(query.split())[:500]
 
         class SearchResultParser(HTMLParser):
             def __init__(self, provider):
@@ -251,7 +250,7 @@ class WebSearchTool:
         parsed = urllib.parse.urlsplit(str(url).strip())
         scheme = parsed.scheme.lower()
         if scheme not in {"http", "https"}:
-            raise ValueError("Only http:// and https:// URLs are supported.")
+            raise TypeError("Only http:// and https:// URLs are supported.")
         if not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("URL must have a hostname and cannot contain credentials.")
         if parsed.port not in (None, 80, 443):

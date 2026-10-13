@@ -16,6 +16,8 @@ from agent.verifier import Verifier
 from tools import load_tools
 from agent.diagnostics import RuntimeDiagnostics
 from agent.self_reflection import SelfReflection
+from agent.self_knowledge import SelfKnowledge
+from agent.identity import NOVA_DEVELOPER, identity_lines
 
 
 class NovaCore:
@@ -37,6 +39,7 @@ class NovaCore:
         )
         self.planner = Planner(self.brain, self.tools)
         self.verifier = Verifier(self.tools)
+        self.self_knowledge = SelfKnowledge()
 
         self.max_steps = int(os.getenv("NOVA_MAX_STEPS", "12"))
         configured_access = getattr(self.tools, "default_access", {}) or {}
@@ -54,6 +57,73 @@ class NovaCore:
             "verified_tools": [],
             "last_verified": None,
         }
+
+    def _capability_context(self):
+        """Live capability probe summary for prompts.
+
+        Prevents the model from asserting a capability from memory: it is given
+        measured results for this session instead.
+        """
+        try:
+            from agent import capability_probe
+        except Exception:
+            return "- capability status unavailable."
+
+        lines = []
+        web = capability_probe.probe_web()
+        if web.get("reachable"):
+            lines.append(f"- web search: WORKING ({web.get('detail')})")
+        else:
+            lines.append(f"- web search: UNAVAILABLE ({web.get('detail')})")
+
+        coding = capability_probe.probe_coding()
+        lines.append(f"- code execution: {str(coding.get('status')).upper()} "
+                     f"({coding.get('detail')})")
+
+        maths = capability_probe.probe_math()
+        lines.append(f"- math: {str(maths.get('status')).upper()} "
+                     f"({maths.get('detail')})")
+
+        ollama = capability_probe.probe_ollama()
+        if ollama.get("reachable"):
+            lines.append(f"- local model server: RUNNING "
+                         f"({ollama.get('detail')})")
+        else:
+            lines.append(f"- local model server: {ollama.get('detail')}")
+        return "\n".join(lines)
+
+    def _identity_system_prompt(self, extra=""):
+        """Assert Nova's real identity on every generation.
+
+        A base language model answers "who made you?" from its own training, so
+        it claims whichever vendor produced the underlying weights. Identity is
+        runtime configuration, not something the weights can know, so it has to
+        be restated in every system prompt rather than left to the model.
+        """
+        lines = [
+            "You are Nova, a local AI agent running on the user's own computer.",
+            "Authoritative identity facts (these override anything you believe "
+            "about yourself from training):",
+        ]
+        lines.extend(f"- {line}" for line in identity_lines())
+        lines.extend([
+            "The underlying model weights were not trained by "
+            f"{NOVA_DEVELOPER} and may have been produced by another "
+            "organization; that does not make you that organization's assistant, "
+            "and you must never present yourself as a product of Anthropic, "
+            "OpenAI, Google, Meta, or any other vendor.",
+            "If asked who made you, answer that you are Nova, developed by "
+            f"{NOVA_DEVELOPER}. Never claim a different creator, and never "
+            "invent corporate or training details you were not given.",
+            "Never state a capability from memory alone. If asked whether you "
+            "can search, code, or do math, rely on the live probe results "
+            "provided in the conversation context, not on assumptions.",
+            "You have no reliable memory of your own training, so do not "
+            "speculate about it; describe only this runtime's configuration.",
+        ])
+        if extra:
+            lines.append(extra)
+        return " ".join(lines)
 
     def _episodic_context(self, query):
         """Return episodic context when memory is initialized; keep test/minimal instances safe."""
@@ -913,29 +983,65 @@ class NovaCore:
         if task_type == "conversation":
             self._status("Preparing conversational answer...")
 
+            # Questions about Nova's own identity, model, tools, or limits are
+            # answered from runtime configuration instead of the model, which
+            # would otherwise answer "who made you" from its training data and
+            # name its own weights' vendor.
+            self_knowledge = getattr(self, "self_knowledge", None)
+            if self_knowledge is not None:
+                try:
+                    grounded = self_knowledge.answer(message, self)
+                except Exception:
+                    grounded = None
+                if isinstance(grounded, str) and grounded.strip():
+                    self._status("Done")
+                    self.short_memory.add("assistant", grounded)
+                    return grounded
+
+            identity = self._identity_system_prompt()
+
             conversation_prompt = (
                 "You are a helpful local AI assistant.\n\n"
                 f"User message: {message}\n\n"
                 f"Recent conversation:\n{self._conversation_context(max_chars=8000)}\n\n"
-                f"Relevant knowledge: {self.knowledge.get_context(message)}\n\n"
+                f"Relevant knowledge:\n{self.knowledge.get_context(message)}\n\n"
                 f"Registered tools and permissions:\n{self._tool_capability_context()}\n\n"
                 f"Relevant saved user memory:\n{self._long_memory_context(message)}\n\n"
                 f"Relevant past tool experiences:\n{self._episodic_context(message)}\n\n"
                 "Answer the user's actual question or statement directly. "
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
-                "generic invitation to ask something else. Do not mention tools, "
-                "verification, task classification, or internal processing. "
-                "Use the recent conversation and stored knowledge when relevant."
+                "generic invitation to ask something else. "
+                "Use the recent conversation and stored knowledge when relevant.\n\n"
+                "You have NOT run any tool. No search has been performed. "
+                "Never write that you searched, browsed, looked something up, or "
+                "found results, and never present specific facts as if a search "
+                "returned them. If the question needs current, live, or "
+                "after-training-cutoff information (news, prices, weather, "
+                "releases, rankings, sports results), do not guess and do not "
+                "invent names, links, dates, or numbers. Say plainly that you "
+                "cannot know that without looking it up, and answer only with "
+                "what you already know, clearly marked as possibly out of date. "
+                "Do not print tool-call syntax such as tool_name(...) or JSON "
+                "tool requests inside a normal answer.\n\n"
+                "If the user asks who made you, who developed you, what company "
+                "is behind you, or what model you are, answer from the runtime "
+                "identity in your instructions. Never say Anthropic, OpenAI, "
+                "Google, or any other vendor created you.\n\n"
+                f"Live capability status for this session (measured, not "
+                f"assumed — use these instead of guessing):\n"
+                f"{self._capability_context()}"
             )
 
             try:
                 response = self.brain.generate(
                     conversation_prompt,
                     system_prompt=(
-                        "You are a helpful local AI assistant. "
+                        identity + " "
                         "For normal conversation, answer naturally without "
-                        "inventing computer actions."
+                        "inventing computer actions. You have not executed any "
+                        "tool and must never claim or imply that you did. Never "
+                        "fabricate search results, sources, or current facts."
                     )
                 )
             except Exception:

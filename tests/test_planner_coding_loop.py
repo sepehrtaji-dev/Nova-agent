@@ -151,6 +151,75 @@ class PlannerCodingLoopTests(unittest.TestCase):
         self.assertIn("Do not assume a language, framework, test runner", prompt)
         self.assertNotIn("For GitHub repo creation the steps must be in order", prompt)
 
+    def test_step_without_description_is_kept_not_dropped(self):
+        """Regression: valid {tool, input} steps were discarded.
+
+        The planner often emits a tool call with no narration. Requiring
+        `description` silently dropped every such step, leaving an empty plan,
+        so the tool never ran and the raw call text was returned to the user.
+        """
+        brain = FakeBrain(json.dumps({
+            "goal": "Search the web",
+            "steps": [
+                {"tool": "read_file", "input": {"path": "module.py"}},
+            ],
+        }))
+        planner = Planner(brain=brain, tools=self.tools)
+
+        plan = planner.create_plan("Search the web", context="")
+
+        self.assertEqual(len(plan["steps"]), 1)
+        step = plan["steps"][0]
+        self.assertEqual(step["tool"], "read_file")
+        self.assertEqual(step["input"], {"path": "module.py"})
+        self.assertTrue(step["description"].strip())
+
+    def test_step_with_empty_description_is_kept(self):
+        brain = FakeBrain(json.dumps({
+            "goal": "Search",
+            "steps": [
+                {"description": "   ", "tool": "read_file",
+                 "input": {"path": "x.py"}},
+            ],
+        }))
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = planner.create_plan("Search", context="")
+        self.assertEqual(len(plan["steps"]), 1)
+
+    def test_step_with_unknown_tool_is_still_dropped(self):
+        """Relaxing the description rule must not admit phantom tools."""
+        brain = FakeBrain(json.dumps({
+            "goal": "Do something",
+            "steps": [
+                {"tool": "not_a_real_tool", "input": {"x": 1}},
+            ],
+        }))
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = planner.create_plan("Do something", context="")
+        self.assertEqual(plan["steps"], [])
+
+    def test_step_without_tool_is_still_dropped(self):
+        brain = FakeBrain(json.dumps({
+            "goal": "Do something",
+            "steps": [
+                {"description": "Just thinking out loud", "input": {"x": 1}},
+            ],
+        }))
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = planner.create_plan("Do something", context="")
+        self.assertEqual(plan["steps"], [])
+
+    def test_step_with_non_object_input_is_still_dropped(self):
+        brain = FakeBrain(json.dumps({
+            "goal": "Do something",
+            "steps": [
+                {"tool": "read_file", "input": "module.py"},
+            ],
+        }))
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = planner.create_plan("Do something", context="")
+        self.assertEqual(plan["steps"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

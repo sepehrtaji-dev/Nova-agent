@@ -283,6 +283,69 @@ class ToolRouter:
 
         return None
 
+    # The intent classifier is a generative model, so it answers with whatever
+    # wording is most natural rather than the two literals the prompt requests.
+    # Observed in practice: "conversational", "informational", "web_search",
+    # "search", "no_action", and bare tool names. Rejecting those silently made
+    # the router fall through to "conversation", which disabled tool use for
+    # requests that were classified correctly. Accept the synonym and treat an
+    # unrecognized-but-action-shaped value as a tool request.
+    _CONVERSATION_SYNONYMS = {
+        "conversation",
+        "conversational",
+        "chat",
+        "talk",
+        "informational",
+        "information",
+        "informative",
+        "answer",
+        "question",
+        "qa",
+        "no_action",
+        "none",
+        "no_tool",
+        "no_tools",
+        "text",
+        "response",
+        "respond",
+        "general",
+    }
+
+    _COMPUTER_SYNONYMS = {
+        "computer",
+        "computer_task",
+        "computer_use",
+        "action",
+        "actions",
+        "execution",
+        "execute",
+        "tool",
+        "tool_call",
+        "tool_use",
+        "tool_usage",
+        "task",
+        "agent",
+        "search",
+        "web",
+        "websearch",
+        "web_search",
+        "browse",
+        "browsing",
+        "internet",
+        "lookup",
+        # Observed from small local models answering a research-style question.
+        "research",
+        "research_task",
+        "information_retrieval",
+        "retrieval",
+        "investigate",
+        "investigation",
+        "find",
+        "finding",
+        "fetch",
+        "retrieve",
+    }
+
     def _normalize_task_type(self, value):
 
         if not isinstance(value, str):
@@ -290,19 +353,17 @@ class ToolRouter:
 
         value = value.strip().lower()
 
-        if value in {
-            "conversation",
-            "chat",
-            "talk"
-        }:
+        if value in self._CONVERSATION_SYNONYMS:
             return "conversation"
 
-        if value in {
-            "computer",
-            "action",
-            "execution",
-            "computer_task"
-        }:
+        if value in self._COMPUTER_SYNONYMS:
+            return "computer"
+
+        # A value naming an enabled tool is an action request. The classifier
+        # frequently answers with the tool name (e.g. "web_search") instead of
+        # the literal "computer"; that must not be discarded.
+        tools = getattr(self.tools, "tools", None)
+        if isinstance(tools, dict) and value in tools:
             return "computer"
 
         return None
@@ -491,8 +552,44 @@ app, file, terminal, web search, or computer action is NOT by itself a request
 to execute it. If the user asks how to do something, explain it unless they
 clearly ask Nova to do it. A direct request to inspect, create, modify, search,
 open, or otherwise operate on a real resource is an action when a listed tool
-supports that operation. If intent is genuinely ambiguous, choose conversation.
+supports that operation.
+
+A question is an action when answering it correctly requires information the
+model cannot know on its own, and an enabled tool can supply it. This includes
+questions about current events, live data, prices, weather, recent releases,
+sports results, rankings, availability, or anything after the model's training
+cutoff -- even when the user never says "search", "look up", or "browse".
+"What is the latest X", "what are the best Y in 2026", "who won Y", and a bare
+topic like "best minecraft shaders 2026" are all requests for current
+information, so choose computer when a web tool is enabled.
+
+An imperative instruction to retrieve information is also computer: "search for
+X", "find X", "look up X", "google X", "get me X".
+
+Choose conversation -- not an action -- only when the answer truly does not
+depend on external, current, or specific real-world data. These are always
+conversation:
+- explanations and concepts ("how does X work", "explain Y", "what is
+  recursion")
+- pure arithmetic, including percentages and unit conversion ("what is 15
+  percent of 240")
+- code the model can write itself
+- opinions, small talk, greetings, thanks
+- questions about Nova's own identity, model, tools, or capabilities
+Never classify a request that asks for a specific real-world product, price,
+release, event, ranking, statistic, or current fact as conversation. If the
+user names a specific real thing and wants information about it, that needs a
+search.
+
+If intent is genuinely ambiguous, choose conversation.
 Do not classify an action as executable if no enabled tool supports it.
+
+Worked examples:
+- "explain how minecraft shaders work" -> conversation (general explanation,
+  nothing current is requested)
+- "what is 15 percent of 240" -> conversation (pure arithmetic)
+- "best minecraft shaders 2026" -> computer (a specific current ranking)
+- "what is the price of bitcoin" -> computer (live data)
 
 ENABLED TOOL CAPABILITIES:
 {capabilities_text}
@@ -514,8 +611,12 @@ CURRENT USER MESSAGE:
                     "Classify the user's intent using the enabled tool "
                     "capabilities and conversation context below. Return only "
                     'JSON: {"task_type":"computer"} or '
-                    '{"task_type":"conversation"}. Do not infer execution intent '
-                    "from mere mentions, hypotheticals, or questions.\n"
+                    '{"task_type":"conversation"}. Use "computer" when the '
+                    "request needs a real tool action, including questions that "
+                    "require current or live information an enabled tool can "
+                    "provide. Use \"conversation\" for explanations, opinions, "
+                    "small talk, and capability questions. Do not infer execution "
+                    "intent from mere mentions, hypotheticals, or questions.\n"
                     f"Enabled capabilities:\n{capabilities_text}\n"
                     f"Conversation: {conversation[-3000:] if isinstance(conversation, str) else ''}\n"
                     f"Request: {message}"
