@@ -218,7 +218,7 @@ class WebSearchTool:
                     if len(cleaned) >= 8:
                         break
                 if cleaned:
-                    return "\\n\\n".join(
+                    return "\n\n".join(
                         f"[{index}]\\nTitle: {title}\\nURL: {result_url}\\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
                         for index, (title, result_url, snippet) in enumerate(cleaned, start=1)
                     )
