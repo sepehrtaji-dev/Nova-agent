@@ -1112,7 +1112,11 @@ Return JSON only.
             except json.JSONDecodeError:
                 parsed_input = stripped
             if isinstance(parsed_input, str):
-                parsed_input = self._input_from_positional(tool, parsed_input)
+                mapped_input = self._input_from_positional(tool, parsed_input)
+                try:
+                    parsed_input = json.loads(mapped_input)
+                except (TypeError, json.JSONDecodeError):
+                    parsed_input = mapped_input
             tool_input_object = parsed_input
         else:
             return None
