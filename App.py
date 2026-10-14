@@ -1,3 +1,5 @@
+import mimetypes
+import os
 import sys
 import threading
 from datetime import datetime
@@ -20,6 +22,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -447,7 +450,7 @@ class ComposerEdit(QPlainTextEdit):
 
 
 class MessageBubble(QFrame):
-    def __init__(self, role, text, parent=None):
+    def __init__(self, role, text, parent=None, attachments=None):
         super().__init__(parent)
         self.setObjectName("userBubble" if role == "user" else "novaBubble")
         apply_glass_shadow(
@@ -475,7 +478,24 @@ class MessageBubble(QFrame):
         name = QLabel("You" if role == "user" else "Nova")
         name.setObjectName("messageName")
         content.addWidget(name)
-        add_markdown_content(content, text if text else " ")
+        add_markdown_content(content, text if text else ("Attached files" if attachments else " "))
+        if role == "user" and attachments:
+            badges = QHBoxLayout()
+            badges.setContentsMargins(0, 2, 0, 0)
+            badges.setSpacing(6)
+            for path in attachments:
+                filename = os.path.basename(path)
+                try:
+                    size = os.path.getsize(path)
+                    size_label = f"{size / 1024:.1f} KB" if size < 1024 * 1024 else f"{size / (1024 * 1024):.1f} MB"
+                except OSError:
+                    size_label = "Unavailable"
+                badge = QLabel(f"📎  {filename}  ·  {size_label}")
+                badge.setObjectName("attachmentBadge")
+                badge.setToolTip(path)
+                badges.addWidget(badge)
+            badges.addStretch(1)
+            content.addLayout(badges)
         layout.addLayout(content, 1)
 
 class ActivityItem(QFrame):
@@ -570,6 +590,7 @@ class NovaWindow(QMainWindow):
         self.worker = None
         self.busy = False
         self.current_turn_status = None
+        self.attachments = []
 
         self.setWindowTitle("Nova")
         self.setMinimumSize(980, 600)
@@ -837,6 +858,23 @@ class NovaWindow(QMainWindow):
         box_layout.setContentsMargins(18, 12, 12, 12)
         box_layout.setSpacing(8)
 
+        # Horizontally scrollable glass file chips, shown only when files are queued.
+        self.attachment_preview = QScrollArea()
+        self.attachment_preview.setObjectName("attachmentPreview")
+        self.attachment_preview.setWidgetResizable(False)
+        self.attachment_preview.setFrameShape(QFrame.NoFrame)
+        self.attachment_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.attachment_preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.attachment_preview.setFixedHeight(50)
+        self.attachment_preview.setVisible(False)
+        self.attachment_preview_content = QWidget()
+        self.attachment_preview_layout = QHBoxLayout(self.attachment_preview_content)
+        self.attachment_preview_layout.setContentsMargins(2, 3, 8, 3)
+        self.attachment_preview_layout.setSpacing(7)
+        self.attachment_preview_layout.addStretch(1)
+        self.attachment_preview.setWidget(self.attachment_preview_content)
+        box_layout.addWidget(self.attachment_preview)
+
         self.input = ComposerEdit()
         self.input.setObjectName("composer")
         self.input.setPlaceholderText("Send a message")
@@ -855,8 +893,10 @@ class NovaWindow(QMainWindow):
         add_button.setIcon(make_icon("plus", "#aeb5c1"))
         add_button.setIconSize(QSize(20, 20))
         add_button.setFixedSize(size, size)
-        add_button.setEnabled(False)
-        add_button.setToolTip("Attachments are not available yet.")
+        add_button.setCursor(Qt.PointingHandCursor)
+        add_button.setToolTip("Attach one or more files")
+        add_button.clicked.connect(self._choose_attachments)
+        self.add_attachment_button = add_button
         controls.addWidget(add_button)
 
         self.globe_button = QPushButton()
@@ -1216,6 +1256,51 @@ class NovaWindow(QMainWindow):
             border: 1px solid rgba(168, 85, 247, 0.4);
         }}
 
+        #attachmentPreview {{
+            background: transparent;
+            border: none;
+        }}
+
+        #attachmentChip {{
+            background: rgba(139, 92, 246, 0.16);
+            border: 1px solid rgba(168, 85, 247, 0.35);
+            border-radius: 12px;
+        }}
+
+        #attachmentChipName {{
+            color: #f2f4fb;
+            font-size: 10px;
+            font-weight: 600;
+        }}
+
+        #attachmentChipSize {{
+            color: rgba(226, 232, 240, 0.60);
+            font-size: 9px;
+        }}
+
+        #attachmentRemove {{
+            color: rgba(226, 232, 240, 0.75);
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 700;
+        }}
+
+        #attachmentRemove:hover {{
+            color: #ffffff;
+            background: rgba(239, 68, 68, 0.55);
+        }}
+
+        #attachmentBadge {{
+            color: #e9ddff;
+            background: rgba(139, 92, 246, 0.18);
+            border: 1px solid rgba(168, 85, 247, 0.35);
+            border-radius: 9px;
+            padding: 5px 9px;
+            font-size: 10px;
+        }}
+
         #composer {{
             background: transparent;
             border: none;
@@ -1565,12 +1650,12 @@ class NovaWindow(QMainWindow):
         self.status_label.setText("Ready")
         self.input.setFocus()
 
-    def _add_message(self, role, text):
+    def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(
             self.chat_container_layout.count() - 1
         )
 
-        bubble = MessageBubble(role, text)
+        bubble = MessageBubble(role, text, attachments=attachments)
         self.chat_container_layout.addWidget(bubble)
 
         if stretch:
@@ -1639,17 +1724,129 @@ class NovaWindow(QMainWindow):
         if self.activity_panel.isVisible():
             self._scroll_activity()
 
+    @staticmethod
+    def _format_file_size(size):
+        if size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        if size < 1024 * 1024 * 1024:
+            return f"{size / (1024 * 1024):.1f} MB"
+        return f"{size / (1024 * 1024 * 1024):.1f} GB"
+
+    def _choose_attachments(self):
+        if self.busy:
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Attach files",
+            "",
+            "Supported files (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg *.txt *.md *.rst *.py *.js *.ts *.jsx *.tsx *.html *.css *.json *.xml *.yaml *.yml *.toml *.ini *.cfg *.sh *.bat *.ps1 *.c *.h *.cpp *.java *.go *.rs *.sql *.pdf *.doc *.docx *.odt *.rtf *.csv *.xlsx *.xls);;Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg);;Text and code files (*.txt *.md *.rst *.py *.js *.ts *.jsx *.tsx *.html *.css *.json *.xml *.yaml *.yml *.toml *.ini *.cfg *.sh *.bat *.ps1 *.c *.h *.cpp *.java *.go *.rs *.sql *.csv);;Documents (*.pdf *.doc *.docx *.odt *.rtf *.xlsx *.xls);;All files (*)",
+        )
+        for path in paths:
+            path = os.path.abspath(path)
+            if path not in self.attachments:
+                self.attachments.append(path)
+        self._refresh_attachment_preview()
+
+    def _remove_attachment(self, path):
+        if path in self.attachments:
+            self.attachments.remove(path)
+            self._refresh_attachment_preview()
+
+    def _refresh_attachment_preview(self):
+        while self.attachment_preview_layout.count():
+            item = self.attachment_preview_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        for path in self.attachments:
+            chip = QFrame()
+            chip.setObjectName("attachmentChip")
+            row = QHBoxLayout(chip)
+            row.setContentsMargins(9, 4, 5, 4)
+            row.setSpacing(7)
+            labels = QVBoxLayout()
+            labels.setContentsMargins(0, 0, 0, 0)
+            labels.setSpacing(0)
+            filename = QLabel(os.path.basename(path))
+            filename.setObjectName("attachmentChipName")
+            filename.setMaximumWidth(190)
+            filename.setToolTip(path)
+            size_label = QLabel(self._format_file_size(os.path.getsize(path)) if os.path.exists(path) else "Unavailable")
+            size_label.setObjectName("attachmentChipSize")
+            labels.addWidget(filename)
+            labels.addWidget(size_label)
+            row.addLayout(labels)
+            remove = QPushButton("×")
+            remove.setObjectName("attachmentRemove")
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.setFixedSize(20, 20)
+            remove.setToolTip("Remove attachment")
+            remove.clicked.connect(lambda _checked=False, p=path: self._remove_attachment(p))
+            row.addWidget(remove)
+            self.attachment_preview_layout.addWidget(chip)
+        self.attachment_preview_layout.addStretch(1)
+        self.attachment_preview.setVisible(bool(self.attachments))
+        self.attachment_preview_content.adjustSize()
+        self.attachment_preview_content.setMinimumWidth(
+            max(self.attachment_preview.viewport().width(), self.attachment_preview_content.sizeHint().width())
+        )
+
+    def _attachment_context(self, paths):
+        """Build textual context for Nova while keeping binary files as path metadata."""
+        parts = []
+        text_extensions = {
+            ".txt", ".md", ".rst", ".py", ".js", ".ts", ".jsx", ".tsx",
+            ".html", ".css", ".json", ".xml", ".yaml", ".yml", ".toml",
+            ".ini", ".cfg", ".sh", ".bat", ".ps1", ".c", ".h", ".cpp",
+            ".java", ".go", ".rs", ".sql", ".csv", ".log", ".env",
+        }
+        for path in paths:
+            name = os.path.basename(path)
+            try:
+                size = os.path.getsize(path)
+                size_text = self._format_file_size(size)
+            except OSError as exc:
+                parts.append(f"[Attached File: {name} (unavailable: {exc}) | path: {path}]")
+                continue
+            extension = os.path.splitext(name)[1].lower().lstrip(".") or "text"
+            mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+            if os.path.splitext(name)[1].lower() in text_extensions or mime_type.startswith("text/"):
+                if size > 1024 * 1024:
+                    parts.append(f"[Attached File: {name} ({size_text}) | path: {path}; content omitted because it exceeds the 1 MiB inline limit]")
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8-sig") as stream:
+                        content = stream.read(1024 * 1024 + 1)
+                    if len(content) > 1024 * 1024:
+                        content = content[:1024 * 1024] + "\n[Truncated at 1 MiB]"
+                except (UnicodeError, OSError):
+                    parts.append(f"[Attached File: {name} ({size_text}; {mime_type}) | path: {path}; unable to decode as UTF-8]")
+                    continue
+                parts.append(f"[Attached File: {name} ({size_text})]\n```{extension}\n{content}\n```")
+            else:
+                category = "image" if mime_type.startswith("image/") else mime_type
+                parts.append(f"[Attached File: {name} ({size_text}; {category}; binary content not embedded) | path: {path}]")
+        return "\n\n".join(parts)
+
     def _send(self):
         if self.busy:
             return
 
-        message = self.input.toPlainText().strip()
-        if not message:
+        user_text = self.input.toPlainText().strip()
+        attachments = list(self.attachments)
+        if not user_text and not attachments:
             return
 
+        attachment_context = self._attachment_context(attachments) if attachments else ""
+        message = user_text
+        if attachment_context:
+            message = f"{user_text}\n\n{attachment_context}" if user_text else attachment_context
+
         self.input.clear()
-        self._add_message("user", message)
-        self._add_activity("Request received.")
+        self.attachments.clear()
+        self._refresh_attachment_preview()
+        self._add_message("user", user_text, attachments=attachments)
+        self._add_activity("Request received" + (f" with {len(attachments)} attachment(s)." if attachments else "."))
         self.current_turn_status = self._add_turn_status("Thinking…")
         self.status_label.setText("Working…")
         self.live_badge.setText("LIVE")
