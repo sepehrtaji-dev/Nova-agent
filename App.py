@@ -5,9 +5,21 @@ from datetime import datetime
 from config.runtime import load_capability_definitions, load_default_access
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QIcon,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRadialGradient,
+)
 from PySide6.QtWidgets import (
     QApplication,
+    QGraphicsDropShadowEffect,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -30,15 +42,25 @@ from agent.core import NovaCore
 from utils.math_parser import format_response_math
 
 
-APP_BG = "#0b0c0f"
-SIDEBAR_BG = "#111318"
-PANEL_BG = "#0f1116"
-BORDER = "#252a33"
-TEXT = "#f5f7fa"
-MUTED = "#8d95a3"
-ACCENT = "#8b7cff"
-ACCENT_HOVER = "#9d91ff"
-GREEN = "#5fe09b"
+# --------------------------------------------------------------------------- #
+#  Glassmorphism design tokens                                                #
+# --------------------------------------------------------------------------- #
+APP_BG = "#070814"            # deep space navy (backdrop base)
+SIDEBAR_BG = "rgba(18, 22, 36, 0.65)"
+PANEL_BG = "rgba(18, 22, 36, 0.65)"
+BORDER = "rgba(255, 255, 255, 0.14)"
+TEXT = "#f2f4fb"
+MUTED = "rgba(226, 232, 240, 0.55)"
+ACCENT = "#8b5cf6"            # electric violet
+ACCENT_2 = "#06b6d4"          # neon cyan
+ACCENT_3 = "#d946ef"          # magenta
+ACCENT_HOVER = "#a78bfa"
+GREEN = "#34d399"
+GLASS_FILL = "rgba(255, 255, 255, 0.05)"
+GLASS_FILL_STRONG = "rgba(255, 255, 255, 0.08)"
+GLASS_BORDER = "rgba(255, 255, 255, 0.14)"
+GLASS_BORDER_GLOW = "rgba(168, 85, 247, 0.4)"
+GLASS_GRADIENT = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(139, 92, 246, 0.85), stop:1 rgba(6, 182, 212, 0.85))"
 
 # Default permissions come from the declarative tool manifest.
 DEFAULT_ACCESS = load_default_access()
@@ -105,6 +127,7 @@ class CodeBlock(QFrame):
     def __init__(self, code, language="", parent=None):
         super().__init__(parent)
         self.setObjectName("codeBlock")
+        apply_glass_shadow(self, "#0ea5e9", 26, 8, 70)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -238,6 +261,120 @@ def make_icon(kind, color="#aeb5c1", size=20, width=1.8):
     return QIcon(pixmap)
 
 
+class AuroraBackdrop(QWidget):
+    """Deep-space backdrop with animated procedural frosted neon orbs.
+
+    Paints a dark navy/violet base gradient and three slow-drifting glowing
+    orbs (cyan / violet / magenta) drawn with soft radial gradients, giving
+    every translucent glass panel above it a real sense of refractive depth.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("auroraRoot")
+        self._t = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(50)  # ~20 fps is plenty for soft ambient drift
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self):
+        self._t = (self._t + 0.05) % 1000.0
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = max(1.0, float(self.width()))
+        h = max(1.0, float(self.height()))
+        t = self._t
+
+        # Base: deep space navy -> deep violet-navy.
+        base = QLinearGradient(0.0, 0.0, w * 0.35, h)
+        base.setColorAt(0.0, QColor("#070814"))
+        base.setColorAt(0.55, QColor("#0a0b1c"))
+        base.setColorAt(1.0, QColor("#0d0f22"))
+        painter.fillRect(self.rect(), QBrush(base))
+
+        # Soft multi-stop nebula wash for extra depth.
+        nebula = QLinearGradient(0.0, 0.0, w, h)
+        nebula.setColorAt(0.0, QColor(139, 92, 246, 14))
+        nebula.setColorAt(0.5, QColor(6, 182, 212, 8))
+        nebula.setColorAt(1.0, QColor(217, 70, 239, 14))
+        painter.fillRect(self.rect(), QBrush(nebula))
+
+        def _color_with_alpha(color_val, alpha):
+            c = QColor(color_val)
+            c.setAlpha(max(0, min(255, int(alpha))))
+            return c
+
+        def orb(cx, cy, radius, color, alpha):
+            gradient = QRadialGradient(cx, cy, radius)
+            c = _color_with_alpha(color, alpha)
+            gradient.setColorAt(0.0, c)
+            fade = _color_with_alpha(color, 0)
+            gradient.setColorAt(0.55, _color_with_alpha(color, max(0, alpha // 4)))
+            gradient.setColorAt(1.0, fade)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(gradient))
+            painter.drawEllipse(QPointF(cx, cy), radius, radius)
+
+        import math
+
+        # Slow Lissajous-style drift so the glow never repeats exactly.
+        orb(
+            w * (0.22 + 0.08 * math.sin(t * 0.11)),
+            h * (0.28 + 0.07 * math.cos(t * 0.09)),
+            max(w, h) * 0.34,
+            "#06b6d4",
+            52,
+        )
+        orb(
+            w * (0.78 + 0.07 * math.cos(t * 0.08 + 2.0)),
+            h * (0.22 + 0.08 * math.sin(t * 0.07 + 1.0)),
+            max(w, h) * 0.30,
+            "#8b5cf6",
+            58,
+        )
+        orb(
+            w * (0.55 + 0.09 * math.sin(t * 0.06 + 4.0)),
+            h * (0.86 + 0.06 * math.cos(t * 0.10 + 3.0)),
+            max(w, h) * 0.28,
+            "#d946ef",
+            40,
+        )
+        # Tiny specular star-dust for a frosted-glass sparkle.
+        painter.setPen(Qt.NoPen)
+        for i in range(26):
+            seed = (i * 977) % 1000 / 1000.0
+            seed2 = (i * 613) % 1000 / 1000.0
+            x = w * seed
+            y = h * ((seed2 + 0.13 * math.sin(t * 0.2 + i)) % 1.0)
+            twinkle = 0.5 + 0.5 * math.sin(t * 0.5 + i * 1.7)
+            alpha = int(10 + 26 * twinkle)
+            dust = QRadialGradient(x, y, 2.4)
+            c = QColor(255, 255, 255, alpha)
+            dust.setColorAt(0.0, c)
+            fade = QColor(255, 255, 255, 0)
+            dust.setColorAt(1.0, fade)
+            painter.setBrush(QBrush(dust))
+            painter.drawEllipse(QPointF(x, y), 2.4, 2.4)
+        painter.end()
+
+
+def apply_glass_shadow(widget, color="#8b5cf6", blur=26, y_offset=8, alpha=90):
+    """Attach a soft neon/ambient drop shadow to a floating glass panel."""
+    effect = QGraphicsDropShadowEffect(widget)
+    effect.setBlurRadius(blur)
+    effect.setOffset(0, y_offset)
+    c = QColor(color)
+    c.setAlpha(alpha)
+    effect.setColor(c)
+    widget.setGraphicsEffect(effect)
+    return effect
+
+
 class AgentWorker(QObject):
     status = Signal(str)
     finished = Signal(str)
@@ -313,6 +450,13 @@ class MessageBubble(QFrame):
     def __init__(self, role, text, parent=None):
         super().__init__(parent)
         self.setObjectName("userBubble" if role == "user" else "novaBubble")
+        apply_glass_shadow(
+            self,
+            "#8b5cf6" if role == "user" else "#06b6d4",
+            30,
+            8,
+            70,
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 14)
@@ -439,9 +583,9 @@ class NovaWindow(QMainWindow):
         self._sync_responsive_layout()
 
     def _build_ui(self):
-        root = QWidget()
-        root.setObjectName("root")
+        root = AuroraBackdrop()
         self.setCentralWidget(root)
+        root.setObjectName("root")
 
         root_layout = QHBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -501,6 +645,7 @@ class NovaWindow(QMainWindow):
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         self.sidebar = sidebar
+        apply_glass_shadow(sidebar, "#8b5cf6", 34, 6, 70)
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(14, 16, 14, 14)
@@ -607,6 +752,7 @@ class NovaWindow(QMainWindow):
         panel = QFrame()
         panel.setObjectName("activityPanel")
         self.activity_panel = panel
+        apply_glass_shadow(panel, "#06b6d4", 34, 6, 60)
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 18, 16, 16)
@@ -686,6 +832,7 @@ class NovaWindow(QMainWindow):
         box.setObjectName("composerBox")
         box.setProperty("focused", False)
         self.composer_box = box
+        apply_glass_shadow(box, "#8b5cf6", 42, 12, 110)
         box_layout = QVBoxLayout(box)
         box_layout.setContentsMargins(18, 12, 12, 12)
         box_layout.setSpacing(8)
@@ -850,8 +997,8 @@ class NovaWindow(QMainWindow):
             color: {TEXT};
         }}
 
-        QMainWindow, #root, #main {{
-            background: {APP_BG};
+        #root {{
+            background: transparent;
         }}
 
         #activityScroll, #activityScroll > QWidget > QWidget, #activityContainer,
@@ -861,13 +1008,14 @@ class NovaWindow(QMainWindow):
         }}
 
         #sidebar {{
-            background: {SIDEBAR_BG};
-            border-right: 1px solid {BORDER};
+            background: rgba(14, 17, 30, 0.62);
+            border-right: 1px solid rgba(255, 255, 255, 0.10);
         }}
 
         #brandTitle {{
             font-size: 17px;
             font-weight: 650;
+            color: #ffffff;
         }}
 
         #brandSubtitle {{
@@ -876,22 +1024,22 @@ class NovaWindow(QMainWindow):
         }}
 
         #newChat {{
-            background: #1a1d24;
-            border: 1px solid {BORDER};
-            border-radius: 10px;
+            background: {GLASS_GRADIENT};
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 12px;
             padding: 10px 12px;
             text-align: left;
             font-size: 13px;
             font-weight: 600;
+            color: #ffffff;
         }}
 
         #newChat:hover {{
-            background: #1d2129;
-            border-color: #343a46;
+            border-color: rgba(255, 255, 255, 0.40);
         }}
 
         #sectionLabel, #tinyLabel {{
-            color: #68707e;
+            color: rgba(226, 232, 240, 0.45);
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 1.2px;
@@ -905,30 +1053,34 @@ class NovaWindow(QMainWindow):
         }}
 
         #chatList::item {{
-            color: #aeb5c1;
+            color: rgba(226, 232, 240, 0.75);
+            background: rgba(255, 255, 255, 0.04);
             padding: 9px 10px;
-            border-radius: 8px;
+            border-radius: 9px;
+            margin: 1px 0;
         }}
 
         #chatList::item:hover {{
-            background: #171a21;
-            color: {TEXT};
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
         }}
 
         #chatList::item:selected {{
-            background: #1c2029;
-            color: {TEXT};
+            background: rgba(139, 92, 246, 0.30);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            color: #ffffff;
         }}
 
         #sidebarFooter {{
-            background: #15181f;
-            border: 1px solid {BORDER};
-            border-radius: 11px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 12px;
         }}
 
         #modelValue {{
             font-size: 12px;
             font-weight: 600;
+            color: #e2e8f0;
         }}
 
         #privacy {{
@@ -938,21 +1090,22 @@ class NovaWindow(QMainWindow):
         }}
 
         #header {{
-            background: {APP_BG};
-            border-bottom: 1px solid {BORDER};
+            background: rgba(13, 15, 34, 0.55);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.10);
         }}
 
         #headerTitle {{
             font-size: 15px;
             font-weight: 650;
+            color: #ffffff;
         }}
 
         #localPill {{
-            color: #aaa3ff;
-            background: #1a1828;
-            border: 1px solid #302b49;
-            border-radius: 6px;
-            padding: 3px 7px;
+            color: #c4b5fd;
+            background: rgba(139, 92, 246, 0.16);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: 7px;
+            padding: 3px 8px;
             font-size: 9px;
             font-weight: 700;
         }}
@@ -964,26 +1117,28 @@ class NovaWindow(QMainWindow):
         }}
 
         #headerButton {{
-            background: transparent;
-            border: 1px solid {BORDER};
-            border-radius: 8px;
-            padding: 7px 11px;
-            color: #b8bec8;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 9px;
+            padding: 7px 12px;
+            color: rgba(226, 232, 240, 0.85);
         }}
 
         #headerButton:hover {{
-            background: #171a21;
-            color: {TEXT};
+            background: rgba(139, 92, 246, 0.20);
+            border-color: rgba(168, 85, 247, 0.4);
+            color: #ffffff;
         }}
 
         #activityPanel {{
-            background: {PANEL_BG};
-            border-left: 1px solid {BORDER};
+            background: rgba(14, 17, 30, 0.62);
+            border-left: 1px solid rgba(255, 255, 255, 0.10);
         }}
 
         #panelTitle {{
             font-size: 14px;
             font-weight: 650;
+            color: #ffffff;
         }}
 
         #panelInfo {{
@@ -993,71 +1148,72 @@ class NovaWindow(QMainWindow):
         }}
 
         #idleBadge, #liveBadge {{
-            background: #161a20;
-            color: #747d8b;
-            border: 1px solid {BORDER};
-            border-radius: 6px;
-            padding: 3px 6px;
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(226, 232, 240, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 7px;
+            padding: 3px 7px;
             font-size: 9px;
             font-weight: 700;
         }}
 
         #turnStatus {{
-            background: #12151b;
-            border: 1px solid #262b34;
-            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: 12px;
         }}
 
         #turnStatusDot {{
-            color: #8b7cff;
+            color: {ACCENT_2};
             font-size: 9px;
         }}
 
         #turnStatusTitle {{
-            color: #8b7cff;
+            color: #a78bfa;
             font-size: 10px;
             font-weight: 700;
         }}
 
         #turnStatusMessage {{
-            color: #b8bec8;
+            color: rgba(226, 232, 240, 0.80);
             font-size: 11px;
         }}
 
         #activityItem {{
-            background: #14171d;
-            border: 1px solid #20242c;
-            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 10px;
         }}
 
         #activityDot {{
-            color: {ACCENT};
+            color: {ACCENT_2};
             font-size: 9px;
         }}
 
         #activityTime {{
-            color: #646c79;
+            color: rgba(226, 232, 240, 0.40);
             font-size: 9px;
         }}
 
         #activityText {{
-            color: #b8bec8;
+            color: rgba(226, 232, 240, 0.80);
             font-size: 10px;
         }}
 
         #composerArea {{
-            background: {APP_BG};
+            background: transparent;
             border-top: none;
         }}
 
         #composerBox {{
-            background: #15181f;
-            border: 1px solid #2a2f39;
-            border-radius: 22px;
+            background: rgba(18, 22, 36, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 24px;
         }}
 
         #composerBox[focused="true"] {{
-            border-color: #514a72;
+            background: rgba(24, 28, 48, 0.72);
+            border: 1px solid rgba(168, 85, 247, 0.4);
         }}
 
         #composer {{
@@ -1065,31 +1221,34 @@ class NovaWindow(QMainWindow):
             border: none;
             padding: 2px 2px;
             font-size: 14px;
-            selection-background-color: #4a426f;
+            color: #f2f4fb;
+            selection-background-color: rgba(139, 92, 246, 0.55);
         }}
 
         #roundButton {{
-            background: #1e222b;
-            border: none;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.10);
             border-radius: 19px;
         }}
 
         #roundButton:hover {{
-            background: #262b36;
+            background: rgba(255, 255, 255, 0.10);
+            border-color: rgba(168, 85, 247, 0.4);
         }}
 
         #roundButton:checked {{
-            background: #1a2438;
+            background: rgba(6, 182, 212, 0.18);
+            border-color: rgba(6, 182, 212, 0.45);
         }}
 
         #roundButton:disabled {{
-            background: #191c23;
+            background: rgba(255, 255, 255, 0.03);
         }}
 
         #modelSelector {{
-            background: #1e222b;
+            background: rgba(255, 255, 255, 0.05);
             color: {TEXT};
-            border: none;
+            border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 19px;
             padding: 0 16px;
             font-size: 12px;
@@ -1097,39 +1256,41 @@ class NovaWindow(QMainWindow):
         }}
 
         #modelSelector:hover {{
-            background: #262b36;
+            background: rgba(255, 255, 255, 0.09);
+            border-color: rgba(168, 85, 247, 0.4);
         }}
 
         #sendButton {{
-            background: {ACCENT};
-            border: none;
+            background: {GLASS_GRADIENT};
+            border: 1px solid rgba(255, 255, 255, 0.25);
             border-radius: 19px;
         }}
 
         #sendButton:hover {{
-            background: {ACCENT_HOVER};
+            border-color: rgba(255, 255, 255, 0.45);
         }}
 
         #sendButton:disabled {{
-            background: #2a2833;
+            background: rgba(139, 92, 246, 0.15);
+            border-color: rgba(255, 255, 255, 0.08);
         }}
 
         QMenu {{
-            background: #15181f;
-            border: 1px solid #2a2f39;
-            border-radius: 10px;
+            background: rgba(18, 22, 36, 0.92);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: 12px;
             padding: 6px;
         }}
 
         QMenu::item {{
             padding: 8px 26px 8px 14px;
-            border-radius: 6px;
+            border-radius: 8px;
             color: {TEXT};
             font-size: 12px;
         }}
 
         QMenu::item:selected {{
-            background: #222733;
+            background: rgba(139, 92, 246, 0.30);
         }}
 
         QMenu::indicator {{
@@ -1137,53 +1298,58 @@ class NovaWindow(QMainWindow):
         }}
 
         QMenu::item:checked {{
-            color: {ACCENT_HOVER};
+            color: {ACCENT_2};
             font-weight: 700;
         }}
 
         #chatArea, #chatScroll, #chatContainer, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {{
-            background: {APP_BG};
+            background: transparent;
             border: none;
         }}
 
         #messageName {{
-            color: #aeb5c1;
+            color: rgba(226, 232, 240, 0.70);
             font-size: 11px;
             font-weight: 650;
         }}
 
-        #userMessage, #novaMessage {{
-            background: transparent;
-            border: none;
-            color: {TEXT};
-            font-size: 13px;
+        #userBubble {{
+            background: rgba(139, 92, 246, 0.16);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: 16px;
+            padding: 12px 16px;
         }}
 
-        #userMessage {{
-            color: #d9dde4;
+        #novaBubble {{
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 16px;
+            padding: 12px 16px;
         }}
 
         #codeBlock {{
-            background: #10131a;
-            border: 1px solid #292f3a;
-            border-radius: 10px;
+            background: rgba(7, 8, 20, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 12px;
         }}
 
         #codeLanguage {{
-            background: #151922;
-            color: #858e9d;
-            border-bottom: 1px solid #292f3a;
+            background: rgba(139, 92, 246, 0.16);
+            color: #a5f3fc;
+            border-bottom: 1px solid rgba(168, 85, 247, 0.4);
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
             padding: 6px 10px;
             font-size: 10px;
             font-weight: 650;
         }}
 
         #codeEditor {{
-            background: #10131a;
+            background: transparent;
             color: #e6e9ef;
             border: none;
             padding: 11px;
-            selection-background-color: #343047;
+            selection-background-color: rgba(139, 92, 246, 0.55);
             selection-color: #ffffff;
         }}
 
@@ -1194,21 +1360,37 @@ class NovaWindow(QMainWindow):
         }}
 
         QScrollBar::handle:vertical {{
-            background: #2a2f38;
+            background: rgba(168, 85, 247, 0.35);
             border-radius: 4px;
             min-height: 35px;
         }}
 
         QScrollBar::handle:vertical:hover {{
-            background: #383f4b;
+            background: rgba(6, 182, 212, 0.55);
         }}
 
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0;
         }}
 
+        QScrollBar:horizontal {{
+            background: transparent;
+            height: 8px;
+            margin: 2px;
+        }}
+
+        QScrollBar::handle:horizontal {{
+            background: rgba(168, 85, 247, 0.35);
+            border-radius: 4px;
+            min-width: 35px;
+        }}
+
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0;
+        }}
+
         QSplitter::handle {{
-            background: {BORDER};
+            background: rgba(255, 255, 255, 0.10);
         }}
         """)
 
@@ -1301,17 +1483,17 @@ class NovaWindow(QMainWindow):
                     """
                     QPushButton {
                         text-align: left;
-                        background: #171b21;
-                        border: 1px solid #303641;
-                        border-radius: 11px;
+                        background: rgba(139, 92, 246, 0.22);
+                        border: 1px solid rgba(168, 85, 247, 0.4);
+                        border-radius: 12px;
                         padding: 7px 12px;
-                        color: #e5e8ee;
+                        color: #ffffff;
                         font-size: 10px;
                         font-weight: 650;
                     }
                     QPushButton:hover {
-                        background: #1c2028;
-                        border-color: #3c4350;
+                        background: rgba(139, 92, 246, 0.32);
+                        border-color: rgba(6, 182, 212, 0.55);
                     }
                     """
                 )
@@ -1320,16 +1502,17 @@ class NovaWindow(QMainWindow):
                     """
                     QPushButton {
                         text-align: left;
-                        background: #111318;
-                        border: 1px solid #20242b;
-                        border-radius: 11px;
+                        background: rgba(255, 255, 255, 0.05);
+                        border: 1px solid rgba(255, 255, 255, 0.14);
+                        border-radius: 12px;
                         padding: 7px 12px;
-                        color: #747d8b;
+                        color: rgba(226, 232, 240, 0.55);
                         font-size: 10px;
                         font-weight: 650;
                     }
                     QPushButton:hover {
-                        background: #15181e;
+                        background: rgba(255, 255, 255, 0.09);
+                        color: rgba(226, 232, 240, 0.85);
                     }
                     """
                 )
@@ -1472,11 +1655,11 @@ class NovaWindow(QMainWindow):
         self.live_badge.setText("LIVE")
         self.live_badge.setStyleSheet(
             f"""
-            background: #16221b;
+            background: rgba(52, 211, 153, 0.14);
             color: {GREEN};
-            border: 1px solid #294936;
-            border-radius: 6px;
-            padding: 3px 6px;
+            border: 1px solid rgba(52, 211, 153, 0.45);
+            border-radius: 7px;
+            padding: 3px 7px;
             font-size: 9px;
             font-weight: 700;
             """
@@ -1531,11 +1714,11 @@ class NovaWindow(QMainWindow):
         self.live_badge.setText("IDLE")
         self.live_badge.setStyleSheet(
             """
-            background: #161a20;
-            color: #747d8b;
-            border: 1px solid #252a33;
-            border-radius: 6px;
-            padding: 3px 6px;
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(226, 232, 240, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 7px;
+            padding: 3px 7px;
             font-size: 9px;
             font-weight: 700;
             """
