@@ -57,12 +57,36 @@ class Verifier:
         self.tools = tools
 
     # ── Public entry point ────────────────────────────────────────────────────
+    @staticmethod
+    def _same_path(left, right):
+        """Compare two paths by identity, not by spelling.
+
+        On Windows the same directory may be written with an 8.3 short name
+        ("SEPEHR~1") or its long name ("SepehrTaji"), and casing and separators
+        vary elsewhere. A plain string comparison reports a correct operation as
+        a mismatch, so resolve both sides first.
+        """
+        if not left or not right:
+            return False
+        try:
+            return (
+                os.path.normcase(os.path.realpath(str(left)))
+                == os.path.normcase(os.path.realpath(str(right)))
+            )
+        except (OSError, ValueError):
+            return os.path.normcase(str(left)) == os.path.normcase(str(right))
+
     def _resolve_path_for_verification(self, tool_input):
-        path = str(tool_input.get("path", "")).strip()
+        path = tool_input.get("path")
         location = str(tool_input.get("location", "projects")).strip().lower()
 
-        if not path:
-            return None
+        # An omitted or empty path means the workspace root itself, which is a
+        # valid target (list_files with no path lists the root). Treating it as
+        # unresolvable marked correct listings as unverifiable.
+        if path is None or not str(path).strip():
+            path = "."
+
+        path = str(path).strip()
 
         if location == "system":
             return os.path.abspath(path) if os.path.isabs(path) else None
@@ -175,7 +199,7 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="write_file could not resolve its requested location safely.",
             )
-        if os.path.abspath(actual_path) != requested_path:
+        if not self._same_path(actual_path, requested_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
@@ -208,7 +232,7 @@ class Verifier:
                     evidence=str(exc),
                     message=f"Could not read written file for verification: {actual_path}",
                 )
-            if actual != expected:
+            if not self._same_path(actual, expected):
                 return VerificationResult(
                     status="failed",
                     evidence=f"Expected {len(expected)} chars, found {len(actual)} chars.",
@@ -268,7 +292,7 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="find_files did not report the searched directory.",
             )
-        if os.path.abspath(reported_path) != requested_path:
+        if not self._same_path(reported_path, requested_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"Tool reported: {reported_path}, Expected: {requested_path}",
@@ -417,7 +441,7 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="create_directory could not resolve its requested location safely.",
             )
-        if os.path.abspath(actual_path) != requested_path:
+        if not self._same_path(actual_path, requested_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
@@ -472,7 +496,13 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="list_files did not report the listed directory.",
             )
-        if os.path.abspath(reported_path) != requested_path:
+        # Compare real paths, not spellings. On Windows the same directory can be
+        # written with an 8.3 short name ("SEPEHR~1") or the long name
+        # ("SepehrTaji"), and a plain string comparison marked a correct listing
+        # as a mismatch. Case and separators differ on other platforms too.
+        reported_real = os.path.normcase(os.path.realpath(reported_path))
+        requested_real = os.path.normcase(os.path.realpath(requested_path))
+        if reported_real != requested_real:
             return VerificationResult(
                 status="failed",
                 evidence=f"Tool reported: {reported_path}, Expected: {requested_path}",
@@ -725,7 +755,7 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="edit_file could not resolve its requested location safely.",
             )
-        if os.path.abspath(actual_path) != requested_path:
+        if not self._same_path(actual_path, requested_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"Tool reported: {actual_path}, Expected: {requested_path}",
@@ -820,7 +850,7 @@ class Verifier:
                 evidence=tool_result[:300],
                 message="delete_file could not resolve its requested location safely.",
             )
-        if os.path.abspath(reported_path) != actual_path:
+        if not self._same_path(reported_path, actual_path):
             return VerificationResult(
                 status="failed",
                 evidence=f"Tool reported: {reported_path}, Expected: {actual_path}",

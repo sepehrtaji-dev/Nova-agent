@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "web_search",
-      "description": "Search the public web for current information. Return real titles, URLs, and snippets.",
+      "description": "Search the public web and return real titles, URLs, and snippets from a live query. Use this whenever the answer depends on current, live, or post-training-cutoff information: news, prices, weather, release dates, product rankings, sports results, or any specific real-world fact you cannot verify from memory. Pass a short keyword query, not a full sentence. Do not use it for explanations, arithmetic, or code you can write yourself. Results may fail to arrive; never invent results if this tool reports an error.",
       "module": "tools.web",
       "class": "WebSearchTool",
       "method": "run",
@@ -16,7 +16,9 @@
         "properties": {
           "query": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Keyword search terms, for example 'best minecraft shaders 2026' or 'python 3.14 release date'. Not a question or instruction."
           }
         },
         "additionalProperties": false
@@ -25,13 +27,13 @@
     },
     {
       "name": "write_file",
-      "description": "Create or overwrite a file after validating the requested path and complete content.",
+      "description": "Create or overwrite a file with complete content. Provide the entire final file contents, not a diff or a fragment. Use location 'projects' for the agent workspace (default), 'desktop' for the user's Desktop, or 'system' for an absolute path. Protected system paths are refused.",
       "module": "tools.filesystem",
       "class": "FileSystemTool",
       "method": "write_file",
       "prepare_input": "prepare_write_input",
       "capability": "pc",
-      "enabled": false,
+      "enabled": true,
       "input_schema": {
         "type": "object",
         "required": [
@@ -41,7 +43,8 @@
         "properties": {
           "path": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "File path. Relative to the chosen location when location is 'projects' or 'desktop'; must be absolute when location is 'system'."
           },
           "location": {
             "type": "string",
@@ -49,21 +52,233 @@
               "projects",
               "desktop",
               "system"
-            ]
+            ],
+            "description": "Workspace to write into. Defaults to 'projects'."
           },
           "content": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "The complete file content to write."
           }
         }
       },
       "verifier_method": "_verify_write_file"
+    },
+    {
+      "name": "read_file",
+      "description": "Read a UTF-8 text file and return its contents. Use this before editing a file so the edit is based on real content rather than assumption. Binary files and protected system paths are refused.",
+      "module": "tools.filesystem",
+      "class": "FileSystemTool",
+      "method": "read_file",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "File path to read."
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "desktop",
+              "system"
+            ],
+            "description": "Workspace to read from. Defaults to 'projects'."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_files",
+      "description": "List the entries in a workspace directory. Use this to discover what exists before reading or writing. Omit path, or use '.', to list the workspace root.",
+      "module": "tools.filesystem",
+      "class": "FileSystemTool",
+      "method": "list_files",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path relative to the location. Defaults to '.' (the root)."
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "desktop",
+              "system"
+            ],
+            "description": "Workspace to list. Defaults to 'projects'."
+          }
+        }
+      }
+    },
+    {
+      "name": "terminal",
+      "description": "Run one non-interactive PROGRAM (an executable on PATH) and return its exit code, stdout, and stderr. Pass the program name followed by its arguments, with no pipes, redirects, or chaining. This tool is NOT for creating, reading, writing, listing, or editing files: use write_file, read_file, or list_files for those. Never pass another tool's name as the command. Shells and inline interpreter code (such as python -c) are refused. Examples that work: 'git status', 'python -m unittest discover', 'pip list'.",
+      "module": "tools.terminal",
+      "class": "TerminalTool",
+      "method": "run",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Program and arguments, for example 'python -m unittest discover' or 'git status'."
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "desktop"
+            ],
+            "description": "Working directory to run in. Defaults to 'projects'."
+          },
+          "input": {
+            "type": "string",
+            "description": "Optional text piped to the program's stdin."
+          }
+        }
+      }
+    },
+    {
+      "name": "git",
+      "description": "Perform a Git operation in the workspace. Supports init, clone, status, add, commit, push, pull, branch, checkout, log, diff, stash and related read operations. Clone URLs must be public HTTPS. Force pushes and history-destroying commands are refused.",
+      "module": "tools.git",
+      "class": "GitTool",
+      "method": "run",
+      "capability": "git",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Git operation to perform, for example 'status', 'add', 'commit', 'push', 'pull', 'log', 'diff'."
+          },
+          "path": {
+            "type": "string",
+            "description": "Repository path or file path the action applies to."
+          },
+          "message": {
+            "type": "string",
+            "description": "Commit message. Required when action is 'commit'."
+          },
+          "remote": {
+            "type": "string",
+            "description": "Remote name for push/pull. Defaults to 'origin'."
+          },
+          "branch": {
+            "type": "string",
+            "description": "Branch name for checkout/push/pull."
+          },
+          "url": {
+            "type": "string",
+            "description": "HTTPS repository URL. Required when action is 'clone'."
+          }
+        }
+      }
+    },
+    {
+      "name": "github",
+      "description": "Query GitHub through the locally authenticated gh CLI. Read-only: it can view repositories, list and view issues and pull requests, list workflow runs and releases, and search code. It cannot create, edit, merge, or delete anything. Requires 'gh auth login' to have been run.",
+      "module": "tools.github",
+      "class": "GitHubTool",
+      "method": "run",
+      "capability": "git",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "action",
+          "repo"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "repo_view",
+              "issue_list",
+              "issue_view",
+              "pr_list",
+              "pr_view",
+              "run_list",
+              "release_list",
+              "code_search"
+            ],
+            "description": "Read-only GitHub query to perform."
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository as owner/name, for example 'sepehrtaji-dev/Nova-agent'."
+          },
+          "number": {
+            "type": "integer",
+            "description": "Issue or pull-request number. Required for issue_view and pr_view."
+          },
+          "state": {
+            "type": "string",
+            "description": "Filter for issue_list (open, closed, all) or pr_list (open, closed, merged, all)."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search terms. Required for code_search."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum results, 1 to 20. Defaults to 10."
+          }
+        }
+      }
+    },
+    {
+      "name": "desktop",
+      "description": "Interact with the local desktop: open or focus an installed application. Application names are resolved against what is actually installed, so an unknown name returns an error rather than launching anything else.",
+      "module": "tools.desktop",
+      "class": "DesktopTool",
+      "method": "run",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Desktop action to perform, for example 'open_app'."
+          },
+          "app": {
+            "type": "string",
+            "description": "Application name to open or focus. Required for open_app."
+          }
+        }
+      }
     }
   ],
   "default_access": {
     "web": true,
-    "git": false,
-    "pc": false
+    "git": true,
+    "pc": true
   },
   "capabilities": {
     "web": {

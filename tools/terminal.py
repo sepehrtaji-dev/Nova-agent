@@ -2,7 +2,25 @@ import subprocess
 import os
 import json
 import shlex
+import shutil
 import ntpath
+
+# Windows cmd.exe builtins: they exist only inside the shell, so shell=False
+# cannot run them. Listed so the tool can explain instead of failing obscurely.
+_WINDOWS_BUILTINS = {
+    "echo", "dir", "type", "cd", "chdir", "copy", "move", "del", "erase",
+    "ren", "rename", "md", "mkdir", "rd", "rmdir", "cls", "set", "path",
+    "ver", "vol", "date", "time", "title", "prompt", "mklink", "assoc",
+    "ftype", "color", "pause", "start", "call", "exit", "if", "for",
+}
+
+# POSIX utilities a model may reach for on Windows. Naming them lets the tool
+# point at the file tools instead of emitting a bare "not found".
+_POSIX_ONLY = {
+    "touch", "ls", "cat", "grep", "rm", "cp", "mv", "sed", "awk", "chmod",
+    "chown", "find", "xargs", "head", "tail", "wc", "sort", "uniq", "tee",
+    "ln", "df", "du", "ps", "kill", "which", "bash", "sh", "env",
+}
 
 
 class TerminalTool:
@@ -187,10 +205,52 @@ class TerminalTool:
                         "Use a simple command without pipes, redirects, or chaining."
                     )
 
+            # POSIX shlex rules strip backslashes, which corrupts unquoted
+            # Windows paths ("C:\projects\a.py" -> "C:projectsa.py"). Split with
+            # platform-appropriate rules, and drop any surrounding quotes that
+            # the Windows (non-POSIX) splitter leaves attached to a token.
             try:
-                cmd_args = shlex.split(command)
+                if os.name == "nt":
+                    cmd_args = [
+                        token[1:-1]
+                        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
+                        else token
+                        for token in shlex.split(command, posix=False)
+                    ]
+                else:
+                    cmd_args = shlex.split(command)
             except ValueError as e:
                 return f"Terminal error: invalid command syntax: {e}"
+
+            if not cmd_args:
+                return "Terminal error: command must be a non-empty string."
+
+            # On Windows, echo/dir/type/cd/copy/del are cmd.exe builtins with no
+            # executable on PATH. shell=False cannot run them, and cmd.exe is
+            # deliberately blocked as a shell launcher, so an unresolved first
+            # token would otherwise surface as a confusing WinError 2. Detect it
+            # and explain, rather than silently failing.
+            if os.name == "nt":
+                resolved = shutil.which(cmd_args[0])
+                if resolved is None and cmd_args[0].casefold() in _WINDOWS_BUILTINS:
+                    return (
+                        f"Terminal error: '{cmd_args[0]}' is a Windows shell "
+                        "builtin, not a program, so it cannot be run directly. "
+                        "Use a real executable instead "
+                        "(for example 'python script.py' or 'git status')."
+                    )
+                if resolved is None and cmd_args[0].casefold() in _POSIX_ONLY:
+                    return (
+                        f"Terminal error: '{cmd_args[0]}' is a POSIX shell "
+                        "utility that does not exist on Windows. To create, read, "
+                        "write, or list files, use the file tools (write_file, "
+                        "read_file, list_files) instead of a shell command."
+                    )
+                if resolved is None:
+                    return (
+                        f"Terminal error: no program named '{cmd_args[0]}' was "
+                        "found on PATH."
+                    )
 
             run_kwargs = {
                 "shell": False,

@@ -88,7 +88,12 @@ class GitHubTool:
             query = str(data.get("query", "")).strip()
             if not query:
                 raise ValueError("code_search requires a non-empty query.")
-            return ["search", "code", query, "--repo", repo, "--limit", str(limit),
+            # A query beginning with "-" would be parsed by gh as a flag rather
+            # than a search term, letting model-supplied text change which
+            # command gh runs. "--" ends option parsing so the query is always
+            # treated as a value.
+            return ["search", "code", "--", query, "--repo", repo,
+                    "--limit", str(limit),
                     "--json", "path,repository,url"]
         raise ValueError("Unsupported GitHub action.")
 

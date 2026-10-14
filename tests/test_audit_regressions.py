@@ -84,6 +84,53 @@ class AuditRegressionTests(unittest.TestCase):
                 )
             self.assertEqual(result.status, "confirmed")
 
+    def test_list_files_without_path_is_verifiable(self):
+        """Regression: omitting 'path' made a good listing look unverifiable.
+
+        list_files with no path lists the workspace root, which the tool's own
+        description recommends. The verifier treated an absent path as
+        unresolvable and reported 'could not resolve its requested location'
+        for a listing that had actually succeeded.
+        """
+        verifier = Verifier(tools=None)
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "projects"
+            project.mkdir(parents=True)
+            (project / "note.txt").write_text("x", encoding="utf-8")
+            with mock.patch("agent.verifier.os.getcwd", return_value=directory):
+                result = verifier._verify_list_files(
+                    {"location": "projects"},
+                    f"Location: {project}\n\n[FILE] note.txt  (1 bytes)",
+                )
+            self.assertEqual(result.status, "confirmed")
+
+    def test_list_files_still_rejects_escapes_and_missing_dirs(self):
+        verifier = Verifier(tools=None)
+        escaped = verifier._verify_list_files(
+            {"path": "../outside", "location": "projects"},
+            "Filesystem error: Path escapes workspace root.",
+        )
+        self.assertEqual(escaped.status, "failed")
+        missing = verifier._verify_list_files(
+            {"path": "nope", "location": "projects"},
+            "Path does not exist: C:/x/nope",
+        )
+        self.assertEqual(missing.status, "failed")
+
+    def test_workspace_roots_are_reported_to_the_model(self):
+        """The model must be told the real roots so it stops guessing paths."""
+        from agent.tool_awareness import render_workspace, render_platform
+
+        text = render_workspace(SimpleNamespace())
+        self.assertIn("Current working directory", text)
+        self.assertIn("projects", text)
+        self.assertIn("location='projects'", text)
+
+        platform_text = render_platform()
+        self.assertTrue(
+            "Windows" in platform_text or "POSIX" in platform_text
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

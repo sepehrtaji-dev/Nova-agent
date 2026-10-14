@@ -9,6 +9,7 @@ import re
 import urllib.parse
 import urllib.error
 import urllib.request
+import unicodedata
 
 
 class WebSearchTool:
@@ -21,8 +22,17 @@ class WebSearchTool:
         )
 
     def _parse_input(self, input_data: str):
+        """Extract a query string from a dict, JSON string, or plain text.
+
+        Whitespace-only input normalizes to "" so callers can reject it before
+        making any network request.
+        """
         if isinstance(input_data, dict):
-            return input_data.get("query", "")
+            for key in ("query", "search", "q", "text"):
+                value = input_data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return ""
 
         if not isinstance(input_data, str):
             return ""
@@ -33,24 +43,19 @@ class WebSearchTool:
             return ""
 
         try:
-            data: dict = json.loads(text)
-
-            if isinstance(data, dict):
-                query = (
-                    data.get("query")
-                    or data.get("search")
-                    or data.get("q")
-                    or data.get("text")
-                    or ""
-                )
-
-                if isinstance(query, str):
-                    return query.strip()
-
-                return ""
-
+            data = json.loads(text)
         except json.JSONDecodeError:
-            pass
+            return text
+
+        if isinstance(data, dict):
+            for key in ("query", "search", "q", "text"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return ""
+
+        if isinstance(data, str):
+            return data.strip()
 
         return text
 
@@ -156,12 +161,16 @@ class WebSearchTool:
             (
                 "ddg",
                 "https://html.duckduckgo.com/html/",
-                {"q": query},
+                {"q": query, "kl": "us-en"},
             ),
             (
                 "bing",
+                # Without explicit market/locale parameters Bing serves results
+                # localized to the caller's IP, which can return pages with no
+                # relation to the query at all (observed: government portals for
+                # a Minecraft search). setlang/mkt/cc pin the market.
                 "https://www.bing.com/search",
-                {"q": query, "count": "10"},
+                {"q": query, "count": "10", "setlang": "en", "mkt": "en-US", "cc": "US"},
             ),
         )
         errors = []
@@ -191,6 +200,19 @@ class WebSearchTool:
                 seen = set()
                 for item in parser.results:
                     result_url = html.unescape(item.get("url", "")).strip()
+                    # DuckDuckGo returns protocol-relative redirect links
+                    # ("//duckduckgo.com/l/?uddg=<encoded>"). urlsplit gives them
+                    # no hostname, so the uddg unwrap used to be skipped and the
+                    # result was then discarded by the scheme check -- silently
+                    # losing every real hit.
+                    if result_url.startswith("//"):
+                        result_url = "https:" + result_url
+                    if provider == "ddg":
+                        parsed_link = urllib.parse.urlsplit(result_url)
+                        if (parsed_link.hostname or "").endswith("duckduckgo.com"):
+                            target = urllib.parse.parse_qs(parsed_link.query).get("uddg", [""])[0]
+                            if target:
+                                result_url = urllib.parse.unquote(target)
                     if provider == "bing":
                         bparsed = urllib.parse.urlsplit(result_url)
                         if (bparsed.hostname or "").endswith("bing.com") and bparsed.path.startswith("/ck/a"):
@@ -202,12 +224,6 @@ class WebSearchTool:
                                     result_url = base64.urlsafe_b64decode(body).decode("utf-8", "replace")
                                 except Exception:
                                     pass
-                    if provider == "ddg":
-                        parsed_link = urllib.parse.urlsplit(result_url)
-                        if parsed_link.hostname and parsed_link.hostname.endswith("duckduckgo.com"):
-                            target = urllib.parse.parse_qs(parsed_link.query).get("uddg", [""])[0]
-                            if target:
-                                result_url = urllib.parse.unquote(target)
                     parsed = urllib.parse.urlsplit(result_url)
                     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                         continue
@@ -222,14 +238,24 @@ class WebSearchTool:
                     if normalized in seen:
                         continue
                     seen.add(normalized)
-                    title = " ".join(html.unescape(item.get("title", "")).split())
-                    snippet = " ".join(html.unescape(item.get("snippet", "")).split())
+                    title = self._clean_text(item.get("title", ""), 300)
+                    snippet = self._clean_text(item.get("snippet", ""), 1000)
                     if not title:
                         continue
-                    cleaned.append((title[:300], normalized[:2000], snippet[:1000]))
+                    cleaned.append((title, normalized[:2000], snippet))
                     if len(cleaned) >= 8:
                         break
                 if cleaned:
+                    score = self._relevance(cleaned, query)
+                    if score == 0.0:
+                        # A provider can answer 200 with results unrelated to the
+                        # query (geo-localized pages, an interstitial, or a
+                        # rewritten SERP). Returning those as if they answered
+                        # the question is worse than reporting failure.
+                        errors.append(
+                            f"{provider}: {len(cleaned)} results but none match the query"
+                        )
+                        continue
                     return "\n\n".join(
                         f"[{index}]\nTitle: {title}\nURL: {result_url}\nSnippet: {snippet or '(No snippet provided by the search engine.)'}"
                         for index, (title, result_url, snippet) in enumerate(cleaned, start=1)
@@ -245,12 +271,58 @@ class WebSearchTool:
             + (f" Details: {details}" if details else "")
         )
 
+    @staticmethod
+    def _relevance(cleaned, query):
+        """Fraction of query terms appearing across the result set (0.0-1.0).
+
+        Used only to reject a completely off-topic provider response, so the
+        threshold is deliberately low: it must never discard real results just
+        because the engine phrased them differently.
+        """
+        terms = {
+            term for term in re.split(r"\W+", str(query).casefold())
+            if len(term) > 2
+        }
+        if not terms:
+            return 1.0  # nothing meaningful to match on; do not filter
+        haystack = " ".join(
+            f"{title} {url} {snippet}".casefold()
+            for title, url, snippet in cleaned
+        )
+        hits = sum(1 for term in terms if term in haystack)
+        return hits / len(terms)
+
+    @staticmethod
+    def _clean_text(value, limit):
+        """Normalize scraped text without dropping legitimate international text.
+
+        Search engines return control characters on some pages, and the result
+        is later printed to consoles that may be cp1252. Strip control codes and
+        collapse whitespace, but keep real Unicode letters intact so non-English
+        results remain readable rather than being replaced by '?'.
+        """
+        if not isinstance(value, str):
+            value = str(value or "")
+        text = html.unescape(value)
+        # Drop C0/C1 control characters except ordinary whitespace.
+        text = "".join(
+            ch for ch in text
+            if ch in "\t\n\r " or unicodedata.category(ch)[0] != "C"
+        )
+        text = " ".join(text.split())
+        return text[:limit]
+
     def _resolve_public_url(self, url):
         """Validate a URL and return its resolved public IPs for connection pinning."""
         parsed = urllib.parse.urlsplit(str(url).strip())
         scheme = parsed.scheme.lower()
+        # ValueError, not TypeError: an unsupported scheme is a bad value, and
+        # callers catch ValueError. Raising TypeError here escaped fetch()'s
+        # handler and crashed instead of returning a clean error.
         if scheme not in {"http", "https"}:
-            raise TypeError("Only http:// and https:// URLs are supported.")
+            raise ValueError(
+                "Only http:// and https:// URLs are supported."
+            )
         if not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("URL must have a hostname and cannot contain credentials.")
         if parsed.port not in (None, 80, 443):

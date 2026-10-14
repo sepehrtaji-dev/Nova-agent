@@ -89,24 +89,23 @@ class FileSystemTool:
         root = os.path.realpath(root)
         full_path = os.path.abspath(os.path.join(root, path))
         candidate_real = os.path.realpath(full_path)
+
+        def _inside(candidate):
+            """True when candidate is the root itself or a descendant of it."""
+            try:
+                return os.path.commonpath([root, candidate]) == root
+            except ValueError:
+                # Different drives on Windows can never be common.
+                return False
+
+        # Checking the parent directory by realpath catches a symlinked parent
+        # that redirects outside the workspace. When the path IS the root,
+        # dirname() yields the root's parent, which is legitimately outside, so
+        # only apply the parent check to strict descendants.
         parent_real = os.path.realpath(os.path.dirname(full_path))
+        escapes_parent = full_path != root and not _inside(parent_real)
 
-        try:
-            if os.path.commonpath([root, parent_real]) != root:
-                raise ValueError(
-                    f"Path escapes workspace root. "
-                    f"Root: {root}  Path: {full_path}"
-                )
-
-            # Always validate the canonical candidate, not only existing paths.
-            # exists() is False for broken symlinks, but realpath() still resolves
-            # their target and lets us reject paths that point outside the workspace.
-            if os.path.commonpath([root, candidate_real]) != root:
-                raise ValueError(
-                    f"Path escapes workspace root through a symlink. "
-                    f"Root: {root}  Path: {full_path}"
-                )
-        except ValueError:
+        if escapes_parent or not _inside(candidate_real):
             raise ValueError(
                 f"Path escapes workspace root. "
                 f"Root: {root}  Path: {full_path}"
@@ -115,34 +114,77 @@ class FileSystemTool:
         return full_path
 
     def _check_system_path(self, full_path):
-        """Block protected targets after canonicalizing symlinks and path case."""
-        # Check both the requested path and its resolved target. Otherwise a
-        # harmless-looking symlink can redirect a read/write into a protected
-        # system file.
-        candidates = {
-            os.path.abspath(full_path),
-            os.path.realpath(full_path),
-        }
-        blocked_prefixes = list(self._BLOCKED_PREFIXES) + [
-            "C:/Windows",
-            "C:/ProgramData/Microsoft",
-            "C:/System Volume Information",
-            "C:/$Recycle.Bin",
+        """Block protected targets after canonicalizing symlinks and path case.
+
+        Blocked prefixes are written in POSIX form, but on Windows
+        os.path.abspath("/etc/shadow") becomes "C:\\etc\\shadow", which never
+        matches the literal "/etc/shadow" entry. Both the candidate and the
+        blocklist entry are therefore normalized to a single POSIX-ish form,
+        with any drive letter and leading separators stripped, so the same
+        rules apply on every platform.
+        """
+
+        def normalize(value):
+            text = str(value).replace("\\", "/")
+            # Drop a Windows drive prefix ("C:/...") and UNC share markers.
+            if len(text) > 1 and text[1] == ":":
+                text = text[2:]
+            text = text.lstrip("/")
+            # Collapse duplicate separators so "//etc//shadow" matches.
+            while "//" in text:
+                text = text.replace("//", "/")
+            return text.rstrip("/").casefold()
+
+        # Check the requested path and its resolved target: a harmless-looking
+        # symlink must not redirect a read/write into a protected system file.
+        candidates = [os.path.abspath(full_path)]
+        try:
+            resolved = os.path.realpath(full_path)
+            if resolved not in candidates:
+                candidates.append(resolved)
+        except OSError:
+            pass
+        # Also test the raw text, so a POSIX path keeps its POSIX meaning even
+        # on Windows where abspath would rewrite it onto the current drive.
+        candidates.append(str(full_path))
+
+        blocked_prefixes = [normalize(item) for item in self._BLOCKED_PREFIXES]
+        blocked_prefixes += [
+            normalize(item) for item in (
+                "C:/Windows",
+                "C:/ProgramData/Microsoft",
+                "C:/System Volume Information",
+                "C:/$Recycle.Bin",
+            )
+        ]
+        blocked_prefixes = [item for item in blocked_prefixes if item]
+
+        blocked_substrings = [
+            item.casefold().strip("/")
+            for item in self._BLOCKED_SUBSTRINGS
+            if str(item).strip()
         ]
 
         for candidate in candidates:
-            norm = candidate.replace("\\", "/").rstrip("/")
-            folded = norm.casefold()
+            folded = normalize(candidate)
+            if not folded:
+                continue
 
-            for blocked in blocked_prefixes:
-                prefix = blocked.replace("\\", "/").rstrip("/").casefold()
+            for prefix in blocked_prefixes:
                 if folded == prefix or folded.startswith(prefix + "/"):
                     raise PermissionError(
                         f"Access denied: {full_path!r} resolves to a protected system path."
                     )
 
-            for blocked_sub in self._BLOCKED_SUBSTRINGS:
-                if blocked_sub.casefold() in folded:
+            # Match protected elements on path-segment boundaries so that
+            # ".ssh" blocks "/home/u/.ssh/id_rsa" but not "notes.ssh.txt".
+            segments = folded.split("/")
+            for blocked_sub in blocked_substrings:
+                if blocked_sub in segments or any(
+                    segment.startswith(blocked_sub + ".")
+                    or segment == blocked_sub
+                    for segment in segments
+                ):
                     raise PermissionError(
                         f"Access denied: {full_path!r} contains a protected path element."
                     )

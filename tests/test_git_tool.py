@@ -34,6 +34,34 @@ class GitToolTests(unittest.TestCase):
         destination = data["dest"].replace("\\", "/").rstrip("/").split("/")[-1]
         self.assertEqual(destination, "escape")
 
+    def test_run_returns_error_string_instead_of_raising(self):
+        """Regression: run() resolved the path before checking 'action'.
+
+        A payload with an escaping path and no action raised an uncaught
+        ValueError, which can abort the agent turn instead of surfacing as a
+        ordinary tool failure.
+        """
+        for payload in (
+            {"path": "."},
+            {"path": ".."},
+            {"path": "../../outside"},
+            {},
+            {"action": ""},
+        ):
+            result = self.tool.run(payload)
+            self.assertIsInstance(result, str, payload)
+            self.assertIn("GIT ERROR", result, payload)
+
+    def test_missing_action_is_reported_clearly(self):
+        result = self.tool.run({})
+        self.assertIn("action", result.lower())
+        self.assertIn("required", result.lower())
+
+    def test_unknown_action_is_reported(self):
+        result = self.tool.run({"action": "definitely_not_a_git_action"})
+        self.assertIsInstance(result, str)
+        self.assertIn("GIT", result.upper())
+
 
 if __name__ == "__main__":
     unittest.main()

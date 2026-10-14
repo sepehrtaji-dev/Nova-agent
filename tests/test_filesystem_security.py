@@ -59,6 +59,63 @@ class FileSystemSecurityTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.tool._check_system_path(link)
 
+    def test_posix_paths_blocked_on_windows(self):
+        """Regression: POSIX blocklist entries never matched on Windows.
+
+        os.path.abspath("/etc/shadow") becomes "C:\\etc\\shadow" on Windows, so
+        comparing the absolute path against the literal "/etc/shadow" entry
+        always failed and these protected files were reachable.
+        """
+        for probe in (
+            "/etc/shadow",
+            "/etc/passwd",
+            "/etc/sudoers",
+            "/etc/hosts",
+            "/proc/self/environ",
+            "/sys/kernel",
+            "/dev/sda",
+            "/boot/grub",
+            "/root/secret",
+            "/var/log/syslog",
+        ):
+            with self.assertRaises(PermissionError, msg=probe):
+                self.tool._check_system_path(probe)
+
+    def test_path_traversal_and_separator_variants_are_blocked(self):
+        for probe in (
+            "//etc//shadow",
+            "/etc/./shadow",
+            "C:/etc/shadow",
+            "c:/ETC/SHADOW",
+        ):
+            with self.assertRaises(PermissionError, msg=probe):
+                self.tool._check_system_path(probe)
+
+    def test_legitimate_paths_are_not_over_blocked(self):
+        """A tightened filter must not start rejecting normal project files."""
+        for probe in (
+            "C:/projects/nova/main.py",
+            "C:/Users/x/Documents/notes.txt",
+            "C:/data/procedures.csv",
+            "C:/work/bashrc_notes.md",
+            "C:/Users/x/Documents/ssh_keys_guide.txt",
+            "C:/reports/etcetera_summary.md",
+            "C:/Users/x/.sshconfig_backup.txt",
+        ):
+            try:
+                self.tool._check_system_path(probe)
+            except PermissionError as exc:
+                self.fail(f"over-blocked legitimate path {probe!r}: {exc}")
+
+    def test_protected_element_matches_on_segment_boundary(self):
+        """"'.ssh' blocks .ssh/id_rsa but not a file merely containing it."""
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(PermissionError):
+                self.tool._check_system_path(os.path.join(root, ".ssh", "id_rsa"))
+            # These contain the substring but are ordinary files.
+            self.tool._check_system_path(os.path.join(root, "notes.ssh.txt"))
+            self.tool._check_system_path(os.path.join(root, ".sshconfig_backup"))
+
 
 if __name__ == "__main__":
     unittest.main()

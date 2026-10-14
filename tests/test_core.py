@@ -277,10 +277,39 @@ class CoreTests(unittest.TestCase):
 
         context = core._tool_capability_context()
 
-        self.assertIn("desktop [enabled]", context)
-        self.assertIn("web_search [enabled]", context)
-        self.assertIn("git [disabled]", context)
+        # Enabled tools are listed as usable; disabled ones are separated and
+        # named explicitly so the model cannot mistake them for available.
+        usable, _, disabled_section = context.partition(
+            "REGISTERED BUT DISABLED BY PERMISSION")
+        self.assertIn("desktop", usable)
+        self.assertIn("web_search", usable)
+        self.assertNotIn("git", usable)
+        self.assertIn("git", disabled_section)
+        self.assertIn("2 usable tool(s)", context)
         self.assertNotIn("self_knowledge", context)
+
+    def test_tool_context_is_derived_from_registry_not_hardcoded(self):
+        """Adding a tool to the registry must change what the model is told."""
+        core = NovaCore.__new__(NovaCore)
+        core.tools = type("Registry", (), {"tools": {}})()
+        core.access = {"pc": True}
+
+        empty = core._tool_capability_context()
+        self.assertIn("no tools are registered", empty.lower())
+
+        core.tools.tools["brand_new_tool"] = {
+            "capability": "pc",
+            "description": "A tool that did not exist before.",
+            "input_schema": {
+                "type": "object",
+                "required": ["arg"],
+                "properties": {"arg": {"type": "string"}},
+            },
+        }
+        after = core._tool_capability_context()
+        self.assertIn("brand_new_tool", after)
+        # The declared schema must be surfaced so the model knows the arguments.
+        self.assertIn("arg:string", after.replace(" ", ""))
 
     def test_core_does_not_use_rule_based_capability_answer(self):
         self.assertFalse(hasattr(NovaCore, "_direct_capability_answer"))

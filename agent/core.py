@@ -160,23 +160,19 @@ class NovaCore:
         return allowed
 
     def _tool_capability_context(self):
-        """Describe tool availability from live registry metadata and permissions."""
-        registry = getattr(getattr(self, "tools", None), "tools", {}) or {}
-        access = getattr(self, "access", {}) or {}
-        lines = []
-        for name, raw in sorted(registry.items()):
-            metadata = raw if isinstance(raw, dict) else {}
-            capability = metadata.get("capability")
-            enabled = bool(capability and access.get(capability, False))
-            description = str(metadata.get("description", "")).strip()
-            status = "enabled" if enabled else "disabled"
-            line = f"- {name} [{status}]"
-            if capability:
-                line += f" capability={capability}"
-            if description:
-                line += f": {description}"
-            lines.append(line)
-        return "\n".join(lines) if lines else "No tools are registered."
+        """Describe tool availability from live registry metadata and permissions.
+
+        Delegates to agent.tool_awareness so every prompt renders tools the same
+        way, derived from the registry rather than a hardcoded list.
+        """
+        try:
+            from agent.tool_awareness import render_for_prompt
+        except Exception:
+            return "Tool information is unavailable in this instance."
+        try:
+            return render_for_prompt(self)
+        except Exception:
+            return "Tool information is unavailable in this instance."
 
     def _status(self, message):
         if self.status_callback:
@@ -524,6 +520,7 @@ class NovaCore:
         return (
             f"You are a local AI assistant.\n\n"
             f"RUNTIME DIAGNOSTICS AND CAPABILITY MAP:\n{diagnostics_context}\n\n"
+            f"{self._tool_capability_context()}\n\n"
             f"User request:\n{message}\n\n"
             f"RECENT CONVERSATION / CONTEXT:\n{self._conversation_context(max_chars=12000)}\n\n"
             f"STORED KNOWLEDGE (SECONDARY, MODEL-DERIVED):\n{knowledge_context}\n\n"
@@ -955,6 +952,10 @@ class NovaCore:
         rejected_decisions = set()
         consecutive_rejections = 0
         workspace_revision = 0
+        # Per-tool failure counter: catches flailing where the model varies its
+        # arguments slightly instead of repeating one exact call.
+        tool_failures = {}
+        succeeded_any = False
 
         self._status(
             "Understanding request..."
@@ -1481,6 +1482,26 @@ Nova must correct the invalid input rather than repeat it.
                 workspace_revision
             )
 
+            # A different argument string is not progress. When the same tool
+            # keeps failing, the model is guessing (observed: touch tasks.txt,
+            # touch tasks.md, echo > tasks.md, mkdir -p ... && echo >). Counting
+            # failures per tool catches that, where an exact-input check cannot.
+            if not succeeded_any:
+                failure_count = tool_failures.get(tool_name, 0)
+                if failure_count >= 2:
+                    last_tool_error = (
+                        f"{tool_name} failed {failure_count + 1} times with "
+                        "different arguments. Stopping instead of retrying the "
+                        "same tool again. Use a different tool, or report that "
+                        "the operation is not possible in this environment."
+                    )
+                    tool_history.append(
+                        f"Stopping after repeated {tool_name} failures; the "
+                        "tool is not working for this task in this environment."
+                    )
+                    self._status(f"Stopping repeated {tool_name} failures...")
+                    break
+
             if tool_key in used_tools:
 
                 tool_history.append(
@@ -1552,12 +1573,15 @@ Nova must choose another useful action.
             )
 
             if succeeded:
+                succeeded_any = True
                 self._remember_verified_tool_result(
                     tool_name,
                     tool_input,
                     result,
                     verification
                 )
+            else:
+                tool_failures[tool_name] = tool_failures.get(tool_name, 0) + 1
 
             # Save a concise outcome for both success and failure. The memory
             # module redacts common secrets and never stores raw tool payloads.
@@ -1732,7 +1756,13 @@ Nova must choose another useful action.
 
         response = self.brain.generate(
             prompt,
-            system_prompt="You are a local AI assistant. Be direct and concise."
+            system_prompt=(
+                self._identity_system_prompt()
+                + " Be direct and concise. When you report what you did, rely on "
+                "the real tool results provided; never claim an action you did "
+                "not perform, and never claim you lack a tool that is listed as "
+                "available to you."
+            )
         )
 
         if not isinstance(

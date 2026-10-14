@@ -274,10 +274,17 @@ class GitTool:
 
         action = str(data.get("action", "")).strip().lower()
         path   = data.get("path")
-        cwd    = self._resolve_repo_path(path)
 
+        # Validate the action first. Resolving the path can raise ValueError for
+        # an escaping path, and doing that before the action check turned a
+        # simple "missing action" case into an uncaught exception.
         if not action:
             return "GIT ERROR: 'action' is required."
+
+        try:
+            cwd = self._resolve_repo_path(path)
+        except ValueError as exc:
+            return f"GIT ERROR: {exc}"
 
         # ── create_repo ───────────────────────────────────────────────────────
         if action == "create_repo":

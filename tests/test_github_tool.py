@@ -62,6 +62,75 @@ class GitHubToolTests(unittest.TestCase):
         )
         self.assertTrue(success.confirmed())
 
+    def test_code_search_query_cannot_be_parsed_as_a_flag(self):
+        """Regression: a query starting with "-" was passed straight to gh.
+
+        Model-supplied text could therefore change which command gh ran
+        (e.g. "--help") instead of being searched for. "--" ends option parsing.
+        """
+        from tools.github import GitHubTool
+
+        tool = GitHubTool()
+        args = tool._build_args(
+            {"action": "code_search", "repo": "a/b", "query": "--help"}
+        )
+        self.assertIn("--", args)
+        separator = args.index("--")
+        self.assertEqual(args[separator + 1], "--help")
+        # The query must sit after the separator, not before it.
+        self.assertLess(args.index("search"), separator)
+
+    def test_code_search_rejects_empty_query(self):
+        from tools.github import GitHubTool
+
+        tool = GitHubTool()
+        with self.assertRaises(ValueError):
+            tool._build_args(
+                {"action": "code_search", "repo": "a/b", "query": "   "}
+            )
+
+    def test_write_actions_are_not_supported(self):
+        from tools.github import GitHubTool
+
+        tool = GitHubTool()
+        for action in (
+            "delete_repo",
+            "repo_create",
+            "issue_create",
+            "pr_merge",
+            "push",
+        ):
+            with self.assertRaises(ValueError, msg=action):
+                tool._build_args({"action": action, "repo": "a/b"})
+
+    def test_repo_is_strictly_validated(self):
+        from tools.github import GitHubTool
+
+        tool = GitHubTool()
+        for repo in (
+            "../../etc",
+            "a/b/c",
+            "a;rm -rf /",
+            "",
+            "a b/c",
+            "a/..",
+        ):
+            with self.assertRaises(ValueError, msg=repo):
+                tool._build_args({"action": "repo_view", "repo": repo})
+
+    def test_limit_is_clamped(self):
+        from tools.github import GitHubTool
+
+        tool = GitHubTool()
+        high = tool._build_args(
+            {"action": "issue_list", "repo": "a/b", "limit": 9999}
+        )
+        self.assertIn("20", high)
+        low = tool._build_args(
+            {"action": "issue_list", "repo": "a/b", "limit": -5}
+        )
+        self.assertIn("1", low)
+
 
 if __name__ == "__main__":
     unittest.main()
