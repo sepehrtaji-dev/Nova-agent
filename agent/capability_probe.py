@@ -99,6 +99,75 @@ def probe_web(timeout: float = 6.0) -> dict:
     return _cached("web", _run)
 
 
+def probe_model_details(core):
+    """Describe the model actually serving this session, from live metadata.
+
+    Replaces hardcoded claims such as "3 billion parameters" and "runs locally":
+    for a remote model those are simply false, and the model then repeats them.
+    Returns a dict that is always safe to render, with unknown fields marked.
+    """
+    brain = getattr(core, "brain", None)
+    model = str(getattr(brain, "model", "") or "").strip()
+
+    try:
+        from model.provider import backend_kind, describe_brain
+
+        kind = backend_kind(brain)
+        description = describe_brain(brain)
+    except Exception:
+        kind, description = "unknown", "an unspecified backend"
+
+    details = {
+        "model": model or "unknown",
+        "backend_kind": kind,
+        "backend_description": description,
+        "location": ("on the provider's servers" if kind == "remote"
+                     else "on this computer"),
+        "parameter_count": None,
+        "parameter_size": None,
+        "architecture": None,
+        "quantization": None,
+        "context_length": None,
+    }
+
+    # Local models expose metadata through Ollama; remote models generally do
+    # not, so those fields stay unknown rather than being guessed.
+    if kind == "local" and model:
+        try:
+            from agent.introspection import inspect_model
+
+            info = inspect_model(core)
+            if info.get("status") == "available":
+                details["parameter_count"] = info.get("parameter_count")
+                details["parameter_size"] = info.get("parameter_size")
+                details["architecture"] = info.get("architecture")
+                details["quantization"] = info.get("quantization")
+                details["context_length"] = info.get("model_context_length")
+        except Exception:
+            pass
+
+    return details
+
+
+def describe_model(core):
+    """One-line, always-true sentence about the model serving this session."""
+    d = probe_model_details(core)
+    parts = [f"The model serving this session is '{d['model']}', running "
+             f"{d['location']}"]
+    if d["parameter_size"]:
+        parts.append(f"reported size {d['parameter_size']}")
+    if d["quantization"]:
+        parts.append(f"quantization {d['quantization']}")
+    sentence = ", ".join(parts) + "."
+    if d["backend_kind"] == "remote":
+        sentence += (" Its parameter count is not visible to Nova, so it cannot "
+                     "be stated.")
+    elif not d["parameter_size"]:
+        sentence += (" No size metadata is available from the local runtime, so "
+                     "it cannot be stated.")
+    return sentence
+
+
 def probe_ollama(timeout: float = 4.0) -> dict:
     """Confirm the local model server answers, not merely that it is configured."""
     def _run():

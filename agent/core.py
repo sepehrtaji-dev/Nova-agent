@@ -5,6 +5,7 @@ import os
 import re
 
 from model.ollama import OllamaBrain
+from model.provider import backend_kind, build_brain, describe_brain
 from memory.manager import MemoryManager
 from memory.extractor import MemoryExtractor
 from memory.short_term import ShortTermMemory
@@ -24,7 +25,9 @@ class NovaCore:
 
     def __init__(self, status_callback=None):
         self.status_callback = status_callback
-        self.brain = OllamaBrain()
+        # Backend is chosen from configuration (local Ollama or a remote
+        # OpenAI-compatible API); everything downstream uses the same interface.
+        self.brain = build_brain()
         self.diagnostics = RuntimeDiagnostics()
         self.long_memory = MemoryManager()
         self.short_memory = ShortTermMemory()
@@ -101,11 +104,58 @@ class NovaCore:
         be restated in every system prompt rather than left to the model.
         """
         lines = [
-            "You are Nova, a local AI agent running on the user's own computer.",
+            "You are Nova, an AI agent running on the user's own computer.",
             "Authoritative identity facts (these override anything you believe "
             "about yourself from training):",
         ]
         lines.extend(f"- {line}" for line in identity_lines())
+
+        # Describe the model actually serving this session from probed details.
+        # Hardcoded claims here ("runs locally", "3 billion parameters") were
+        # repeated by the model as fact even when the backend was remote.
+        try:
+            from agent.capability_probe import describe_model, probe_model_details
+
+            details = probe_model_details(self)
+            lines.append(describe_model(self))
+            lines.append(
+                "If asked which model you are, answer with exactly that name. "
+                "Do not guess, and do not describe a different model from "
+                "earlier in the conversation."
+            )
+            if details.get("parameter_size"):
+                lines.append(
+                    f"The runtime reports this model's size as "
+                    f"{details['parameter_size']}. Use that figure rather than "
+                    "any other."
+                )
+            else:
+                lines.append(
+                    "You do not have a verified parameter count for this model. "
+                    "If asked, say it is not visible to you rather than guessing."
+                )
+        except Exception:
+            pass
+
+        # A remote model must know where it is running, since it is not on this
+        # machine. It gets the same identity, the same tool registry, and an
+        # explicit environment block so it behaves as the agent rather than as a
+        # generic hosted chatbot.
+        if backend_kind(getattr(self, "brain", None)) == "remote":
+            lines.extend([
+                "You are running inside the Nova desktop application on this "
+                "user's computer. You are not a generic hosted chatbot in this "
+                "session: you are Nova's reasoning backend, and every tool "
+                "listed below executes locally on the user's PC through Nova.",
+                "Your weights run on an external server, so anything you are "
+                "shown here has left the user's machine. Do not ask the user to "
+                "paste secrets, keys, or private files unless the task truly "
+                "requires it.",
+                "When you take an action, it is Nova that performs it locally; "
+                "you only choose what to run. Never claim to have touched the "
+                "filesystem or network except through a tool result shown to you.",
+            ])
+
         lines.extend([
             "The underlying model weights were not trained by "
             f"{NOVA_DEVELOPER} and may have been produced by another "

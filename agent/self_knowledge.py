@@ -12,9 +12,7 @@ from agent import capability_probe
 from agent.identity import (
     NOVA_CAPABILITIES,
     NOVA_DEVELOPER,
-    NOVA_KIND,
     NOVA_NAME,
-    NOVA_PARAMETER_COUNT,
     NOVA_REPOSITORY,
     NOVA_VERSION,
     identity_lines,
@@ -49,16 +47,36 @@ class SelfKnowledge:
                 "enabled": bool(access.get(capability, True)),
             })
 
+        # Report the backend actually in use. Hardcoding "Ollama" would make Nova
+        # describe itself incorrectly whenever a remote provider is configured.
+        try:
+            from model.provider import backend_kind, describe_brain
+
+            kind = backend_kind(brain)
+            provider_description = describe_brain(brain)
+        except Exception:
+            kind = "local"
+            provider_description = "Ollama"
+
+        details = capability_probe.probe_model_details(core)
+
         return {
             "identity": NOVA_NAME,
             "version": NOVA_VERSION,
             "developer": NOVA_DEVELOPER,
-            "kind": NOVA_KIND,
             "repository": NOVA_REPOSITORY,
-            "default_parameters": NOVA_PARAMETER_COUNT,
             "capabilities": list(NOVA_CAPABILITIES),
-            "model_provider": "Ollama",
+            "model_provider": "Ollama" if kind == "local" else "remote API",
+            "backend_kind": kind,
+            "backend_description": provider_description,
             "configured_model": str(model),
+            # Runtime facts, probed rather than asserted. Unknown values stay
+            # None so nothing downstream can state them as if they were known.
+            "model_location": details.get("location"),
+            "model_parameter_size": details.get("parameter_size"),
+            "model_parameter_count": details.get("parameter_count"),
+            "model_quantization": details.get("quantization"),
+            "model_architecture": details.get("architecture"),
             "python_version": platform.python_version(),
             "platform": sys.platform,
             "tools": tools,
@@ -70,9 +88,10 @@ class SelfKnowledge:
                 "I am software; I should not claim human-like consciousness, feelings, or personal experiences.",
                 "My abilities depend on tools registered in this running instance and their enabled permissions.",
                 "A registered/enabled web-search tool does not guarantee that the network or website is reachable.",
-                "The configured Ollama model name does not prove that the model is currently loaded or responding.",
+                "The configured model name does not prove that the model is currently loaded or responding.",
                 "Terminal execution is not a complete operating-system sandbox; scripts may act with the Nova process account's permissions.",
                 "I must not claim a file, command, search, or other action succeeded without actual tool evidence.",
+                "When a remote provider is configured, conversation content and tool results are sent to that provider's servers.",
             ],
         }
 
@@ -85,7 +104,8 @@ class SelfKnowledge:
         lines.extend(f"- {line}" for line in identity_lines())
         lines.extend([
             f"Model provider: {state['model_provider']}.",
-            f"Configured Ollama model: {state['configured_model']} (configuration only; not proof it is currently loaded).",
+            f"Configured model: {state['configured_model']} (configuration only; not proof it is currently loaded).",
+            f"Backend: {state.get('backend_description', state['model_provider'])}.",
             f"Runtime: Python {state['python_version']} on {state['platform']}.",
             f"Configured generation budgets: context={profile['context_budget']} tokens; output={profile['output_budget']} tokens.",
             f"Agent components present: {profile['present_components']}/{profile['component_count']}.",
@@ -228,14 +248,12 @@ class SelfKnowledge:
         ))
         if identity_question:
             lines = [
-                f"I'm {state['identity']} {state['version']}, {state['kind']}, "
-                f"developed by {state['developer']}.",
+                f"I'm {state['identity']} {state['version']}, developed by "
+                f"{state['developer']}.",
                 f"I'm open source: {state['repository']}.",
                 "I can search the web, write and run code, and solve math "
-                "questions.",
-                f"I run locally through {state['model_provider']}; the default "
-                f"model is {state['default_parameters']} parameters, and this "
-                f"session is using \"{state['configured_model']}\".",
+                "questions when those tools are enabled.",
+                capability_probe.describe_model(core),
                 "I am not a product of Anthropic, OpenAI, Google, Meta, or any "
                 "other AI vendor, and I should not claim to be one. The "
                 "underlying model weights were trained elsewhere, but the agent "
@@ -251,33 +269,63 @@ class SelfKnowledge:
             text,
         ))
         if parameter_question:
-            model = inspect_model(core)
-            if model["status"] == "available":
+            details = capability_probe.probe_model_details(core)
+            model_name = details.get("model", "the configured model")
+            size = details.get("parameter_size")
+            count = details.get("parameter_count")
+
+            if details.get("backend_kind") == "remote":
                 return (
-                    f"Ollama reports {model['parameter_count']} parameters for the configured model "
-                    f"{model['configured_name']}. Reported model size: {model['parameter_size']}; "
-                    f"architecture: {model['architecture']}; quantization: {model['quantization']}. "
-                    "These are model metadata, not a count of parameters in Nova's Python agent code. "
-                    "Metadata availability does not prove generation is working."
+                    f"I can't state a parameter count for {model_name}: it runs "
+                    "on the provider's servers, and that metadata is not visible "
+                    "to me. I won't guess it from the model name."
+                )
+            if size or count:
+                parts = [f"The model serving this session, {model_name}, reports "
+                         f"a size of {size or count}"]
+                for label, key in (("architecture", "architecture"),
+                                   ("quantization", "quantization")):
+                    if details.get(key):
+                        parts.append(f"{label} {details[key]}")
+                return (
+                    ", ".join(parts) + ". This is model metadata reported by the "
+                    "local runtime, not a count of parameters in Nova's Python "
+                    "agent code. Metadata availability does not prove generation "
+                    "is working."
                 )
             return (
-                f"I cannot verify the parameter count for {model['configured_name']}: "
-                f"{model['detail']} I will not guess it from the model tag."
+                f"I cannot verify a parameter count for {model_name}: the local "
+                "runtime returned no size metadata. I will not guess it from the "
+                "model tag."
             )
 
+        # Match the many ways a user asks this. The previous pattern required
+        # "what model" to be adjacent, so "what is the exact name of your model"
+        # fell through to the model, which then invented an answer from context.
         model_question = bool(re.search(
-            r"\b(?:what|which) model (?:are you using|do you use|is this|are you|"
+            r"\b(?:what|which) model\b|"
+            r"\bmodel (?:name|id)\b|"
+            r"\bname (?:of )?(?:your|the) model\b|"
+            r"\b(?:your|the) model(?:'s)? name\b|"
+            r"\bwhat (?:is your|model) model\b|\bwhich llm\b|\bwhat llm\b|"
+            r"\bwhat ai (?:are you|model)\b|"
+            r"\bwhat(?:'s| is) the exact name\b[^?]{0,40}\bmodel\b|"
+            r"\bexact(?:ly)? (?:model|name)\b[^?]{0,30}\bmodel\b|"
+            r"\bwhat(?:'s| is) the exact\b[^?]{0,30}\bmodel\b|"
+            r"\bexact model\b|"
+            r"\bwhat model (?:are you using|do you use|is this|are you|"
             r"do you run|is it)\b|"
-            r"\bwhat (?:is your|model) model\b|\bwhat model\b|\bwhich llm\b|"
-            r"\bwhat llm\b|\bwhat ai (?:are you|model)\b|"
-            r"(?:از چه مدلی استفاده می.?کنی|مدلت چیه|چه مدلی هستی|چه مدلی استفاده می.?کنی)",
+            r"(?:از چه مدلی استفاده می.?کنی|مدلت چیه|چه مدلی هستی|"
+            r"چه مدلی استفاده می.?کنی|اسم مدلت چیه)",
             text,
         ))
         if model_question:
             return (
-                f"My configured model provider is Ollama, with model name "
-                f"{state['configured_model']}. This is the configured name; "
-                "I have not verified from this answer alone that the model is currently loaded."
+                f"I'm Nova {state['version']}. My reasoning runs on the model "
+                f"'{state['configured_model']}' via "
+                f"{state.get('backend_description', state['model_provider'])}. "
+                "This is the configured model; I have not verified from this "
+                "answer alone that it is currently loaded and responding."
             )
 
         tools_question = bool(re.search(
@@ -289,6 +337,34 @@ class SelfKnowledge:
         ))
         if tools_question:
             return self._capability_report(core, state)
+
+        location_question = bool(re.search(
+            r"\bare you (?:local|remote|online|offline)\b|"
+            r"\blocal or remote\b|\bremote or local\b|"
+            r"\bdo you run (?:locally|on my (?:computer|machine|pc))\b|"
+            r"\bwhere do you run\b|\bwhere are you running\b|"
+            r"\bis my data (?:sent|leaving|leaving my (?:computer|machine))\b|"
+            r"\bdoes anything leave (?:my|this) (?:computer|machine|pc)\b|"
+            r"(?:لوکال هستی یا ریموت|کجا اجرا می.?شی|رو سیستم من اجرا می.?شی)",
+            text,
+        ))
+        if location_question:
+            details = capability_probe.probe_model_details(core)
+            if details.get("backend_kind") == "remote":
+                return (
+                    f"I'm Nova, and my reasoning currently runs on the remote "
+                    f"model '{details['model']}' {details['location']}. "
+                    "That means your messages, the file contents you ask me to "
+                    "read, and tool results are sent to that provider. My tools "
+                    "still execute locally on this computer. Switch to a local "
+                    "Ollama model in API settings if you want nothing to leave "
+                    "this machine."
+                )
+            return (
+                f"I'm Nova, running fully on this computer. My reasoning runs on "
+                f"the local model '{details['model']}' through Ollama, and my "
+                "tools execute here too. Nothing is sent to a remote provider."
+            )
 
         web_question = bool(re.search(
             r"\b(?:can|do|could)\s+(?:you|u|nova)\b[^?]{0,40}\b(?:browse|search|"

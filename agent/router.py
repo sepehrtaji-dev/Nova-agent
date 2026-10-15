@@ -522,6 +522,7 @@ class ToolRouter:
 
     def classify_task(self, message, conversation="", allowed_tools=None):
         """Classify intent from meaning and the capabilities actually enabled."""
+        self.last_classification_error = None
         if not isinstance(message, str) or not message.strip():
             return "conversation"
 
@@ -530,6 +531,8 @@ class ToolRouter:
         registered_tools = getattr(self.tools, "tools", {}) or {}
         if not isinstance(registered_tools, dict):
             registered_tools = {}
+        # Why the last classification fell back, if it did.
+        last_error = None
         for name, metadata in registered_tools.items():
             if allowed is not None and name not in allowed:
                 continue
@@ -607,8 +610,7 @@ CURRENT USER MESSAGE:
 """
         for attempt in range(2):
             try:
-                retry_prompt = (
-                    "Classify the user's intent using the enabled tool "
+                retry_prompt = (                    "Classify the user's intent using the enabled tool "
                     "capabilities and conversation context below. Return only "
                     'JSON: {"task_type":"computer"} or '
                     '{"task_type":"conversation"}. Use "computer" when the '
@@ -626,6 +628,7 @@ CURRENT USER MESSAGE:
                     json_mode=True,
                 )
             except Exception as exc:
+                last_error = exc
                 logging.warning(
                     "Intent classification attempt %s failed: %s",
                     attempt + 1,
@@ -639,6 +642,17 @@ CURRENT USER MESSAGE:
                 if task_type in {"computer", "conversation"}:
                     return task_type
 
+        # Both attempts failed. Falling back to "conversation" keeps the session
+        # alive, but silently answering as chat when the model never replied
+        # hides a real outage. Record it so the caller can surface the reason.
+        self.last_classification_error = (
+            str(last_error) if last_error is not None else
+            "the model did not return a usable task type"
+        )
+        logging.warning(
+            "Intent classification unavailable; defaulting to conversation. %s",
+            self.last_classification_error,
+        )
         return "conversation"
 
     def _build_decision_prompt(

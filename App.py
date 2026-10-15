@@ -5,6 +5,14 @@ import threading
 from datetime import datetime
 
 from config.runtime import load_capability_definitions, load_default_access
+from config.model_settings import (
+    apply_to_environment,
+    load_settings,
+    masked_key,
+    remote_ready,
+    save_settings,
+    summarise as summarise_backend,
+)
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -21,6 +29,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QGraphicsDropShadowEffect,
     QFileDialog,
     QFrame,
@@ -32,6 +42,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMainWindow,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QSplitter,
@@ -579,11 +590,157 @@ class CapabilityButton(QPushButton):
         self.setText(f"{self.title}  ·  {state}\n{self.subtitle}")
 
 
+class ModelSettingsDialog(QDialog):
+    """Choose the local model or configure a remote API provider.
+
+    The API key is write-only here: an existing key is shown masked, and leaving
+    the field untouched keeps the stored value rather than clearing it.
+    """
+
+    def __init__(self, settings, installed_models, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Model settings")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+
+        self._settings = dict(settings)
+        self._installed = list(installed_models or [])
+        self._existing_key = str(settings.get("api_key", "") or "")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(12)
+
+        heading = QLabel("Choose how Nova reasons")
+        heading.setStyleSheet("font-size: 16px; font-weight: 700;")
+        layout.addWidget(heading)
+
+        note = QLabel(
+            "Local keeps everything on this computer. Remote sends your messages, "
+            "file contents, and tool results to the provider you configure."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #9aa3b2;")
+        layout.addWidget(note)
+
+        # ---- local ----------------------------------------------------------
+        self.local_radio = QRadioButton("Local model (Ollama)")
+        layout.addWidget(self.local_radio)
+
+        self.local_model = QLineEdit(str(settings.get("local_model", "") or ""))
+        self.local_model.setPlaceholderText("e.g. qwen2.5:3b (blank = auto-detect)")
+        layout.addWidget(self.local_model)
+
+        if self._installed:
+            hint = QLabel("Installed: " + ", ".join(self._installed[:6]))
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color: #7f8899; font-size: 11px;")
+            layout.addWidget(hint)
+
+        # ---- remote ---------------------------------------------------------
+        self.remote_radio = QRadioButton("Remote API (OpenAI-compatible)")
+        layout.addWidget(self.remote_radio)
+
+        self.api_base = QLineEdit(str(settings.get("api_base_url", "") or ""))
+        self.api_base.setPlaceholderText("https://api.openai.com/v1")
+        layout.addWidget(self._labelled("Base URL", self.api_base))
+
+        self.api_model = QLineEdit(str(settings.get("api_model", "") or ""))
+        self.api_model.setPlaceholderText("e.g. gpt-4o-mini, or a gateway model id")
+        layout.addWidget(self._labelled("Model", self.api_model))
+
+        self.api_key = QLineEdit()
+        self.api_key.setEchoMode(QLineEdit.Password)
+        if self._existing_key:
+            self.api_key.setPlaceholderText(
+                f"stored: {masked_key(self._existing_key)} \u2014 leave blank to keep"
+            )
+        else:
+            self.api_key.setPlaceholderText("API key")
+        layout.addWidget(self._labelled("API key", self.api_key))
+
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: #9aa3b2; font-size: 11px;")
+        layout.addWidget(self.status)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        if str(settings.get("provider", "local")).lower() == "remote":
+            self.remote_radio.setChecked(True)
+        else:
+            self.local_radio.setChecked(True)
+
+        for widget in (self.local_radio, self.remote_radio):
+            widget.toggled.connect(self._refresh)
+        for widget in (self.api_base, self.api_model, self.api_key):
+            widget.textChanged.connect(self._refresh)
+        self._refresh()
+
+    @staticmethod
+    def _labelled(text, widget):
+        box = QWidget()
+        inner = QVBoxLayout(box)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(3)
+        label = QLabel(text)
+        label.setStyleSheet("color: #7f8899; font-size: 11px;")
+        inner.addWidget(label)
+        inner.addWidget(widget)
+        return box
+
+    def _effective_key(self):
+        typed = self.api_key.text().strip()
+        return typed or self._existing_key
+
+    def _refresh(self):
+        remote = self.remote_radio.isChecked()
+        for widget in (self.api_base, self.api_model, self.api_key):
+            widget.setEnabled(remote)
+        self.local_model.setEnabled(not remote)
+
+        preview = self.values()
+        self.status.setText(summarise_backend(preview))
+
+    def values(self):
+        """Current form contents as a settings mapping."""
+        typed_key = self.api_key.text().strip()
+        return {
+            "provider": "remote" if self.remote_radio.isChecked() else "local",
+            "local_model": self.local_model.text().strip(),
+            "api_base_url": self.api_base.text().strip(),
+            "api_model": self.api_model.text().strip(),
+            # Blank means "keep the stored key", not "erase it".
+            "api_key": typed_key or self._existing_key,
+        }
+
+    def _on_save(self):
+        values = self.values()
+        if values["provider"] == "remote":
+            if not values["api_model"]:
+                self.status.setText("A model name is required for remote mode.")
+                return
+            if not values["api_key"]:
+                self.status.setText("An API key is required for remote mode.")
+                return
+        self.accept()
+
+
 class NovaWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.core = NovaCore()
+        # Load saved backend settings and apply them BEFORE building the core,
+        # so a stored remote provider is used from the first request.
+        self._settings = load_settings()
+        self._backend_error = ""
+        apply_to_environment(self._settings)
+
+        self.core = self._create_core()
         self.core.set_access(**DEFAULT_ACCESS)
         self.thread = None
         self._autoscroll = True
@@ -600,7 +757,13 @@ class NovaWindow(QMainWindow):
         self._wire_composer_controls()
         self._apply_style()
         self._sync_capabilities()
+        self._refresh_model_labels()
         self._welcome()
+        if self._backend_error:
+            self._add_activity(
+                "Saved remote provider could not be used, so Nova started on the "
+                f"local model. Open API settings to fix it. Reason: {self._backend_error}"
+            )
         self._sync_responsive_layout()
 
     def _build_ui(self):
@@ -984,12 +1147,86 @@ class NovaWindow(QMainWindow):
 
     def _build_model_menu(self):
         menu = QMenu(self)
+
+        remote = self._settings.get("provider") == "remote"
+        if remote:
+            header = menu.addAction(
+                f"Remote: {self._settings.get('api_model') or 'unconfigured'}")
+            header.setEnabled(False)
+            menu.addSeparator()
+
         for name in self._installed_models():
             action = menu.addAction(name)
             action.setCheckable(True)
-            action.setChecked(name == self.current_model)
-            action.triggered.connect(lambda _checked=False, n=name: self._select_model(n))
+            action.setChecked(not remote and name == self.current_model)
+            action.triggered.connect(
+                lambda _checked=False, n=name: self._select_model(n))
+
+        menu.addSeparator()
+        settings_action = menu.addAction("API and model settings\u2026")
+        settings_action.triggered.connect(self._open_model_settings)
         return menu
+
+    def _open_model_settings(self):
+        if self.busy:
+            return
+        dialog = ModelSettingsDialog(self._settings, self._installed_models(), self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        values = dialog.values()
+        ok, message = save_settings(values)
+        self._settings = values
+        # Apply before rebuilding so NovaCore picks up the new backend.
+        apply_to_environment(values)
+        if self._rebuild_core():
+            self._refresh_model_labels()
+        self._add_activity(message if ok else f"Settings not saved: {message}")
+        self._add_activity(summarise_backend(values))
+
+    def _create_core(self):
+        """Build a NovaCore, recovering from an unusable saved backend.
+
+        A misconfigured remote provider must never make the app unopenable: the
+        user would have no way to reach the settings dialog and fix it. Fall back
+        to local, record the reason, and surface it in the UI.
+        """
+        try:
+            return NovaCore()
+        except RuntimeError as exc:
+            self._backend_error = str(exc)
+            # Force local so the retry cannot hit the same failure.
+            os.environ["NOVA_PROVIDER"] = "local"
+            for name in ("NOVA_API_KEY", "NOVA_API_MODEL", "NOVA_API_BASE_URL"):
+                os.environ.pop(name, None)
+            self._settings["provider"] = "local"
+            return NovaCore()
+
+    def _rebuild_core(self):
+        """Recreate the core so a changed backend takes effect immediately."""
+        access = (self.core.get_access() if getattr(self, "core", None)
+                  else dict(DEFAULT_ACCESS))
+        try:
+            new_core = NovaCore()
+        except RuntimeError as exc:
+            # Remote selected but not configured. Keep the existing core and say
+            # so, rather than leaving the user with no working agent.
+            self._add_activity(f"Could not switch backend: {exc}")
+            return False
+        new_core.set_access(**{**DEFAULT_ACCESS, **access})
+        self.core = new_core
+        return True
+
+    def _refresh_model_labels(self):
+        brain = getattr(self.core, "brain", None)
+        model = str(getattr(brain, "model", "") or "model")
+        remote = self._settings.get("provider") == "remote"
+        label = f"{model} \u00b7 remote" if remote else model
+        self.current_model = model
+        self.model_selector.setText(label)
+        self.model_selector.setToolTip(summarise_backend(self._settings))
+        if hasattr(self, "sidebar_model_label"):
+            self.sidebar_model_label.setText(label)
 
     def _show_model_menu(self):
         if self.busy:
@@ -1004,27 +1241,40 @@ class NovaWindow(QMainWindow):
     def _select_model(self, name):
         if self.busy or not name or name == self.current_model:
             return
+
+        # Picking an installed model means local mode. Persist that so a previous
+        # remote configuration does not silently come back on the next restart.
+        if self._settings.get("provider") == "remote":
+            self._settings["provider"] = "local"
+        self._settings["local_model"] = name
+        apply_to_environment(self._settings)
+        save_settings(self._settings)
+
         self.current_model = name
-        brain = getattr(self.core, "brain", None)
-        if brain is not None:
-            brain.model = name
-        self.model_selector.setText(name)
-        if hasattr(self, "sidebar_model_label"):
-            self.sidebar_model_label.setText(name)
-        self._add_activity(f"Model switched to {name}.")
+        if not self._rebuild_core():
+            return
+        self._refresh_model_labels()
+        self._add_activity(f"Model switched to {name} (local).")
 
     def _welcome(self):
         model_name = str(
-            getattr(
-                getattr(self.core, "brain", None),
-                "model",
-                "the configured local model",
-            )
+            getattr(getattr(self.core, "brain", None), "model", "")
+            or "the configured local model"
         ).strip()
+        if self._settings.get("provider") == "remote":
+            where = (
+                f"I'm running on the remote model **{model_name}**. Your messages, "
+                "file contents, and tool results are sent to that provider."
+            )
+        else:
+            where = (
+                f"I'm your local AI agent running through Ollama with "
+                f"**{model_name}**. Nothing leaves this computer."
+            )
         self._add_message(
             "nova",
             "## Welcome to Nova\n\n"
-            f"I'm your local AI agent running through Ollama with **{model_name}**.\n\n"
+            f"{where}\n\n"
             "I can reason about tasks, use enabled tools, inspect real results, "
             "and continue until the task is complete."
         )
@@ -1614,6 +1864,9 @@ class NovaWindow(QMainWindow):
             return
 
         access = self.core.get_access() if self.core else dict(DEFAULT_ACCESS)
+        # Re-apply the saved backend so a new chat keeps the configured provider
+        # instead of silently reverting to the local default.
+        apply_to_environment(self._settings)
         self.core = NovaCore()
         restored_access = {
             capability: access.get(capability, default)
@@ -1625,9 +1878,7 @@ class NovaWindow(QMainWindow):
             if capability not in restored_access
         })
         self.core.set_access(**restored_access)
-
-        if getattr(self, "current_model", None):
-            self.core.brain.model = self.current_model
+        self._refresh_model_labels()
 
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
