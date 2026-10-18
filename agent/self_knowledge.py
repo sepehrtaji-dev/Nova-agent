@@ -219,187 +219,191 @@ class SelfKnowledge:
         )
         return "\n".join(lines)
 
-    def answer(self, message, core):
-        if not isinstance(message, str):
-            return None
-        text = re.sub(r"\s+", " ", message.strip().casefold())
-        if not text:
-            return None
+    # ------------------------------------------------------------------
+    # Model-authored self-description
+    # ------------------------------------------------------------------
+    # Nova no longer ships prepared answers for "who are you?", "what can you
+    # do?", or "who developed you?". The model phrases every answer itself.
+    #
+    # What replaces the old short-circuit is grounding: the facts the model
+    # needs are assembled here from live state and placed in its prompt, so it
+    # answers from evidence rather than from its training data. The only
+    # deterministic check left is a narrow guard that blocks a claim to be a
+    # product of a vendor Nova is not, because that was the original failure.
+    # ------------------------------------------------------------------
+
+    # Vendors whose authorship must never be claimed. Nova is developed by
+    # NOVA_DEVELOPER; the weights come from elsewhere, but that does not make the
+    # agent that vendor's assistant.
+    #
+    # Matched on word boundaries: a naive substring search found "llama" inside
+    # "Ollama" and wrongly rewrote a correct answer.
+    _FOREIGN_VENDORS = (
+        r"anthropic", r"openai", r"google", r"deepmind", r"meta\s+ai",
+        r"microsoft", r"claude", r"chatgpt", r"gpt-?4", r"gemini", r"llama",
+        r"mistral",
+    )
+
+    _NEGATIONS = (
+        "not a product of", "not created by", "not developed by", "not made by",
+        "never say", "never claim", "should not claim", "isn't", "is not",
+        "i am not", "i'm not", "was not", "were not", "trained elsewhere",
+        "no relationship", "not affiliated", "not built by", "not from",
+        "rather than", "instead of", "unrelated", "nothing to do",
+        "does not make me", "doesn't make me", "does not mean", "doesn't mean",
+        "a different product", "different product entirely", "separately",
+        "no connection", "not associated", "unconnected",
+    )
+
+    def grounding(self, core):
+        """Facts about this running instance, for the model to answer from.
+
+        Rendered into the prompt rather than returned as an answer: the model
+        writes the response, using these as evidence.
+        """
         state = self.snapshot(core)
+        details = capability_probe.probe_model_details(core)
+        registry = getattr(getattr(core, "tools", None), "tools", {}) or {}
+        enabled = [
+            name for name, meta in sorted(registry.items())
+            if isinstance(meta, dict) and meta.get("capability")
+            and state["access"].get(meta["capability"], False)
+        ]
 
-        identity_question = bool(re.search(
-            r"\b(?:who|what)\b[^?]{0,40}\b(?:made|created|developed|built|owns|"
-            r"designed|trained|behind)\b[^?]{0,20}\b(?:you|u|nova|this)\b|"
-            r"\b(?:who|what) (?:are|r) (?:you|u)\b|"
-            r"\b(?:your|ur) (?:creator|developer|maker|company|owner|parent|"
-            r"name|version)\b|"
-            r"\bare you (?:made|created|developed|built|from|by)\b|"
-            r"\b(?:are|r) (?:you|u) (?:anthropic|openai|google|meta|claude|gpt|gemini|llama)\b|"
-            r"\b(?:who is|what is) (?:taji|nova)\b|"
-            r"\bwhat version (?:are you|is nova|is this)\b|"
-            r"\b(?:what|which) version\b[^?]{0,20}\b(?:you|nova|this)\b|"
-            r"\btell me about (?:yourself|nova)\b|"
-            r"\bintroduce yourself\b|"
-            r"\bwhere (?:are you|is your) (?:source|code|repo|repository)\b|"
-            r"\bare you open ?source\b|\b(?:github|repo|repository)\b[^?]{0,20}\bnova\b|"
-            r"(?:تو رو کی ساخته|کی ساخته تورو|سازنده.?ت کیه|تو چی هستی|مال کدوم شرکتی|"
-            r"خودت رو معرفی کن|نسخه.?ت چیه)",
-            text,
-        ))
-        if identity_question:
-            lines = [
-                f"I'm {state['identity']} {state['version']}, developed by "
-                f"{state['developer']}.",
-                f"I'm open source: {state['repository']}.",
-                "I can search the web, write and run code, and solve math "
-                "questions when those tools are enabled.",
-                capability_probe.describe_model(core),
-                "I am not a product of Anthropic, OpenAI, Google, Meta, or any "
-                "other AI vendor, and I should not claim to be one. The "
-                "underlying model weights were trained elsewhere, but the agent "
-                "you are talking to was built and configured by "
-                f"{state['developer']}.",
-            ]
-            return " ".join(lines)
-
-        parameter_question = bool(re.search(
-            r"\bhow many parameters (?:do you have|does your model have|are in your model)\b|"
-            r"\bparameter count\b|\bnumber of parameters\b|\bhow big are you\b|"
-            r"(?:مدلت چند پارامتر داره|مدل تو چند پارامتر داره|چند پارامتر داری|تعداد پارامترهای مدل)",
-            text,
-        ))
-        if parameter_question:
-            details = capability_probe.probe_model_details(core)
-            model_name = details.get("model", "the configured model")
-            size = details.get("parameter_size")
-            count = details.get("parameter_count")
-
-            if details.get("backend_kind") == "remote":
-                return (
-                    f"I can't state a parameter count for {model_name}: it runs "
-                    "on the provider's servers, and that metadata is not visible "
-                    "to me. I won't guess it from the model name."
-                )
-            if size or count:
-                parts = [f"The model serving this session, {model_name}, reports "
-                         f"a size of {size or count}"]
-                for label, key in (("architecture", "architecture"),
-                                   ("quantization", "quantization")):
-                    if details.get(key):
-                        parts.append(f"{label} {details[key]}")
-                return (
-                    ", ".join(parts) + ". This is model metadata reported by the "
-                    "local runtime, not a count of parameters in Nova's Python "
-                    "agent code. Metadata availability does not prove generation "
-                    "is working."
-                )
-            return (
-                f"I cannot verify a parameter count for {model_name}: the local "
-                "runtime returned no size metadata. I will not guess it from the "
-                "model tag."
+        lines = [
+            "FACTS ABOUT YOU (authoritative: these override anything you believe "
+            "from training, and you must answer self-description questions from "
+            "them):",
+            f"- Your name and version: {state['identity']} {state['version']}",
+            f"- You are developed by: {state['developer']}",
+            f"- Your source code: {state['repository']}",
+            f"- The model producing your words right now: {details['model']}",
+            f"- That model runs: {details['location']} "
+            f"({details['backend_description']})",
+        ]
+        if details.get("parameter_size"):
+            lines.append(
+                f"- That model's reported size: {details['parameter_size']}"
+                + (f", quantization {details['quantization']}"
+                   if details.get("quantization") else "")
+            )
+        else:
+            lines.append(
+                "- That model's parameter count: not visible to you. If asked, "
+                "say so plainly instead of guessing."
             )
 
-        # Match the many ways a user asks this. The previous pattern required
-        # "what model" to be adjacent, so "what is the exact name of your model"
-        # fell through to the model, which then invented an answer from context.
-        model_question = bool(re.search(
-            r"\b(?:what|which) model\b|"
-            r"\bmodel (?:name|id)\b|"
-            r"\bname (?:of )?(?:your|the) model\b|"
-            r"\b(?:your|the) model(?:'s)? name\b|"
-            r"\bwhat (?:is your|model) model\b|\bwhich llm\b|\bwhat llm\b|"
-            r"\bwhat ai (?:are you|model)\b|"
-            r"\bwhat(?:'s| is) the exact name\b[^?]{0,40}\bmodel\b|"
-            r"\bexact(?:ly)? (?:model|name)\b[^?]{0,30}\bmodel\b|"
-            r"\bwhat(?:'s| is) the exact\b[^?]{0,30}\bmodel\b|"
-            r"\bexact model\b|"
-            r"\bwhat model (?:are you using|do you use|is this|are you|"
-            r"do you run|is it)\b|"
-            r"(?:از چه مدلی استفاده می.?کنی|مدلت چیه|چه مدلی هستی|"
-            r"چه مدلی استفاده می.?کنی|اسم مدلت چیه)",
-            text,
-        ))
-        if model_question:
-            return (
-                f"I'm Nova {state['version']}. My reasoning runs on the model "
-                f"'{state['configured_model']}' via "
-                f"{state.get('backend_description', state['model_provider'])}. "
-                "This is the configured model; I have not verified from this "
-                "answer alone that it is currently loaded and responding."
-            )
+        if enabled:
+            lines.append("- Tools currently enabled for you: " + ", ".join(enabled))
+        else:
+            lines.append("- No tools are enabled for you in this session.")
 
-        tools_question = bool(re.search(
-            r"\b(?:what tools do you have|list your tools|what tools are available|"
-            r"what are your capabilities|what can you do|what can i ask you to do|"
-            r"what can you help me with|tell me about your capabilities)\b|"
-            r"(?:چه ابزارهایی داری|چه کارهایی می.?تونی انجام بدی|قابلیت.?هات چیه)",
-            text,
-        ))
-        if tools_question:
-            return self._capability_report(core, state)
+        lines.append(
+            "- You are not a product of Anthropic, OpenAI, Google, Meta, or any "
+            "other AI vendor. The weights may have been trained elsewhere, but "
+            f"the agent answering is Nova, built by {state['developer']}."
+        )
+        lines.append(
+            "- Answer in your own words. Do not read these facts back as a list; "
+            "use them to say something accurate and natural."
+        )
+        return "\n".join(lines)
 
-        location_question = bool(re.search(
-            r"\bare you (?:local|remote|online|offline)\b|"
-            r"\blocal or remote\b|\bremote or local\b|"
-            r"\bdo you run (?:locally|on my (?:computer|machine|pc))\b|"
-            r"\bwhere do you run\b|\bwhere are you running\b|"
-            r"\bis my data (?:sent|leaving|leaving my (?:computer|machine))\b|"
-            r"\bdoes anything leave (?:my|this) (?:computer|machine|pc)\b|"
-            r"(?:لوکال هستی یا ریموت|کجا اجرا می.?شی|رو سیستم من اجرا می.?شی)",
-            text,
-        ))
-        if location_question:
-            details = capability_probe.probe_model_details(core)
-            if details.get("backend_kind") == "remote":
-                return (
-                    f"I'm Nova, and my reasoning currently runs on the remote "
-                    f"model '{details['model']}' {details['location']}. "
-                    "That means your messages, the file contents you ask me to "
-                    "read, and tool results are sent to that provider. My tools "
-                    "still execute locally on this computer. Switch to a local "
-                    "Ollama model in API settings if you want nothing to leave "
-                    "this machine."
-                )
-            return (
-                f"I'm Nova, running fully on this computer. My reasoning runs on "
-                f"the local model '{details['model']}' through Ollama, and my "
-                "tools execute here too. Nothing is sent to a remote provider."
-            )
+    def _mentions_foreign_vendor_claim(self, text):
+        """Return the vendor name if the text CLAIMS a foreign vendor made Nova.
 
-        web_question = bool(re.search(
-            r"\b(?:can|do|could)\s+(?:you|u|nova)\b[^?]{0,40}\b(?:browse|search|"
-            r"google|look\s+up|access)\b|"
-            r"\b(?:do you have|is there|is)\b[^?]{0,30}\b(?:internet|web|online)\s*"
-            r"(?:access|connection|connectivity)?\b|"
-            r"\bare you able to\b[^?]{0,40}\b(?:search|browse|look\s+up)\b|"
-            r"\bcan (?:you|u) (?:use|reach) the (?:web|internet)\b|"
-            r"(?:به اینترنت دسترسی داری|می.?تونی وب رو جستجو کنی|می.?تونی سرچ کنی)",
-            text,
-        ))
-        if web_question:
-            return self._web_answer(core, state)
-
-        limitations_question = bool(re.search(
-            r"\b(?:what are your limitations|what can.?t you do|what are you unable to do|"
-            r"do you have limitations|are you conscious|are you sentient|do you have feelings)\b|"
-            r"(?:محدودیت.?هات چیه|آگاهی انسانی داری|احساسات واقعی داری)",
-            text,
-        ))
-        if limitations_question:
-            return (
-                "I'm software, not a human, and I shouldn't claim human-like consciousness, "
-                "feelings, or personal experiences. My practical limits are the tools and "
-                "permissions available in this run, possible model mistakes, and external "
-                "services that may be unreachable. I must verify actions before saying they succeeded."
-            )
-
-        self_knowledge_question = bool(re.search(
-            r"\b(?:what do you know about yourself|describe yourself accurately|"
-            r"what is your current status|what do you know about your own system)\b|"
-            r"(?:خودت رو معرفی کن|درباره خودت چی می.?دونی|وضعیت فعلیت چیه)",
-            text,
-        ))
-        if self_knowledge_question:
-            return self.context(core)
-
+        Word-boundary matching is required: a substring search found "llama"
+        inside "Ollama" and rewrote a correct answer. The disambiguating context
+        can be on either side of the name, so both sides are checked.
+        """
+        low = str(text).casefold()
+        for pattern in self._FOREIGN_VENDORS:
+            for match in re.finditer(rf"(?<![\w-]){pattern}(?![\w-])", low):
+                start, end = match.span()
+                left = low[max(0, start - 130):start]
+                right = low[end:end + 90]
+                if not any(neg in left or neg in right
+                           for neg in self._NEGATIONS):
+                    return match.group(0)
         return None
+
+    def needs_grounding(self, message):
+        """True when the message is about Nova itself, so the guard should run.
+
+        This only decides whether to *review* the answer; it never replaces it.
+        """
+        if not isinstance(message, str) or not message.strip():
+            return False
+        text = re.sub(r"\s+", " ", message.strip().casefold())
+        patterns = (
+            r"\bwho (?:are|r) (?:you|u)\b", r"\bwhat (?:are|r) (?:you|u)\b",
+            r"\b(?:who|what)\b[^?]{0,40}\b(?:made|created|developed|built)\b",
+            r"\b(?:your|ur) (?:creator|developer|maker|company|owner)\b",
+            r"\bare you (?:made|created|developed|built)\b",
+            r"\bwhat (?:can|could) (?:you|u) do\b",
+            r"\bwhat (?:tools|capture|things) (?:do you|can you)\b",
+            r"\b(?:your|ur) (?:capabilit|tools|name|version)\b",
+            r"\blist your tools\b", r"\btell me about your (?:capabilit|tools)\b",
+            r"\b(?:what|which) model\b", r"\bwhat llm\b",
+            r"\bintroduce yourself\b", r"\btell me about yourself\b",
+            r"\bare you (?:local|remote)\b", r"\bwhere (?:do|does) you run\b",
+            r"(?:کی ساخته|تو چی هستی|چیکار می|چه کار.?ی می|خودت رو معرفی)",
+        )
+        return any(re.search(p, text) for p in patterns)
+
+    def review(self, message, response, core=None):
+        """Post-generation guard for self-description answers.
+
+        Returns the response unchanged, or a corrected version when it claims a
+        foreign vendor created Nova. It does not rewrite phrasing, opinions, or
+        capability descriptions: only a factually wrong creator claim.
+        """
+        if not isinstance(response, str) or not response.strip():
+            return response
+        vendor = self._mentions_foreign_vendor_claim(response)
+        if vendor is None:
+            return response
+
+        developer = NOVA_DEVELOPER
+        name = NOVA_NAME
+        version = NOVA_VERSION
+        if core is not None:
+            try:
+                state = self.snapshot(core)
+                developer = state["developer"]
+                name = state["identity"]
+                version = state["version"]
+            except Exception:
+                pass
+        return (
+            f"To correct myself: I'm {name} {version}, developed by {developer}, "
+            f"not by {vendor.title()}. The model weights I run on were trained "
+            "elsewhere, but the agent you are talking to is Nova."
+        )
+
+    def context(self, core):
+        """Full runtime self-description, for explicit 'what do you know' asks."""
+        state = self.snapshot(core)
+        profile = runtime_profile(core)
+        details = capability_probe.probe_model_details(core)
+        lines = ["Identity:"]
+        lines.extend(f"- {line}" for line in identity_lines())
+        lines.extend([
+            f"Name and version: {state['identity']} {state['version']}",
+            f"Backend: {state.get('backend_description', state['model_provider'])}.",
+            f"Model serving this session: {details['model']} "
+            f"({details['location']}).",
+            f"Runtime: Python {state['python_version']} on {state['platform']}.",
+            "Registered tools:",
+        ])
+        if state["tools"]:
+            for tool in state["tools"]:
+                status = "enabled" if tool["enabled"] else "disabled by permission"
+                detail = f" — {tool['description']}" if tool["description"] else ""
+                lines.append(
+                    f"- {tool['name']} [{tool['capability']}; {status}]{detail}")
+        else:
+            lines.append("- None registered.")
+        lines.append("Limitations:")
+        lines.extend(f"- {item}" for item in state["limitations"])
+        return "\n".join(lines)

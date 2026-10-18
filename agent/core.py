@@ -1034,20 +1034,21 @@ class NovaCore:
         if task_type == "conversation":
             self._status("Preparing conversational answer...")
 
-            # Questions about Nova's own identity, model, tools, or limits are
-            # answered from runtime configuration instead of the model, which
-            # would otherwise answer "who made you" from its training data and
-            # name its own weights' vendor.
+            # Self-description is answered by the model, not by a canned string.
+            # The runtime facts it needs are injected below as grounding so the
+            # answer is evidence-based rather than recalled from its training
+            # data. After generation, a narrow guard catches the one failure that
+            # matters: claiming a foreign vendor built Nova.
             self_knowledge = getattr(self, "self_knowledge", None)
+            grounding = ""
+            guarded = False
             if self_knowledge is not None:
                 try:
-                    grounded = self_knowledge.answer(message, self)
+                    grounding = self_knowledge.grounding(self)
+                    guarded = self_knowledge.needs_grounding(message)
                 except Exception:
-                    grounded = None
-                if isinstance(grounded, str) and grounded.strip():
-                    self._status("Done")
-                    self.short_memory.add("assistant", grounded)
-                    return grounded
+                    grounding = ""
+                    guarded = False
 
             identity = self._identity_system_prompt()
 
@@ -1076,9 +1077,10 @@ class NovaCore:
                 "Do not print tool-call syntax such as tool_name(...) or JSON "
                 "tool requests inside a normal answer.\n\n"
                 "If the user asks who made you, who developed you, what company "
-                "is behind you, or what model you are, answer from the runtime "
-                "identity in your instructions. Never say Anthropic, OpenAI, "
+                "is behind you, or what model you are, answer from the FACTS "
+                "ABOUT YOU below in your own words. Never say Anthropic, OpenAI, "
                 "Google, or any other vendor created you.\n\n"
+                f"{grounding}\n\n"
                 f"Live capability status for this session (measured, not "
                 f"assumed — use these instead of guessing):\n"
                 f"{self._capability_context()}"
@@ -1100,6 +1102,14 @@ class NovaCore:
 
             if not isinstance(response, str):
                 response = str(response)
+
+            # Narrow post-generation guard: correct a claim that a foreign
+            # vendor built Nova, without touching anything else the model said.
+            if guarded and self_knowledge is not None:
+                try:
+                    response = self_knowledge.review(message, response, self)
+                except Exception:
+                    pass
 
             # Small local models sometimes emit a registered tool call as if it
             # were a conversational answer. Treat that model-produced call as

@@ -51,7 +51,7 @@ class OllamaBrain:
             self.model = self._discover_model()
         if not self.model:
             raise RuntimeError(
-                "No local Ollama model is available. Pull a model or set NOVA_MODEL."
+                "No local Ollama model is available. Pull a model or set NOVA_MODEL in enviroment varieables."
             )
 
         def _env_int(name, default, minimum):
