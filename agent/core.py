@@ -939,7 +939,7 @@ class NovaCore:
             if not entries:
                 return False
             key_value_line = re.compile(
-                r"""^["']?[A-Za-z_][A-Za-z0-9_ -]*["']?\\s*(?::|=)?\\s*["'][^"']*["']$"""
+                r"""^["']?[A-Za-z_][A-Za-z0-9_ -]*["']?\s*(?::|=)?\s*["'][^"']*["']$"""
             )
             return all(key_value_line.match(line) for line in entries)
         return False
