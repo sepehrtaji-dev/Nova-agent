@@ -548,7 +548,7 @@ class FigmaDesktopShell:
         lowered = message.lower()
         if any(token in lowered for token in ("read", "opened", "inspected")):
             self.workspace_stats["Files read"].setText(str(int(self.workspace_stats["Files read"].text()) + 1))
-        if any(token in lowered for token in ("write", "modified", "created", "updated")):
+        if any(token in lowered for token in ("write", "wrote", "modified", "created", "updated")):
             self.workspace_stats["Files changed"].setText(str(int(self.workspace_stats["Files changed"].text()) + 1))
             self.latest_change.setText(message)
         if any(token in lowered for token in ("terminal", "command", "ran ", "executed")):
