@@ -1692,6 +1692,9 @@ class NovaWindow(QMainWindow):
         self.globe_button.blockSignals(False)
         self._refresh_globe()
         self._refresh_capability_styles()
+        shell = getattr(self, "_desktop_shell", None)
+        if shell:
+            shell.sync_capabilities()
 
     def _refresh_capability_styles(self):
         for button in self.capability_buttons.values():
