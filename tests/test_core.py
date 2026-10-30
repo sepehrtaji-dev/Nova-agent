@@ -583,5 +583,53 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(valid, reason)
 
 
+
+    def test_conversation_json_tool_decision_is_handed_to_executor(self):
+        from agent.router import ToolRouter
+
+        core = NovaCore.__new__(NovaCore)
+        core.tools = FakeTools()
+        core.access = {"pc": True, "web": True, "git": True}
+        core.router = ToolRouter(FakeBrain(), core.tools)
+        response = json.dumps({
+            "action": "tool",
+            "task_type": "computer",
+            "tool": "write_file",
+            "input": {"path": "hello.py", "location": "projects"},
+        })
+
+        decision = core._conversation_tool_call(response)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision["tool"], "write_file")
+        self.assertEqual(
+            json.loads(decision["input"]),
+            {"path": "hello.py", "location": "projects"},
+        )
+
+    def test_unrequested_memory_json_is_detected_but_requested_json_is_preserved(self):
+        self.assertTrue(
+            NovaCore._is_unrequested_json_response(
+                "my name is sepehr", '{"name":"sepehr"}'
+            )
+        )
+        self.assertFalse(
+            NovaCore._is_unrequested_json_response(
+                "return my name as JSON", '{"name":"sepehr"}'
+            )
+        )
+
+    def test_json_rewrite_recovers_a_natural_acknowledgment(self):
+        class RewriteBrain:
+            def generate(self, prompt, system_prompt=None):
+                return "Got it, Sepehr. Thanks for telling me."
+
+        core = NovaCore.__new__(NovaCore)
+        core.brain = RewriteBrain()
+        response = core._rewrite_unrequested_json(
+            "my name is sepehr", '{"name":"sepehr"}'
+        )
+        self.assertEqual(response, "Got it, Sepehr. Thanks for telling me.")
+
 if __name__ == "__main__":
     unittest.main()
