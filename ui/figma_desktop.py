@@ -102,7 +102,6 @@ class FigmaDesktopShell:
         self.owner.activity_panel.hide()
         self.owner._desktop_shell = self
         self.owner.sidebar = self.sidebar
-        self.show_welcome()
         self.navigate("chat")
         return root
 
