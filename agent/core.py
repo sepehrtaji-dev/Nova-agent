@@ -920,9 +920,29 @@ class NovaCore:
             candidate = re.sub(r"^\s*```(?:json)?\s*", "", candidate, flags=re.IGNORECASE)
             candidate = re.sub(r"\s*```$", "", candidate).strip()
         try:
-            return isinstance(json.loads(candidate), (dict, list))
+            parsed = json.loads(candidate)
+            return isinstance(parsed, (dict, list))
         except (TypeError, json.JSONDecodeError):
-            return False
+            pass
+        try:
+            parsed = ast.literal_eval(candidate)
+            if isinstance(parsed, (dict, list)):
+                return True
+        except (ValueError, SyntaxError):
+            pass
+        # Some models emit JSON-like objects with missing punctuation, e.g.
+        # { name"sepehr" }. Treat only a whole object made of key/value-looking
+        # lines as a leaked structure; ordinary code/prose remains untouched.
+        if candidate.startswith("{") and candidate.endswith("}"):
+            body = candidate[1:-1].strip()
+            entries = [line.strip().rstrip(",") for line in body.splitlines() if line.strip()]
+            if not entries:
+                return False
+            key_value_line = re.compile(
+                r"""^["']?[A-Za-z_][A-Za-z0-9_ -]*["']?\\s*(?::|=)?\\s*["'][^"']*["']$"""
+            )
+            return all(key_value_line.match(line) for line in entries)
+        return False
 
     def _conversation_tool_call(self, response):
         """Recognize structured or legacy tool calls emitted on the chat path."""
@@ -1317,15 +1337,24 @@ class NovaCore:
                 "Deciding what to do..."
             )
 
-            decision = self.router.decide(
-                message=message,
-                task_type=task_type,
-                conversation=conversation,
-                knowledge=knowledge_context,
-                tool_history=history,
-                plan=self.planner.get_plan_summary(plan),
-                allowed_tools=self._allowed_tools()
-            )
+            if isinstance(detected_call, dict):
+                # The conversation model has already emitted a validated,
+                # registry-backed tool decision. Execute that exact decision
+                # through the normal permission, input-validation, execution,
+                # and verifier pipeline instead of asking another model pass
+                # to rediscover the same action.
+                decision = detected_call
+                detected_call = None
+            else:
+                decision = self.router.decide(
+                    message=message,
+                    task_type=task_type,
+                    conversation=conversation,
+                    knowledge=knowledge_context,
+                    tool_history=history,
+                    plan=self.planner.get_plan_summary(plan),
+                    allowed_tools=self._allowed_tools()
+                )
 
             if not isinstance(
                 decision,
