@@ -209,8 +209,6 @@ class FigmaDesktopShell:
             f"border:1px solid {BORDER}; border-radius:20px; font-size:18px; }}"
             f"QPushButton:checked {{ background:rgba(22,119,255,0.22); color:white; border-color:{BLUE}; }}"
         )
-        self.web_toggle_button.toggled.connect(self.owner.globe_button.setChecked)
-        self.owner.globe_button.toggled.connect(self.web_toggle_button.setChecked)
         header.addWidget(self.web_toggle_button)
         more = QPushButton("⋯")
         more.setFixedSize(40, 40)
@@ -267,6 +265,8 @@ class FigmaDesktopShell:
         # Figma attachment / message / send row.
         self.owner.model_selector.hide()
         self.owner.globe_button.hide()
+        self.web_toggle_button.toggled.connect(self.owner.globe_button.setChecked)
+        self.owner.globe_button.toggled.connect(self.web_toggle_button.setChecked)
         layout.addWidget(self.owner.composer_area)
         return page
 
