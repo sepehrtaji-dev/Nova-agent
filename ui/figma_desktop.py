@@ -74,6 +74,7 @@ class FigmaDesktopShell:
         self.workspace_activity = None
         self.workspace_stats = {}
         self.welcome_hero = None
+        self.extra_workspace_roots = []
 
     def build(self):
         root = QWidget()
@@ -320,6 +321,8 @@ class FigmaDesktopShell:
         self.language_combo = QComboBox()
         self.language_combo.addItems(["English", "Persian"])
         self._style_combo(self.language_combo)
+        self.language_combo.setEnabled(False)
+        self.language_combo.setToolTip("Additional UI translations are not implemented yet.")
         a.addWidget(self.language_combo)
         provider = action_button("Configure API / Provider")
         provider.clicked.connect(self.owner._open_model_settings)
@@ -333,11 +336,15 @@ class FigmaDesktopShell:
         self.theme_combo.addItems(["Dark", "Light", "System"])
         self.theme_combo.setCurrentText("Dark")
         self._style_combo(self.theme_combo)
+        self.theme_combo.setEnabled(False)
+        self.theme_combo.setToolTip("The current desktop build supports the Dark theme.")
         ap.addWidget(self.theme_combo)
         ap.addWidget(label("Accent color", 14, TEXT, 500))
         self.accent_combo = QComboBox()
         self.accent_combo.addItems(["Blue", "Purple", "Green"])
         self._style_combo(self.accent_combo)
+        self.accent_combo.setEnabled(False)
+        self.accent_combo.setToolTip("Accent customization is not implemented yet.")
         ap.addWidget(self.accent_combo)
         left.addWidget(appearance)
         left.addStretch(1)
@@ -348,6 +355,8 @@ class FigmaDesktopShell:
         self.notify_errors = QCheckBox("Error notifications")
         for control in (self.notify_completion, self.notify_errors):
             control.setStyleSheet(f"QCheckBox {{ color:{SECONDARY}; spacing:10px; }} QCheckBox::indicator {{ width:18px; height:18px; }}")
+            control.setEnabled(False)
+            control.setToolTip("Desktop notifications are not implemented yet.")
             n.addWidget(control)
         right.addWidget(notifications)
 
@@ -467,7 +476,12 @@ class FigmaDesktopShell:
         self.workspace_tree.addTopLevelItem(root)
         self._populate_tree(root, root_path, depth=0)
         root.setExpanded(True)
-        self.workspace_path.setText(str(root_path))
+        for extra in self.extra_workspace_roots:
+            extra_root = QTreeWidgetItem([extra.name or str(extra)])
+            self.workspace_tree.addTopLevelItem(extra_root)
+            self._populate_tree(extra_root, extra, depth=0)
+            extra_root.setExpanded(True)
+        self.workspace_path.setText(str(root_path) + (f"  ·  +{len(self.extra_workspace_roots)} folder(s)" if self.extra_workspace_roots else ""))
 
     def _populate_tree(self, parent, path, depth):
         if depth >= 2:
@@ -487,7 +501,10 @@ class FigmaDesktopShell:
     def _add_workspace_folder(self):
         folder = QFileDialog.getExistingDirectory(self.owner, "Add workspace folder", str(Path.cwd()))
         if folder:
-            self.owner._add_activity(f"Workspace folder selected: {folder}")
+            selected = Path(folder).resolve()
+            if selected not in self.extra_workspace_roots:
+                self.extra_workspace_roots.append(selected)
+            self.owner._add_activity(f"Workspace folder added: {selected}")
             self.refresh_workspace()
 
     def record_activity(self, message):
