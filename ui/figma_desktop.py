@@ -200,6 +200,27 @@ class FigmaDesktopShell:
         titles.addWidget(label("Typically replies in seconds", 14, MUTED))
         header.addLayout(titles)
         header.addStretch(1)
+        self.web_toggle_button = QPushButton("◎")
+        self.web_toggle_button.setCheckable(True)
+        self.web_toggle_button.setFixedSize(40, 40)
+        self.web_toggle_button.setToolTip("Toggle web search access")
+        self.web_toggle_button.setStyleSheet(
+            f"QPushButton {{ background:rgba(255,255,255,0.08); color:{MUTED}; "
+            f"border:1px solid {BORDER}; border-radius:20px; font-size:18px; }}"
+            f"QPushButton:checked {{ background:rgba(22,119,255,0.22); color:white; border-color:{BLUE}; }}"
+        )
+        self.web_toggle_button.toggled.connect(self.owner.globe_button.setChecked)
+        self.owner.globe_button.toggled.connect(self.web_toggle_button.setChecked)
+        header.addWidget(self.web_toggle_button)
+        more = QPushButton("⋯")
+        more.setFixedSize(40, 40)
+        more.setToolTip("Model and provider settings")
+        more.setStyleSheet(
+            f"QPushButton {{ background:rgba(255,255,255,0.08); color:{TEXT}; "
+            f"border:1px solid {BORDER}; border-radius:20px; font-size:20px; }}"
+        )
+        more.clicked.connect(self.owner._open_model_settings)
+        header.addWidget(more)
         self.owner.status_label = label("Ready", 12, MUTED)
         header.addWidget(self.owner.status_label)
         layout.addLayout(header)
@@ -242,7 +263,10 @@ class FigmaDesktopShell:
         layout.addLayout(suggestions)
 
         self.owner.composer_area = self.owner._build_composer()
-        # Figma has a 48px attachment action and a full-width input/send row.
+        # Model selection lives on Settings; keep the composer faithful to the
+        # Figma attachment / message / send row.
+        self.owner.model_selector.hide()
+        self.owner.globe_button.hide()
         layout.addWidget(self.owner.composer_area)
         return page
 
@@ -549,3 +573,9 @@ class FigmaDesktopShell:
         self.sidebar.setFixedWidth(280)
         if self.stack.currentIndex() == 2:
             self.refresh_workspace()
+
+    def sync_capabilities(self):
+        if hasattr(self, "web_toggle_button"):
+            self.web_toggle_button.blockSignals(True)
+            self.web_toggle_button.setChecked(self.owner.globe_button.isChecked())
+            self.web_toggle_button.blockSignals(False)
