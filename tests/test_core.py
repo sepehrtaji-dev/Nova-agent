@@ -936,7 +936,6 @@ class CoreTests(unittest.TestCase):
         core = self._make_conversation_core(
             ScriptedBrain(), OrderingExtractor()
         )
-        core._remember_verified_tool_result = lambda *args: events.append("verified-memory")
 
         response = core.ask("create memory-order.txt")
 
