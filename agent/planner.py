@@ -30,18 +30,94 @@ class Planner:
         self.brain = brain
         self.tools = tools
 
-    def _tool_descriptions(self):
+    def _tool_descriptions(self, allowed_tools=None):
         if self.tools is None:
             return "No tool registry was provided."
 
         try:
-            return self.tools.get_descriptions()
+            if allowed_tools is None:
+                return self.tools.get_descriptions()
+
+            allowed = set(allowed_tools)
+            registry = getattr(self.tools, "tools", {})
+            lines = []
+            for name, metadata in registry.items():
+                if name not in allowed or not isinstance(metadata, dict):
+                    continue
+                description = str(metadata.get("description", "")).strip()
+                schema = metadata.get("input_schema")
+                contract = (
+                    f" Input schema: {json.dumps(schema, ensure_ascii=False)}"
+                    if isinstance(schema, dict)
+                    else ""
+                )
+                lines.append(f"- {name}: {description}{contract}")
+            return "\n".join(lines) or "No tools are enabled for this session."
         except Exception as e:
             print(
                 f"[PLANNER] Tool descriptions error: "
                 f"{type(e).__name__}: {e}"
             )
             return "Tool descriptions are unavailable."
+
+    def _validate_step_tool(self, tool, raw_input, allowed_tools=None):
+        if not isinstance(tool, str) or not tool.strip():
+            return False, "missing tool name"
+        if not isinstance(raw_input, dict):
+            return False, "input must be an object"
+        if self.tools is not None and not self.tools.exists(tool):
+            return False, f"unregistered tool '{tool}'"
+        if allowed_tools is not None and tool not in set(allowed_tools):
+            return False, f"tool '{tool}' is disabled for this session"
+
+        validator = getattr(self.tools, "validate_input", None)
+        if callable(validator):
+            try:
+                valid, reason = validator(tool, raw_input)
+                if not valid:
+                    return False, str(reason or "input does not match tool schema")
+            except Exception as exc:
+                return False, f"schema validation failed: {type(exc).__name__}: {exc}"
+        else:
+            metadata = getattr(self.tools, "tools", {}).get(tool, {})
+            schema = metadata.get("input_schema") if isinstance(metadata, dict) else None
+            if isinstance(schema, dict):
+                properties = schema.get("properties", {})
+                required = schema.get("required", [])
+                missing = [
+                    key for key in required
+                    if key not in raw_input or raw_input[key] is None
+                ]
+                if missing:
+                    return False, "missing required input field(s): " + ", ".join(missing)
+                if schema.get("additionalProperties") is False:
+                    unknown = sorted(set(raw_input) - set(properties))
+                    if unknown:
+                        return False, "unexpected input field(s): " + ", ".join(unknown)
+                checks = {
+                    "string": lambda value: isinstance(value, str),
+                    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+                    "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+                    "boolean": lambda value: isinstance(value, bool),
+                    "object": lambda value: isinstance(value, dict),
+                    "array": lambda value: isinstance(value, list),
+                }
+                for key, value in raw_input.items():
+                    definition = properties.get(key, {})
+                    if not isinstance(definition, dict):
+                        continue
+                    check = checks.get(definition.get("type"))
+                    if check and not check(value):
+                        return False, f"field '{key}' must be {definition.get('type')}"
+                    if isinstance(value, str):
+                        if len(value) < int(definition.get("minLength", 0)):
+                            return False, f"field '{key}' is too short"
+                        maximum = definition.get("maxLength")
+                        if maximum is not None and len(value) > int(maximum):
+                            return False, f"field '{key}' is too long"
+                    if "enum" in definition and value not in definition["enum"]:
+                        return False, f"field '{key}' is not an allowed value"
+        return True, None
 
     def _extract_json(self, response):
         if not response:
@@ -145,7 +221,7 @@ class Planner:
 
         return None
 
-    def _normalize_steps(self, steps):
+    def _normalize_steps(self, steps, allowed_tools=None):
         if not isinstance(steps, list):
             return []
 
@@ -184,14 +260,11 @@ class Planner:
                 continue
 
             tool = tool.strip()
-            if self.tools is not None and not self.tools.exists(tool):
-                print(
-                    f"[PLANNER] Warning: step has unregistered tool '{tool}'."
-                )
-                dropped += 1
-                continue
-
-            if not isinstance(raw_input, dict):
+            valid, reason = self._validate_step_tool(
+                tool, raw_input, allowed_tools=allowed_tools
+            )
+            if not valid:
+                print(f"[PLANNER] Rejected planned step '{description}': {reason}.")
                 dropped += 1
                 continue
 
@@ -216,7 +289,7 @@ class Planner:
     # Intent-specific plan shortcuts were removed. The model generates structured
     # tool/input steps; this class only normalizes and validates that output.
 
-    def create_plan(self, goal, context=""):
+    def create_plan(self, goal, context="", allowed_tools=None):
         if not isinstance(goal, str):
             return {
                 "goal": "",
@@ -245,7 +318,7 @@ Think step by step before creating the plan:
 Create a concrete step-by-step plan. Each step must map to exactly ONE tool call.
 
 AVAILABLE TOOLS:
-{self._tool_descriptions()}
+{self._tool_descriptions(allowed_tools)}
 
 USER GOAL: {goal}
 
@@ -338,7 +411,8 @@ Do not put generated file content in write_file input."""
             }
 
         steps = self._normalize_steps(
-            data.get("steps")
+            data.get("steps"),
+            allowed_tools=allowed_tools,
         )
 
         return {
@@ -355,7 +429,8 @@ Do not put generated file content in write_file input."""
         tool_name,
         tool_input,
         result,
-        success
+        success,
+        allowed_tools=None,
     ):
         if not isinstance(plan, dict):
             return plan
@@ -550,7 +625,8 @@ Schema:
 
         new_steps = self._normalize_replanned_steps(
             data.get("steps"),
-            previous_plan
+            previous_plan,
+            allowed_tools=allowed_tools,
         )
 
         if not new_steps:
@@ -685,7 +761,8 @@ Schema:
     def _normalize_replanned_steps(
         self,
         steps,
-        old_plan
+        old_plan,
+        allowed_tools=None,
     ):
         if not isinstance(steps, list):
             return []
@@ -797,20 +874,20 @@ Schema:
                     continue
 
             tool = tool.strip()
-            if self.tools is not None and not self.tools.exists(tool):
-                print(
-                    f"[PLANNER] Warning: replanned step has unregistered "
-                    f"tool '{tool}'."
-                )
-                dropped += 1
-                continue
-
             if not isinstance(raw_input, dict):
                 if old and old.get("tool") == tool and isinstance(old.get("input"), dict):
                     raw_input = old["input"]
                 else:
                     dropped += 1
                     continue
+
+            valid, reason = self._validate_step_tool(
+                tool, raw_input, allowed_tools=allowed_tools
+            )
+            if not valid:
+                print(f"[PLANNER] Rejected replanned step '{description}': {reason}.")
+                dropped += 1
+                continue
 
             normalized_step = {
                 "id": index,
