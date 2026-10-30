@@ -1000,7 +1000,7 @@ class NovaWindow(QMainWindow):
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(8)
 
-        size = 38
+        size = 48
 
         add_button = QPushButton()
         add_button.setObjectName("roundButton")
