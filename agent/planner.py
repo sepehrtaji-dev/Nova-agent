@@ -498,7 +498,7 @@ Think step by step before updating the plan:
 Update the existing plan using the REAL tool result.
 
 AVAILABLE TOOLS:
-{self._tool_descriptions()}
+{self._tool_descriptions(allowed_tools)}
 
 USER GOAL:
 {goal}
