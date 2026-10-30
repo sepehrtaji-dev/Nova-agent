@@ -180,6 +180,13 @@ class FakePlanner:
                     break
         return plan
 
+    def verify_goal(self, **kwargs):
+        return {
+            "complete": True,
+            "reason": "The fake verifier confirms the goal.",
+            "steps": [],
+        }
+
 
 class FakeVerifier:
     def verify(self, tool_name, tool_input, result):
@@ -484,6 +491,11 @@ class CoreTests(unittest.TestCase):
                                 "status": "pending",
                             },
                         ],
+                    },
+                    {
+                        "complete": True,
+                        "reason": "The source was inspected, the report was written, and tests passed.",
+                        "steps": [],
                     },
                 ]
 
