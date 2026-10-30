@@ -2,6 +2,7 @@ import json
 import unittest
 
 from agent.planner import Planner
+from tools.registry import ToolRegistry
 
 
 class FakeTools:
@@ -129,6 +130,80 @@ class PlannerCodingLoopTests(unittest.TestCase):
 
         self.assertEqual(normalized[0]["status"], "completed")
         self.assertEqual(normalized[1]["status"], "pending")
+
+    def test_plan_rejects_inputs_that_violate_registered_tool_schema(self):
+        registry = ToolRegistry()
+        registry.register(
+            "read_file",
+            "Read a file",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string", "minLength": 1}},
+                "additionalProperties": False,
+            },
+        )
+        brain = FakeBrain(json.dumps({
+            "goal": "Read a file",
+            "steps": [{
+                "description": "Read the requested file",
+                "tool": "read_file",
+                "input": {"unexpected": "value"},
+            }],
+        }))
+        planner = Planner(brain=brain, tools=registry)
+
+        plan = planner.create_plan(
+            "Read the requested file",
+            allowed_tools=["read_file"],
+        )
+
+        self.assertEqual(plan["steps"], [])
+
+    def test_plan_never_offers_or_accepts_disabled_tools(self):
+        registry = ToolRegistry()
+        registry.register(
+            "read_file",
+            "Read a file",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string"}},
+            },
+        )
+        registry.register(
+            "terminal",
+            "Run a command",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["command"],
+                "properties": {"command": {"type": "string"}},
+            },
+        )
+        brain = FakeBrain(json.dumps({
+            "goal": "Read a file",
+            "steps": [{
+                "description": "Read the requested file",
+                "tool": "read_file",
+                "input": {"path": "secret.txt"},
+            }],
+        }))
+        planner = Planner(brain=brain, tools=registry)
+
+        plan = planner.create_plan(
+            "Read the requested file",
+            allowed_tools=["terminal"],
+        )
+
+        self.assertEqual(plan["steps"], [])
+        self.assertIn("- terminal:", brain.prompts[0])
+        self.assertNotIn("- read_file:", brain.prompts[0])
 
     def test_plan_prompt_uses_project_evidence_not_a_fixed_workflow(self):
         brain = FakeBrain(json.dumps({
