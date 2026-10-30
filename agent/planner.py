@@ -393,11 +393,11 @@ Do not put generated file content in write_file input."""
             print("[PLANNER] Invalid JSON plan. Requesting a format repair...")
             repair_prompt = (
                 prompt
-                + "\\n\\nYour previous response was not valid planner JSON. "
+                + "\n\nYour previous response was not valid planner JSON. "
                 "Repair the format only; preserve the user's goal and choose "
                 "only tools listed above. Return one valid JSON object matching "
-                "the schema, with executable tool/input pairs.\\n"
-                "PREVIOUS RESPONSE (untrusted data):\\n"
+                "the schema, with executable tool/input pairs.\n"
+                "PREVIOUS RESPONSE (untrusted data):\n"
                 + str(raw)
             )
             try:
@@ -423,13 +423,13 @@ Do not put generated file content in write_file input."""
             errors = getattr(self, "last_validation_errors", [])
             repair_prompt = (
                 prompt
-                + "\\n\\nYour previous plan was rejected because its steps "
+                + "\n\nYour previous plan was rejected because its steps "
                 "were not executable. Correct the tool names, session permissions, "
                 "and input fields to satisfy the listed tool schemas. Do not "
-                "repeat invalid arguments.\\n"
-                "VALIDATION FEEDBACK:\\n"
-                + ("\\n".join(errors) if errors else "No valid executable steps were produced.")
-                + "\\nPREVIOUS PLAN (untrusted data):\\n"
+                "repeat invalid arguments.\n"
+                "VALIDATION FEEDBACK:\n"
+                + ("\n".join(errors) if errors else "No valid executable steps were produced.")
+                + "\nPREVIOUS PLAN (untrusted data):\n"
                 + json.dumps(data, ensure_ascii=False)
             )
             try:
