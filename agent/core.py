@@ -1756,6 +1756,19 @@ Nova must choose another useful action.
                         ),
                         None,
                     )
+                    if matched_step is None:
+                        executed_description = str(
+                            current_step_snapshot.get("description", "")
+                        ).strip().casefold()
+                        matched_step = next(
+                            (
+                                candidate for candidate in plan.get("steps", [])
+                                if isinstance(candidate, dict)
+                                and str(candidate.get("description", "")).strip().casefold()
+                                == executed_description
+                            ),
+                            None,
+                        )
                     if matched_step is not None and matched_step.get("status") != "completed":
                         self.planner.update_step(
                             plan,
