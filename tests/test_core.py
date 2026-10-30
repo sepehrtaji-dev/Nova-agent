@@ -631,5 +631,197 @@ class CoreTests(unittest.TestCase):
         )
         self.assertEqual(response, "Got it, Sepehr. Thanks for telling me.")
 
+
+    def _make_conversation_core(self, brain, extractor=None, access=None):
+        from agent.router import ToolRouter
+
+        class ConversationRouter(ToolRouter):
+            def __init__(self, model, tools):
+                super().__init__(model, tools)
+                self.decide_calls = 0
+
+            def classify_task(self, message, conversation="", allowed_tools=None):
+                return "conversation"
+
+            def decide(self, **kwargs):
+                self.decide_calls += 1
+                raise AssertionError("A validated conversation tool call must not be re-decided.")
+
+        class Episodic:
+            def record(self, **kwargs):
+                return None
+
+        core = NovaCore.__new__(NovaCore)
+        core.status_callback = None
+        core.brain = brain
+        core.long_memory = FakeLongMemory()
+        core.short_memory = FakeMemory()
+        core.knowledge = FakeKnowledge()
+        core.extractor = extractor or FakeExtractor()
+        core.tools = FakeTools()
+        core.router = ConversationRouter(brain, core.tools)
+        core.planner = FakePlanner()
+        core.verifier = FakeVerifier()
+        core.episodic_memory = Episodic()
+        core.max_steps = 3
+        core.access = access or {"web": True, "git": True, "pc": True}
+        core.execution_state = {
+            "last_plan": None,
+            "verified_tools": [],
+            "last_verified": None,
+        }
+        core._direct_self_diagnostics_answer = lambda message: None
+        core._direct_evidence_answer = lambda message: None
+        core._direct_memory_answer = lambda message: None
+        core._identity_system_prompt = lambda extra="": "Nova test identity"
+        core._long_memory_context = lambda message: "NO_PRIOR_MEMORY"
+        core._conversation_context = lambda max_chars=12000: "EMPTY_CONVERSATION"
+        core._episodic_context = lambda query: ""
+        core._tool_capability_context = lambda: "AVAILABLE_TOOLS"
+        core._capability_context = lambda: "CAPABILITIES"
+        core._build_final_prompt = lambda **kwargs: "FINAL_ANSWER_PROMPT"
+        return core
+
+    def test_malformed_json_like_memory_output_is_detected(self):
+        self.assertTrue(
+            NovaCore._is_unrequested_json_response(
+                "my name is sepehr", '{\\n  name"sepehr"\\n}'
+            )
+        )
+        self.assertTrue(
+            NovaCore._is_unrequested_json_response(
+                "my name is sepehr", "{name: 'sepehr'}"
+            )
+        )
+        self.assertFalse(
+            NovaCore._is_unrequested_json_response(
+                "write a Python dictionary example",
+                "result = {'name': 'sepehr'}",
+            )
+        )
+
+    def test_conversation_tool_decision_executes_without_second_model_routing_pass(self):
+        tool_decision = json.dumps({
+            "action": "tool",
+            "task_type": "computer",
+            "tool": "write_file",
+            "input": {
+                "path": "notes.txt",
+                "location": "projects",
+                "content": "Nova action handoff regression test",
+            },
+        })
+
+        class ScriptedBrain:
+            def __init__(self):
+                self.responses = [tool_decision, "The file was created and verified."]
+                self.prompts = []
+
+            def generate(self, prompt, system_prompt=None, json_mode=False):
+                self.prompts.append(prompt)
+                return self.responses.pop(0)
+
+        brain = ScriptedBrain()
+        core = self._make_conversation_core(brain)
+
+        response = core.ask("create notes.txt containing a regression test")
+
+        self.assertIn("created and verified", response.lower())
+        self.assertEqual(len(core.tools.calls), 1)
+        self.assertEqual(core.router.decide_calls, 0)
+        self.assertEqual(core.tools.calls[0][0], "write_file")
+        self.assertEqual(
+            json.loads(core.tools.calls[0][1]),
+            {
+                "path": "notes.txt",
+                "location": "projects",
+                "content": "Nova action handoff regression test",
+            },
+        )
+        self.assertTrue(core.execution_state["last_reflection"]["complete"])
+
+    def test_conversation_tool_decision_respects_disabled_capability(self):
+        tool_decision = json.dumps({
+            "action": "tool",
+            "task_type": "computer",
+            "tool": "write_file",
+            "input": {
+                "path": "blocked.txt",
+                "location": "projects",
+                "content": "must not be written",
+            },
+        })
+
+        class ScriptedBrain:
+            def __init__(self):
+                self.responses = [tool_decision, "I can help explain how to do that."]
+            def generate(self, prompt, system_prompt=None, json_mode=False):
+                return self.responses.pop(0)
+
+        core = self._make_conversation_core(
+            ScriptedBrain(),
+            access={"web": True, "git": True, "pc": False},
+        )
+        response = core.ask("create blocked.txt")
+
+        self.assertEqual(core.tools.calls, [])
+        self.assertIn("help explain", response.lower())
+
+    def test_memory_extraction_runs_after_the_current_conversation_response(self):
+        events = []
+
+        class OrderingBrain:
+            def generate(self, prompt, system_prompt=None, json_mode=False):
+                events.append(("generate", prompt))
+                return "Thanks for telling me, Sepehr."
+
+        class OrderingExtractor:
+            def should_extract(self, message):
+                return True
+            def extract(self, message):
+                events.append(("extract", message))
+                return {"memories": [{
+                    "category": "profile", "key": "name", "value": "Sepehr"
+                }]}
+
+        class OrderingLongMemory:
+            def remember(self, category, key, value):
+                events.append(("remember", category, key, value))
+
+        core = self._make_conversation_core(OrderingBrain(), OrderingExtractor())
+        core.long_memory = OrderingLongMemory()
+
+        response = core.ask("my name is Sepehr")
+
+        self.assertIn("Thanks for telling me", response)
+        self.assertEqual([event[0] for event in events], ["generate", "extract", "remember"])
+        self.assertIn("NO_PRIOR_MEMORY", events[0][1])
+        self.assertNotIn('"name": "Sepehr"', events[0][1])
+
+    def test_memory_extraction_is_skipped_when_extractor_says_no(self):
+        class NeverExtract:
+            def should_extract(self, message):
+                return False
+            def extract(self, message):
+                raise AssertionError("extract() must not run when should_extract is false")
+
+        core = NovaCore.__new__(NovaCore)
+        core.extractor = NeverExtract()
+        core.long_memory = FakeLongMemory()
+        core._extract_and_store_memory("what time is it?")
+
+    def test_memory_extraction_errors_never_break_the_reply(self):
+        class BrokenExtractor:
+            def should_extract(self, message):
+                raise RuntimeError("memory provider unavailable")
+            def extract(self, message):
+                raise AssertionError("should not continue after checker failure")
+
+        core = NovaCore.__new__(NovaCore)
+        core.extractor = BrokenExtractor()
+        core.long_memory = FakeLongMemory()
+
+        core._extract_and_store_memory("my name is Sepehr")
+
 if __name__ == "__main__":
     unittest.main()
