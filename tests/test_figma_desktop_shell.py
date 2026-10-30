@@ -19,6 +19,8 @@ class FakeOwner(QMainWindow):
         self.input = QPlainTextEdit()
         self.status_label = None
         self.model_selector = QPushButton()
+        self.globe_button = QPushButton()
+        self.globe_button.setCheckable(True)
 
     def _build_composer(self):
         return QWidget()
