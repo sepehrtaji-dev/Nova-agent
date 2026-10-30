@@ -422,6 +422,68 @@ Do not put generated file content in write_file input."""
             "steps": steps
         }
 
+    def _replan_fallback(
+        self,
+        plan,
+        tool_name,
+        tool_input,
+        result,
+        success,
+        reason,
+    ):
+        """Preserve verified progress and retire a failed attempt when replanning fails."""
+        fallback = json.loads(json.dumps(plan, ensure_ascii=False))
+        parsed_input = tool_input
+        if isinstance(tool_input, str):
+            try:
+                parsed_input = json.loads(tool_input)
+            except json.JSONDecodeError:
+                parsed_input = None
+
+        steps = fallback.get("steps", [])
+        target = None
+        for step in steps:
+            if not isinstance(step, dict) or step.get("status") == "completed":
+                continue
+            if (
+                step.get("tool") == tool_name
+                and isinstance(parsed_input, dict)
+                and step.get("input") == parsed_input
+            ):
+                target = step
+                break
+        if target is None:
+            target = next(
+                (
+                    step for step in steps
+                    if isinstance(step, dict)
+                    and step.get("status") in {"pending", "in_progress"}
+                ),
+                None,
+            )
+
+        if target is None and success:
+            target = {
+                "id": max(
+                    (
+                        step.get("id", 0) for step in steps
+                        if isinstance(step, dict)
+                        and isinstance(step.get("id", 0), int)
+                    ),
+                    default=0,
+                ) + 1,
+                "description": f"Verified action: {tool_name}",
+                "tool": tool_name,
+                "input": parsed_input if isinstance(parsed_input, dict) else {},
+            }
+            steps.append(target)
+
+        if target is not None:
+            target["status"] = "completed" if success else "failed"
+            target["result"] = result
+        fallback["replan_error"] = str(reason)
+        return fallback
+
     def replan(
         self,
         plan,
@@ -596,7 +658,9 @@ Schema:
                 f"{type(e).__name__}: {e}"
             )
 
-            return previous_plan
+            return self._replan_fallback(
+                previous_plan, tool_name, tool_input, result, success, e
+            )
 
         data = self._extract_json(raw)
 
@@ -621,7 +685,14 @@ Schema:
                 "[PLANNER] Replan returned invalid JSON after retry."
             )
 
-            return previous_plan
+            return self._replan_fallback(
+                previous_plan,
+                tool_name,
+                tool_input,
+                result,
+                success,
+                "model returned invalid JSON after retry",
+            )
 
         new_steps = self._normalize_replanned_steps(
             data.get("steps"),
@@ -634,7 +705,14 @@ Schema:
                 "[PLANNER] Replan returned no steps."
             )
 
-            return previous_plan
+            return self._replan_fallback(
+                previous_plan,
+                tool_name,
+                tool_input,
+                result,
+                success,
+                "model returned no valid executable steps",
+            )
 
         old_completed_descriptions = {
             str(
@@ -731,6 +809,26 @@ Schema:
             )
         )
 
+        # Never leave the exact failed operation pending after a failed
+        # execution. The model must diagnose or change the operation first.
+        if not success:
+            parsed_failed_input = tool_input
+            if isinstance(tool_input, str):
+                try:
+                    parsed_failed_input = json.loads(tool_input)
+                except json.JSONDecodeError:
+                    parsed_failed_input = None
+            for step in new_steps:
+                if (
+                    isinstance(step, dict)
+                    and step.get("tool") == tool_name
+                    and isinstance(parsed_failed_input, dict)
+                    and step.get("input") == parsed_failed_input
+                    and step.get("status") != "completed"
+                ):
+                    step["status"] = "failed"
+                    step["result"] = result
+
         if new_completed_count < old_completed_count:
             print(
                 "[PLANNER] Replan attempted to "
@@ -741,7 +839,14 @@ Schema:
                 "[PLANNER] Keeping previous plan."
             )
 
-            return previous_plan
+            return self._replan_fallback(
+                previous_plan,
+                tool_name,
+                tool_input,
+                result,
+                success,
+                "model attempted to remove verified completed progress",
+            )
 
         result_plan = {
             "goal": str(
@@ -1002,9 +1107,7 @@ Schema:
             ):
                 continue
 
-            if step.get(
-                "status"
-            ) != "completed":
+            if step.get("status") in {"pending", "in_progress"}:
                 return step
 
         return None
