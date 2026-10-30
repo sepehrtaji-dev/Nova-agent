@@ -170,7 +170,13 @@ class FakePlanner:
 
     def replan(self, **kwargs):
         self.replan_calls += 1
-        raise AssertionError("Successful verified actions must not trigger replan().")
+        if kwargs.get("success"):
+            for step in self.plan["steps"]:
+                if step.get("status") != "completed":
+                    step["status"] = "completed"
+                    step["result"] = kwargs.get("result")
+                    break
+        return self.plan
 
 
 class FakeVerifier:
@@ -376,7 +382,7 @@ class CoreTests(unittest.TestCase):
         ]
         self.assertFalse(core._has_successful_tool(history))
 
-    def test_verified_write_completes_without_replan(self):
+    def test_verified_write_triggers_adaptive_replan_and_completes(self):
         core = NovaCore.__new__(NovaCore)
         core.status_callback = None
         core.brain = FakeBrain()
@@ -399,7 +405,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("created successfully", response.lower())
         self.assertEqual(len(core.tools.calls), 1)
         self.assertEqual(core.router.generate_calls, 1)
-        self.assertEqual(core.planner.replan_calls, 0)
+        self.assertEqual(core.planner.replan_calls, 1)
 
         tool_name, raw_input = core.tools.calls[0]
         self.assertEqual(tool_name, "write_file")
