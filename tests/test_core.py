@@ -823,5 +823,125 @@ class CoreTests(unittest.TestCase):
 
         core._extract_and_store_memory("my name is Sepehr")
 
+
+    def test_conversation_tool_call_accepts_short_form_and_fenced_json(self):
+        from agent.router import ToolRouter
+
+        core = NovaCore.__new__(NovaCore)
+        core.tools = FakeTools()
+        core.access = {"pc": True, "web": True, "git": True}
+        core.router = ToolRouter(FakeBrain(), core.tools)
+        payload = {
+            "tool": "write_file",
+            "input": {
+                "path": "short-form.txt",
+                "location": "projects",
+                "content": "hello",
+            },
+        }
+
+        for response in (
+            json.dumps(payload),
+            "Here is the action:\n```json\n" + json.dumps(payload) + "\n```",
+        ):
+            with self.subTest(response=response[:20]):
+                decision = core._conversation_tool_call(response)
+                self.assertIsNotNone(decision)
+                self.assertEqual(decision["tool"], "write_file")
+                self.assertEqual(json.loads(decision["input"]), payload["input"])
+
+    def test_conversation_tool_call_rejects_invalid_or_disabled_tools(self):
+        from agent.router import ToolRouter
+
+        core = NovaCore.__new__(NovaCore)
+        core.tools = FakeTools()
+        core.access = {"pc": True, "web": True, "git": True}
+        core.router = ToolRouter(FakeBrain(), core.tools)
+
+        invalid_input = json.dumps({
+            "action": "tool",
+            "tool": "write_file",
+            "input": {"path": "", "content": "x"},
+        })
+        unknown_tool = json.dumps({
+            "action": "tool",
+            "tool": "not_registered",
+            "input": {"path": "x.txt", "content": "x"},
+        })
+        self.assertIsNone(core._conversation_tool_call(invalid_input))
+        self.assertIsNone(core._conversation_tool_call(unknown_tool))
+
+        core.access["pc"] = False
+        valid_but_disabled = json.dumps({
+            "action": "tool",
+            "tool": "write_file",
+            "input": {"path": "x.txt", "content": "x"},
+        })
+        self.assertIsNone(core._conversation_tool_call(valid_but_disabled))
+
+    def test_json_detection_handles_fences_python_dicts_and_explicit_requests(self):
+        cases = [
+            ("my name is sepehr", "```json\n{\"name\": \"sepehr\"}\n```", True),
+            ("my name is sepehr", "{'name': 'sepehr'}", True),
+            ("return my name as JSON", "{'name': 'sepehr'}", False),
+            ("show me an example of JSON format", "{\"name\": \"sepehr\"}", False),
+            ("my name is sepehr", "Thanks, I will remember that.", False),
+        ]
+        for message, response, expected in cases:
+            with self.subTest(message=message, response=response):
+                self.assertEqual(
+                    NovaCore._is_unrequested_json_response(message, response),
+                    expected,
+                )
+
+    def test_malformed_json_rewrite_uses_safe_fallback_if_model_repeats_structure(self):
+        class RepeatingBrain:
+            def generate(self, prompt, system_prompt=None):
+                return '{ name"sepehr" }'
+
+        core = NovaCore.__new__(NovaCore)
+        core.brain = RepeatingBrain()
+        response = core._rewrite_unrequested_json(
+            "my name is sepehr", '{ name"sepehr" }'
+        )
+        self.assertEqual(response, "Got it — thanks for telling me.")
+
+    def test_task_memory_is_extracted_only_after_final_task_response(self):
+        events = []
+        tool_decision = json.dumps({
+            "action": "tool",
+            "task_type": "computer",
+            "tool": "write_file",
+            "input": {
+                "path": "memory-order.txt",
+                "location": "projects",
+                "content": "created",
+            },
+        })
+
+        class ScriptedBrain:
+            def __init__(self):
+                self.responses = [tool_decision, "The file was created."]
+            def generate(self, prompt, system_prompt=None, json_mode=False):
+                events.append("generate")
+                return self.responses.pop(0)
+
+        class OrderingExtractor:
+            def should_extract(self, message):
+                return True
+            def extract(self, message):
+                events.append("extract")
+                return {"memories": []}
+
+        core = self._make_conversation_core(
+            ScriptedBrain(), OrderingExtractor()
+        )
+        core._remember_verified_tool_result = lambda *args: events.append("verified-memory")
+
+        response = core.ask("create memory-order.txt")
+
+        self.assertIn("file was created", response.lower())
+        self.assertEqual(events, ["generate", "generate", "extract"])
+
 if __name__ == "__main__":
     unittest.main()
