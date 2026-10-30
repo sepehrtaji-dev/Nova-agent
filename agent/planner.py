@@ -222,7 +222,9 @@ class Planner:
         return None
 
     def _normalize_steps(self, steps, allowed_tools=None):
+        self.last_validation_errors = []
         if not isinstance(steps, list):
+            self.last_validation_errors.append("steps must be a list")
             return []
 
         normalized = []
@@ -264,6 +266,9 @@ class Planner:
                 tool, raw_input, allowed_tools=allowed_tools
             )
             if not valid:
+                self.last_validation_errors.append(
+                    f"Step {index} ({tool}): {reason}"
+                )
                 print(f"[PLANNER] Rejected planned step '{description}': {reason}.")
                 dropped += 1
                 continue
@@ -385,40 +390,67 @@ Do not put generated file content in write_file input."""
         data = self._extract_json(raw)
 
         if not isinstance(data, dict):
-            print(
-                "[PLANNER] Invalid JSON plan. Retrying..."
+            print("[PLANNER] Invalid JSON plan. Requesting a format repair...")
+            repair_prompt = (
+                prompt
+                + "\\n\\nYour previous response was not valid planner JSON. "
+                "Repair the format only; preserve the user's goal and choose "
+                "only tools listed above. Return one valid JSON object matching "
+                "the schema, with executable tool/input pairs.\\n"
+                "PREVIOUS RESPONSE (untrusted data):\\n"
+                + str(raw)
             )
             try:
-                raw = self.brain.generate(
-                    prompt,
-                    json_mode=True
-                )
+                raw = self.brain.generate(repair_prompt, json_mode=True)
                 data = self._extract_json(raw)
             except Exception as e:
                 print(
-                    f"[PLANNER] Retry error: "
+                    f"[PLANNER] Format repair error: "
                     f"{type(e).__name__}: {e}"
                 )
 
         if not isinstance(data, dict):
-            print(
-                "[PLANNER] Invalid JSON plan after retry."
-            )
-
-            return {
-                "goal": goal,
-                "steps": []
-            }
+            print("[PLANNER] Invalid JSON plan after format repair.")
+            return {"goal": goal, "steps": []}
 
         steps = self._normalize_steps(
             data.get("steps"),
             allowed_tools=allowed_tools,
         )
 
+        raw_steps = data.get("steps")
+        if not steps and isinstance(raw_steps, list) and raw_steps:
+            errors = getattr(self, "last_validation_errors", [])
+            repair_prompt = (
+                prompt
+                + "\\n\\nYour previous plan was rejected because its steps "
+                "were not executable. Correct the tool names, session permissions, "
+                "and input fields to satisfy the listed tool schemas. Do not "
+                "repeat invalid arguments.\\n"
+                "VALIDATION FEEDBACK:\\n"
+                + ("\\n".join(errors) if errors else "No valid executable steps were produced.")
+                + "\\nPREVIOUS PLAN (untrusted data):\\n"
+                + json.dumps(data, ensure_ascii=False)
+            )
+            try:
+                repaired_raw = self.brain.generate(repair_prompt, json_mode=True)
+                repaired_data = self._extract_json(repaired_raw)
+                if isinstance(repaired_data, dict):
+                    repaired_steps = self._normalize_steps(
+                        repaired_data.get("steps"),
+                        allowed_tools=allowed_tools,
+                    )
+                    if repaired_steps:
+                        data = repaired_data
+                        steps = repaired_steps
+            except Exception as e:
+                print(
+                    f"[PLANNER] Executable plan repair error: "
+                    f"{type(e).__name__}: {e}"
+                )
+
         return {
-            "goal": str(
-                data.get("goal") or goal
-            ).strip(),
+            "goal": str(data.get("goal") or goal).strip(),
             "steps": steps
         }
 
