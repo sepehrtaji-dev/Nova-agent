@@ -256,6 +256,43 @@ class PlannerCodingLoopTests(unittest.TestCase):
         self.assertEqual(updated["steps"][1]["status"], "pending")
         self.assertEqual(updated["steps"][1]["tool"], "terminal")
 
+    def test_success_for_unplanned_tool_does_not_complete_unrelated_pending_step(self):
+        class Brain:
+            def generate(self, prompt, json_mode=False):
+                return json.dumps({
+                    "goal": "Inspect a module",
+                    "steps": [{
+                        "description": "Read module.py",
+                        "tool": "read_file",
+                        "input": {"path": "module.py"},
+                    }],
+                })
+
+        planner = Planner(brain=Brain(), tools=self.tools)
+        old_plan = {
+            "goal": "Inspect a module",
+            "steps": [{
+                "id": 1,
+                "description": "Read module.py",
+                "status": "pending",
+                "result": None,
+                "tool": "read_file",
+                "input": {"path": "module.py"},
+            }],
+        }
+
+        updated = planner.replan(
+            plan=old_plan,
+            goal="Inspect a module",
+            tool_name="edit_file",
+            tool_input={"path": "module.py", "old": "before", "new": "after"},
+            result="edit completed",
+            success=True,
+        )
+
+        self.assertEqual(updated["steps"][0]["status"], "pending")
+        self.assertEqual(updated["steps"][0]["tool"], "read_file")
+
     def test_failed_replan_fallback_retires_stale_step(self):
         class InvalidBrain:
             def generate(self, prompt, json_mode=False):
