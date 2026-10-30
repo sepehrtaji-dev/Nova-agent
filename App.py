@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
 
 from agent.core import NovaCore
 from utils.math_parser import format_response_math
+from ui.figma_desktop import FigmaDesktopShell
 
 
 # --------------------------------------------------------------------------- #
@@ -767,63 +768,13 @@ class NovaWindow(QMainWindow):
         self._sync_responsive_layout()
 
     def _build_ui(self):
-        root = AuroraBackdrop()
-        self.setCentralWidget(root)
-        root.setObjectName("root")
+        """Build the Figma-aligned three-page desktop shell.
 
-        root_layout = QHBoxLayout(root)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        root_layout.addWidget(self._build_sidebar(), 0)
-
-        main = QWidget()
-        main.setObjectName("main")
-        main_layout = QVBoxLayout(main)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        main_layout.addWidget(self._build_header(), 0)
-
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(1)
-
-        chat = QWidget()
-        chat.setObjectName("chatArea")
-        chat_layout = QVBoxLayout(chat)
-        chat_layout.setContentsMargins(0, 0, 0, 0)
-        chat_layout.setSpacing(0)
-
-        self.chat_scroll = QScrollArea()
-        self.chat_scroll.setObjectName("chatScroll")
-        self.chat_scroll.setWidgetResizable(True)
-        self.chat_scroll.setFrameShape(QFrame.NoFrame)
-        self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        self.chat_container = QWidget()
-        self.chat_container.setObjectName("chatContainer")
-        self.chat_container_layout = QVBoxLayout(self.chat_container)
-        self.chat_container_layout.setContentsMargins(42, 30, 42, 24)
-        self.chat_container_layout.setSpacing(0)
-        self.chat_container_layout.addStretch()
-
-        self.chat_scroll.setWidget(self.chat_container)
-        chat_bar = self.chat_scroll.verticalScrollBar()
-        chat_bar.rangeChanged.connect(self._on_chat_range_changed)
-        chat_bar.valueChanged.connect(self._on_chat_scrolled)
-        chat_layout.addWidget(self.chat_scroll, 1)
-        chat_layout.addWidget(self._build_composer(), 0)
-
-        self.main_splitter = splitter
-        splitter.addWidget(chat)
-        self.activity_panel = self._build_activity_panel()
-        splitter.addWidget(self.activity_panel)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
-
-        main_layout.addWidget(splitter, 1)
-        root_layout.addWidget(main, 1)
+        FigmaDesktopShell owns layout/navigation; NovaWindow keeps ownership
+        of agent execution, settings, tool permissions and message lifecycle.
+        """
+        self._desktop_shell = FigmaDesktopShell(self)
+        self._desktop_shell.build()
 
     def _build_sidebar(self):
         sidebar = QFrame()
@@ -1049,7 +1000,7 @@ class NovaWindow(QMainWindow):
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(8)
 
-        size = 38
+        size = 48
 
         add_button = QPushButton()
         add_button.setObjectName("roundButton")
@@ -1257,27 +1208,10 @@ class NovaWindow(QMainWindow):
         self._add_activity(f"Model switched to {name} (local).")
 
     def _welcome(self):
-        model_name = str(
-            getattr(getattr(self.core, "brain", None), "model", "")
-            or "the configured local model"
-        ).strip()
-        if self._settings.get("provider") == "remote":
-            where = (
-                f"I'm running on the remote model **{model_name}**. Your messages, "
-                "file contents, and tool results are sent to that provider."
-            )
-        else:
-            where = (
-                f"I'm your local AI agent running through Ollama with "
-                f"**{model_name}**. Nothing leaves this computer."
-            )
-        self._add_message(
-            "nova",
-            "## Welcome to Nova\n\n"
-            f"{where}\n\n"
-            "I can reason about tasks, use enabled tools, inspect real results, "
-            "and continue until the task is complete."
-        )
+        """Restore the Figma welcome hero for an empty conversation."""
+        shell = getattr(self, "_desktop_shell", None)
+        if shell:
+            shell.show_welcome()
         self._add_activity("Nova is ready.")
 
     def _apply_style(self):
@@ -1730,62 +1664,10 @@ class NovaWindow(QMainWindow):
         """)
 
     def _sync_responsive_layout(self):
-        width = max(980, self.width())
-        height = max(640, self.height())
-
-        sidebar_width = max(220, min(280, int(width * 0.19)))
-        activity_width = max(260, min(340, int(width * 0.225)))
-
-        if width < 1180:
-            activity_width = max(260, int(width * 0.24))
-        elif width > 1600:
-            activity_width = min(340, int(width * 0.21))
-
-        self.sidebar.setFixedWidth(sidebar_width)
-        self.activity_panel.setMinimumWidth(activity_width)
-        self.activity_panel.setMaximumWidth(activity_width)
-
-        available_main = max(1, width - sidebar_width)
-        if self.activity_panel.isVisible():
-            chat_width = max(1, available_main - activity_width)
-            self.main_splitter.setSizes([chat_width, activity_width])
-        else:
-            chat_width = available_main
-
-        side_pad = max(12, min(20, int(sidebar_width * 0.06)))
-        self._set_layout_margins(
-            self.sidebar.layout(),
-            side_pad,
-            max(12, int(height * 0.018)),
-            side_pad,
-            max(12, int(height * 0.018)),
-        )
-
-        self.header.setFixedHeight(max(58, min(72, int(height * 0.082))))
-
-        chat_margin_x = max(24, min(64, int(chat_width * 0.055)))
-        self.chat_container_layout.setContentsMargins(
-            chat_margin_x,
-            max(20, min(34, int(height * 0.035))),
-            chat_margin_x,
-            max(18, min(28, int(height * 0.03))),
-        )
-
-        composer_x = max(20, min(44, int(chat_width * 0.045)))
-        self.composer_layout.setContentsMargins(
-            composer_x,
-            max(10, min(16, int(height * 0.018))),
-            composer_x,
-            max(16, min(24, int(height * 0.026))),
-        )
-
-        self.input.set_min_height(30)
-
-        capability_height = max(48, min(58, int(height * 0.067)))
-        for button in self.capability_buttons.values():
-            button.setFixedHeight(capability_height)
-
-        self._refresh_capability_styles()
+        """Let the Figma shell's Qt layouts handle responsive content sizing."""
+        shell = getattr(self, "_desktop_shell", None)
+        if shell:
+            shell.sync_responsive()
 
     @staticmethod
     def _set_layout_margins(layout, left, top, right, bottom):
@@ -1810,6 +1692,9 @@ class NovaWindow(QMainWindow):
         self.globe_button.blockSignals(False)
         self._refresh_globe()
         self._refresh_capability_styles()
+        shell = getattr(self, "_desktop_shell", None)
+        if shell:
+            shell.sync_capabilities()
 
     def _refresh_capability_styles(self):
         for button in self.capability_buttons.values():
@@ -1902,6 +1787,9 @@ class NovaWindow(QMainWindow):
         self.input.setFocus()
 
     def _add_message(self, role, text, attachments=None):
+        shell = getattr(self, "_desktop_shell", None)
+        if shell and shell.welcome_hero:
+            shell.welcome_hero.hide()
         stretch = self.chat_container_layout.takeAt(
             self.chat_container_layout.count() - 1
         )
@@ -1941,6 +1829,9 @@ class NovaWindow(QMainWindow):
             self.activity_layout.addItem(stretch)
 
         self._scroll_activity()
+        shell = getattr(self, "_desktop_shell", None)
+        if shell:
+            shell.record_activity(message)
 
     def _scroll_chat(self):
         self._autoscroll = True
