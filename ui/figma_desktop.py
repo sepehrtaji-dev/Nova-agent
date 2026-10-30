@@ -136,9 +136,9 @@ class FigmaDesktopShell:
         nav = QVBoxLayout()
         nav.setSpacing(8)
         for key, title, glyph in (
-            ("chat", "Chats", "▤"),
             ("settings", "Settings", "⚙"),
             ("workspace", "Workspace", "▣"),
+            ("chat", "Chats", "▤"),
         ):
             button = QPushButton(f"{glyph}    {title}")
             button.setCursor(Qt.PointingHandCursor)
@@ -459,7 +459,8 @@ class FigmaDesktopShell:
         files_layout.addWidget(self.workspace_tree, 1)
         legend = label("● Read     ● Modified", 11, MUTED)
         files_layout.addWidget(legend)
-        content.addWidget(files_card, 3)
+        files_card.setFixedWidth(300)
+        content.addWidget(files_card, 0)
 
         right = QVBoxLayout()
         stats = QHBoxLayout()
@@ -485,7 +486,7 @@ class FigmaDesktopShell:
         self.latest_change = label("No file changes recorded in this session.", 12, MUTED)
         latest_layout.addWidget(self.latest_change)
         right.addWidget(latest)
-        content.addLayout(right, 7)
+        content.addLayout(right, 1)
         layout.addLayout(content, 1)
         self.refresh_workspace()
         return page
