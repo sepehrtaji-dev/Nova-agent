@@ -301,6 +301,82 @@ class PlannerCodingLoopTests(unittest.TestCase):
             "List project files",
         )
 
+    def test_invalid_json_uses_a_distinct_format_repair_prompt(self):
+        class SequenceBrain:
+            def __init__(self):
+                self.responses = [
+                    "this is not JSON",
+                    json.dumps({
+                        "goal": "Read module",
+                        "steps": [{
+                            "description": "Read module.py",
+                            "tool": "read_file",
+                            "input": {"path": "module.py"},
+                        }],
+                    }),
+                ]
+                self.prompts = []
+            def generate(self, prompt, json_mode=False):
+                self.prompts.append(prompt)
+                return self.responses.pop(0)
+
+        brain = SequenceBrain()
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = planner.create_plan("Read module")
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertEqual(len(brain.prompts), 2)
+        self.assertIn("previous response was not valid planner JSON", brain.prompts[1])
+
+    def test_schema_rejection_triggers_argument_repair(self):
+        registry = ToolRegistry()
+        registry.register(
+            "read_file",
+            "Read a file",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string", "minLength": 1}},
+                "additionalProperties": False,
+            },
+        )
+
+        class SequenceBrain:
+            def __init__(self):
+                self.responses = [
+                    json.dumps({
+                        "goal": "Read module",
+                        "steps": [{
+                            "description": "Read module.py",
+                            "tool": "read_file",
+                            "input": {"wrong": "module.py"},
+                        }],
+                    }),
+                    json.dumps({
+                        "goal": "Read module",
+                        "steps": [{
+                            "description": "Read module.py",
+                            "tool": "read_file",
+                            "input": {"path": "module.py"},
+                        }],
+                    }),
+                ]
+                self.prompts = []
+            def generate(self, prompt, json_mode=False):
+                self.prompts.append(prompt)
+                return self.responses.pop(0)
+
+        brain = SequenceBrain()
+        planner = Planner(brain=brain, tools=registry)
+        plan = planner.create_plan("Read module", allowed_tools=["read_file"])
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertEqual(plan["steps"][0]["input"], {"path": "module.py"})
+        self.assertEqual(len(brain.prompts), 2)
+        self.assertIn("VALIDATION FEEDBACK", brain.prompts[1])
+
     def test_plan_prompt_uses_project_evidence_not_a_fixed_workflow(self):
         brain = FakeBrain(json.dumps({
             "goal": "Improve a module",
