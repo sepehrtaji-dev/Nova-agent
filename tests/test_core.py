@@ -171,13 +171,14 @@ class FakePlanner:
 
     def replan(self, **kwargs):
         self.replan_calls += 1
-        if kwargs.get("success"):
-            for step in self.plan["steps"]:
+        plan = kwargs.get("plan") or self.plan
+        if kwargs.get("success") and isinstance(plan, dict):
+            for step in plan.get("steps", []):
                 if step.get("status") != "completed":
                     step["status"] = "completed"
                     step["result"] = kwargs.get("result")
                     break
-        return self.plan
+        return plan
 
 
 class FakeVerifier:
