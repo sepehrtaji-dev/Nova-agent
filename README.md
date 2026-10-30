@@ -1,360 +1,582 @@
-# ✦ Nova — Local AI Agent
+# ✦ Nova — Local-First AI Agent
 
-**Nova is an experimental, local-first AI agent powered by [Ollama](https://ollama.com/).** It can plan multi-step tasks, use registered tools, inspect real outputs, re-plan after failures, and verify whether a task actually succeeded.
+Nova is an experimental, tool-using AI agent written in Python. It connects a language model to a real tool system so it can understand a request, plan work, call tools, inspect the results, revise its plan, and verify whether an operation actually succeeded.
 
-Nova is a Python agent around a locally served language model—not a newly trained foundation model. The model generates responses and proposes actions; Nova's Python code manages tool registration, permissions, execution, memory, and verification.
+Nova is an **agent application**, not a newly trained foundation model. You choose the model that powers it. Nova provides the orchestration, tools, permissions, memory, interfaces, and verification around that model.
 
 <p align="center">
-  <strong>Local model · Real tools · Evidence-based execution · User-controlled memory</strong>
+  <strong>Choose your model · Give it tools · Observe its work · Verify the result</strong>
 </p>
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Ollama](https://img.shields.io/badge/Model%20runtime-Ollama-black)](https://ollama.com/)
+[![Ollama](https://img.shields.io/badge/Local%20models-Ollama-black)](https://ollama.com/)
+[![Remote API](https://img.shields.io/badge/Remote%20models-OpenAI--compatible-6B5B95)](#model-providers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/sepehrtaji-dev/Nova-agent/actions/workflows/agent-tests.yml/badge.svg)](https://github.com/sepehrtaji-dev/Nova-agent/actions/workflows/agent-tests.yml)
 
-> **Project status:** active development / experimental. Features and safety boundaries are evolving. Review the code and run Nova in an environment appropriate for an agent that can execute commands and modify files.
+> **Status: active development / experimental.** Features and safety boundaries can change. Nova can execute programs and modify files when those capabilities are enabled. Read the security notes before using it on important data.
 
 ## Contents
 
-- [Highlights](#highlights)
-- [How it works](#how-it-works)
-- [Available tools](#available-tools)
+- [What Nova can do](#what-nova-can-do)
+- [Architecture](#architecture)
+- [Model providers](#model-providers)
+- [Task execution flow](#task-execution-flow)
+- [Tools and permissions](#tools-and-permissions)
+- [Memory system](#memory-system)
+- [Interfaces](#interfaces)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
-- [Running Nova](#running-nova)
-- [Commands and permissions](#commands-and-permissions)
-- [Memory and privacy](#memory-and-privacy)
-- [Docker](#docker)
+- [Commands](#commands)
+- [Project structure](#project-structure)
 - [Development and tests](#development-and-tests)
-- [Project layout](#project-layout)
-- [Security notes and limitations](#security-notes-and-limitations)
+- [Repository snapshot](#repository-snapshot)
+- [Docker](#docker)
+- [Security and privacy](#security-and-privacy)
 - [Roadmap](#roadmap)
 - [License](#license)
 
-## Highlights
+## What Nova can do
 
-- **Local inference:** sends prompts to an Ollama model running locally or on a network endpoint you configure. Nova does not require a hosted LLM API.
-- **Model-driven planning:** turns a request into steps using available tool descriptions and evidence from the current project, rather than assuming a particular language or framework.
-- **Tool execution:** calls registered tools and uses their actual output as evidence.
-- **Adaptive re-planning:** can reconsider pending work after a tool result or failure; verified completed work is preserved.
-- **Verification and reflection:** distinguishes a model's claim from an operation confirmed by the verifier. Unverified work should not be reported as completed.
-- **Interactive terminal UIs:** Textual full-screen interface, prompt_toolkit alternative, and a Rich interface.
-- **Workspace-aware file and terminal tools:** project operations are scoped to the configured workspace by default.
-- **Web and Git capabilities:** public web search/fetch, supported local Git operations, and read-only GitHub inspection.
-- **Local memory:** long-term user facts plus knowledge and episodic memory components, with commands to inspect and remove long-term entries.
-- **Capability controls:** toggle web, Git/GitHub, and PC/file/terminal/desktop access from supported terminal interfaces.
-- **Optional integrations:** desktop automation, OCR, a separate PySide6 GUI, and local image generation when their extra dependencies and models are available.
+Nova's actual capabilities depend on the tools that load, enabled permissions, optional packages, and the configured model.
 
-## How it works
+- **Plan tasks:** turn natural-language requests into multi-step plans.
+- **Use tools:** work with files, run supported programs, search the web, and use Git.
+- **Inspect before acting:** discover files and read real content instead of assuming what exists.
+- **Re-plan:** use tool results and errors to revise the remaining steps.
+- **Verify actions:** distinguish confirmed, failed, and unverifiable operations.
+- **Use memory:** maintain conversation context, long-term facts, knowledge records, and summaries of previous tool outcomes.
+- **Inspect itself:** report runtime components, model metadata when available, tools, permissions, and diagnostics.
+- **Switch model backends:** run a local Ollama model or connect to an OpenAI-compatible API.
+- **Use different interfaces:** Textual terminal UI, prompt_toolkit CLI, legacy Rich UI, and an optional PySide6 desktop GUI.
 
-At a high level:
+Nova does not guarantee that every model will plan or use tools correctly. Smaller models may need more retries or produce invalid tool arguments. Review important operations.
 
-1. **Understand:** Nova receives the user's request and relevant conversation/memory context.
-2. **Plan:** the model proposes steps based on the available tools and observed project evidence.
-3. **Act:** Nova validates the proposed tool call and executes it through the registry and permission checks.
-4. **Observe:** the agent receives the real tool result, including failures where applicable.
-5. **Verify:** a verifier evaluates the result; a model response alone is not proof that an operation happened.
-6. **Adapt:** the planner can reorder or add pending diagnostic/repair steps when the evidence calls for it.
-7. **Respond:** Nova reports what the observed results support and identifies work that remains uncertain.
+## Architecture
 
-The model is not trusted to grant itself permissions, fabricate tool outcomes, or override execution checks. Content read from files, webpages, repositories, or terminal output is treated as untrusted context rather than higher-priority instructions.
+Nova separates the language model from the Python application that controls tools and state.
 
-## Available tools
+| Layer | Responsibility |
+|---|---|
+| User interface | Accept requests and display responses, activity, and runtime status |
+| NovaCore | Coordinate tasks, memory, tools, permissions, and execution state |
+| Model provider | Generate responses through Ollama or an OpenAI-compatible API |
+| Planner | Propose and update task steps |
+| Tool router | Interpret model-selected tool calls and route them |
+| Tool registry | Store handlers, descriptions, schemas, capabilities, and verifier metadata |
+| Permission layer | Control which capability groups are enabled |
+| Verifier | Check tool outcomes against observable state |
+| Memory services | Maintain conversation and persisted memory |
+| Diagnostics / introspection | Report observable runtime and model information |
 
-Tools are loaded through a registry. Optional tools may be unavailable when their dependencies or runtime requirements are missing.
+The model proposes what to do. It does **not** grant itself permissions or manufacture successful tool results. Nova's Python code validates and executes tool calls, then provides the actual result back to the agent.
 
-| Capability | What it supports | Notes |
+### Core components
+
+- **NovaCore — agent/core.py:** creates the configured model backend, memory services, tool registry, planner, router, verifier, diagnostics, and execution state. It coordinates each task.
+- **Planner — agent/planner.py:** asks the model to create and update a structured plan.
+- **ToolRouter — agent/router.py:** extracts structured tool requests from model output and maps them to registered tools.
+- **ToolRegistry — tools/registry.py:** stores tool callables and metadata, including capability groups, input schemas, optional input preparation, and verifier methods.
+- **Verifier — agent/verifier.py:** checks whether operations succeeded using filesystem state, command results, or tool-specific checks where implemented.
+- **SelfReflection — agent/self_reflection.py:** compares plan state with verifier evidence. It is an evidence audit, not a claim that the model's private reasoning is correct.
+- **SelfKnowledge and introspection:** report Nova's components and observed runtime configuration. Unknown metadata should remain unknown rather than guessed.
+
+Tool definitions are data-driven. The manifest at **config/tools.json** is read by **tools/__init__.py**, which imports configured handler classes and registers enabled tools. The live registry is the source of truth for tools available in a particular run.
+
+### Task execution flow
+
+1. **Receive:** Nova receives the request and prepares relevant conversation and memory context.
+2. **Plan:** the configured model proposes steps using the currently available tools.
+3. **Validate:** Nova checks the requested tool against the registry and its capability permission.
+4. **Execute:** the registered Python handler runs and returns its real result.
+5. **Verify:** the verifier checks the result. A model's success claim is not proof that a file was written or a command succeeded.
+6. **Adapt:** the planner can revise remaining work using new evidence or a failure.
+7. **Reflect and respond:** Nova reports what is confirmed, failed, or still uncertain.
+
+A simple conversation may not need planning or tools.
+
+## Model providers
+
+Both providers implement the same small generation interface, allowing the planner, router, and memory extractor to use either backend.
+
+### Local: Ollama
+
+The local provider uses the Ollama Python client and an Ollama server.
+
+- Configure the model with **NOVA_MODEL**.
+- If no model name is configured, Nova attempts to discover an installed Ollama model.
+- Context and output budgets are configurable.
+- Model metadata can be queried from Ollama when available.
+- When Ollama runs on the same computer, inference can remain on that computer.
+
+Install Ollama: https://ollama.com/download
+
+Example:
+
+\`\`\`bash
+ollama pull qwen2.5:3b
+ollama list
+\`\`\`
+
+This is only an example model. You can use another model supported by your Ollama installation.
+
+### Remote: OpenAI-compatible API
+
+The remote provider uses the standard chat-completions HTTP protocol. It is intended to work with services exposing an OpenAI-compatible endpoint, such as OpenAI, OpenRouter, Groq, Together, Fireworks, DeepSeek, or compatible self-hosted gateways such as vLLM and LM Studio.
+
+Configure these environment variables:
+
+- **NOVA_PROVIDER=remote**
+- **NOVA_API_BASE_URL**
+- **NOVA_API_MODEL**
+- **NOVA_API_KEY**
+
+The remote client uses Python's standard library rather than requiring a vendor SDK. It supports JSON-mode requests where accepted by the provider, timeouts, retries for transient failures, rate-limit handling, and API-key redaction in error text.
+
+**Privacy difference:** with a remote provider, prompts, tool results, and file contents included in a request are sent to that provider. Nova's tools may still execute locally, but the reasoning model runs remotely. Review the provider's data policy before enabling remote mode.
+
+### Provider selection
+
+| NOVA_PROVIDER | Behaviour |
+|---|---|
+| local | Use Ollama (default) |
+| remote | Require a configured remote API; fail clearly if configuration is incomplete |
+| auto | Use remote only when a remote model and API key are configured; otherwise use Ollama |
+
+Nova intentionally does not silently switch from a selected remote model to a local model after a provider failure. Silent fallback could hide which model is answering and where prompts are being processed.
+
+### Model settings in the desktop GUI
+
+The optional PySide6 desktop application includes settings for selecting a local model or entering a remote API base URL, model name, and key. These settings are applied to the same NOVA environment configuration used by the provider layer.
+
+The current implementation stores settings in the Nova settings JSON file, including the API key, and attempts to restrict file permissions on supported systems. This is best-effort protection, not an operating-system credential vault. Keep the settings file private and never commit it.
+
+## Tools and permissions
+
+The default manifest currently defines **8 tools**:
+
+| Tool | Capability | What it does |
 |---|---|---|
-| Filesystem | List, find, read, write, edit, delete files, and create directories | Workspace paths are checked; absolute system paths have additional restrictions |
-| Terminal | Run supported commands in Nova's allowed workspace | Command validation and result verification apply; this is not a general-purpose secure sandbox |
-| Web | Search public information and fetch readable text from public HTTP/HTTPS pages | Requires network access |
-| Git | Supported Git operations on local repositories | Repository/workspace restrictions apply |
-| GitHub | Inspect repository information, code/search results, issues, pull requests, workflows, and releases | Read-only integration; uses the local GitHub CLI where configured |
-| Desktop | Supported GUI and desktop actions | Optional packages and an interactive desktop session may be required |
-| Image generation | Use a configured local image-generation model | Optional dependencies and model files are required; not enabled by installing core dependencies alone |
+| web_search | web | Search the public web and return result titles, URLs, and snippets |
+| list_files | pc | List entries in a workspace directory |
+| read_file | pc | Read text files |
+| write_file | pc | Create or overwrite files with complete content |
+| terminal | pc | Run one supported non-interactive program with arguments |
+| git | git | Perform supported local Git operations |
+| github | git | Read-only GitHub inspection through the authenticated gh CLI |
+| desktop | pc | Optional GUI and desktop actions |
 
-The actual registry shown by Nova at runtime is the source of truth for which tools loaded successfully.
+A tool being present in the manifest does not guarantee that it loads successfully. Optional dependencies, platform support, authentication, and runtime conditions can affect availability. Check **/tools** or **/self** in a running session.
+
+### Capability groups
+
+- **Web:** public web search.
+- **Git:** local Git and read-only GitHub operations.
+- **PC:** filesystem, terminal, and desktop operations.
+
+The default manifest enables all three groups. You can toggle them during a terminal session with **/web**, **/git**, and **/pc**. These switches control Nova's tool access; they are not a replacement for operating-system security or process isolation.
+
+### Filesystem and terminal
+
+Filesystem tools support workspace locations such as:
+
+- **projects:** Nova's configured project workspace; the default for most file operations.
+- **desktop:** the user's Desktop directory.
+- **system:** absolute paths, subject to protected-path checks and operation restrictions.
+
+Use each tool's live input schema for exact path rules. The terminal tool is intentionally narrower than a general shell: it accepts a program and arguments, and does not provide arbitrary shell pipelines, redirects, command chaining, or inline interpreter code. Use the dedicated file tools for file operations.
+
+### GitHub integration
+
+The **github** tool uses the locally authenticated GitHub CLI and is read-only. It can inspect repositories, issues, pull requests, workflow runs, releases, and code search. It cannot create, modify, merge, or delete GitHub resources. Local Git operations are provided separately by the **git** tool.
+
+## Memory system
+
+Nova uses separate memory components for different kinds of context.
+
+| Component | Purpose |
+|---|---|
+| Short-term memory | Recent conversation context for the current session |
+| Long-term memory | Selected user facts stored for later sessions |
+| Knowledge memory | Topic/fact records with source, confidence, verification time, and optional expiry |
+| Episodic memory | Bounded summaries of previous tool outcomes |
+| Memory extractor | Selects candidate long-term facts from conversation using the configured model |
+
+Episodic memory stores concise task/tool outcome summaries rather than raw tool inputs and full raw tool outputs. Records are bounded and can have statuses such as **confirmed**, **failed**, and **unverifiable**. Secret-like strings are filtered before episodic summaries are saved, but this is a safeguard, not a guarantee.
+
+Memory is local application data. Do not ask Nova to store passwords, API keys, access tokens, private keys, or other secrets. Do not commit runtime memory files.
+
+## Interfaces
+
+Nova has several front ends over the same agent core.
+
+| Interface | Command | Description |
+|---|---|---|
+| Textual terminal UI | python main.py | Default full-screen terminal application |
+| prompt_toolkit CLI | python main.py --prompt-toolkit | Alternative interactive terminal interface |
+| Rich interface | python main.py --rich | Earlier Rich-based terminal interface |
+| PySide6 desktop GUI | python App.py | Optional desktop application; requires optional GUI dependencies |
+
+The Textual and prompt_toolkit interfaces use the same core orchestration. The desktop GUI is an optional front end and requires PySide6.
 
 ## Requirements
 
-- Python **3.11 or newer** (the CI workflow currently tests Python 3.11).
-- [Ollama](https://ollama.com/download) installed and running.
-- An Ollama-compatible model downloaded locally. Nova defaults to `qwen2.5:3b`; you can choose another installed model.
-- Windows, Linux, or macOS for the core terminal agent. Optional desktop features have additional platform-specific requirements.
+- Python **3.11 or newer**.
+- **Ollama** and at least one downloaded model for local inference, or credentials for a compatible remote API.
+- **Git** installed for local Git features.
+- **gh CLI** authenticated with **gh auth login** for read-only GitHub integration.
+- Windows, Linux, or macOS for the core terminal agent. Individual optional tools may have narrower platform requirements.
 
-The model is separate from Nova's source code. Downloading the Python dependencies does not download an LLM.
+Core dependencies in **requirements.txt**:
+
+- ollama
+- rich
+- textual
+- prompt_toolkit
+
+Optional dependencies in **requirements-optional.txt** include PySide6, desktop automation, OCR, image processing, and local image-generation packages. Some extras require separate system software or model files. For example, pytesseract also needs the Tesseract OCR application.
 
 ## Quick start
 
 ### 1. Clone the repository
 
-```bash
+\`\`\`bash
 git clone https://github.com/sepehrtaji-dev/Nova-agent.git
 cd Nova-agent
-```
+\`\`\`
 
-### 2. Create and activate a virtual environment
+### 2. Create a virtual environment
 
-**Windows PowerShell:**
+**Windows PowerShell**
 
-```powershell
+\`\`\`powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 python -m pip install --upgrade pip
-```
+\`\`\`
 
-**Linux / macOS:**
+**Linux / macOS**
 
-```bash
+\`\`\`bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-```
+\`\`\`
 
-If Python 3.11 is not installed, install a supported Python version first and substitute its executable in the commands above.
+### 3. Install dependencies
 
-### 3. Install the core dependencies
-
-```bash
+\`\`\`bash
 python -m pip install -r requirements.txt
-```
+\`\`\`
 
-This installs the dependencies for the terminal agent and its supported interfaces.
+For the optional desktop GUI and integrations:
 
-### 4. Start Ollama and download a model
+\`\`\`bash
+python -m pip install -r requirements-optional.txt
+\`\`\`
 
-Install Ollama from [ollama.com](https://ollama.com/download), then open a terminal and run:
+Install optional extras only if you need them. Some packages, especially local image-generation stacks, can be large and may need compatible hardware and separately downloaded model files.
 
-```bash
+### 4. Configure a model
+
+**Local Ollama**
+
+Install and start Ollama, then download a model:
+
+\`\`\`bash
 ollama pull qwen2.5:3b
 ollama list
-```
+\`\`\`
 
-Ollama normally starts its local service automatically. If it is not running, start it using the method for your operating system.
+**Remote API — PowerShell example**
+
+\`\`\`powershell
+$env:NOVA_PROVIDER = "remote"
+$env:NOVA_API_BASE_URL = "https://api.openai.com/v1"
+$env:NOVA_API_MODEL = "your-model-name"
+$env:NOVA_API_KEY = "your-api-key"
+\`\`\`
+
+Use the base URL and model name supplied by your provider. Never put a real API key in a committed file, issue, screenshot, or log.
 
 ### 5. Launch Nova
 
-```bash
+\`\`\`bash
 python main.py
-```
+\`\`\`
 
-The default entry point launches the Textual terminal UI. See [Running Nova](#running-nova) for alternative interfaces.
+The default launch opens the Textual terminal interface. See [Interfaces](#interfaces) for alternatives.
 
 ## Configuration
 
-Nova reads the following environment variables where noted in the code:
-
-| Variable | Default | Purpose |
+| Variable | Default / behaviour | Purpose |
 |---|---|---|
-| `NOVA_MODEL` | `qwen2.5:3b` | Name of the Ollama model to use |
-| `NOVA_NUM_CTX` | `8192` | Requested context budget; invalid values fall back to the code default |
-| `NOVA_NUM_PREDICT` | `2048` | Requested output-token budget; invalid values fall back to the code default |
-| `OLLAMA_HOST` | Ollama client's default | Ollama server address; useful when Ollama is not at its default local endpoint |
-| `NOVA_IMAGE_MODEL_PATH` | Not set | Model-path setting used by the optional image-generation tool |
-| `NOVA_EPISODIC_MEMORY_PATH` | Package-local `memory/episodic.json` | Optional override for the episodic-memory JSON file path |
+| NOVA_PROVIDER | local | Select local, remote, or auto |
+| NOVA_MODEL | Auto-detect installed Ollama model if empty | Local model name |
+| NOVA_API_BASE_URL | https://api.openai.com/v1 | OpenAI-compatible API base URL |
+| NOVA_API_MODEL | Required for remote mode | Remote model identifier |
+| NOVA_API_KEY | Required for remote mode | Remote API credential |
+| NOVA_API_TIMEOUT | 120 seconds | Remote request timeout |
+| NOVA_NUM_CTX | 8192 | Requested local Ollama context budget |
+| NOVA_NUM_PREDICT | 1536 in current Ollama adapter | Requested local output-token budget |
+| NOVA_MAX_STEPS | 12 | Maximum task execution steps |
+| OLLAMA_HOST | Ollama client default | Ollama server address |
+| NOVA_HOME | ~/.nova | Base directory for desktop settings |
+| NOVA_SETTINGS_FILE | ~/.nova/settings.json | Override desktop settings file |
+| NOVA_TOOL_MANIFEST | config/tools.json | Override tool manifest |
+| NOVA_EPISODIC_MEMORY_PATH | memory/episodic.json | Override episodic-memory storage |
+| NOVA_IMAGE_MODEL_PATH | Not set | Optional local image model path |
 
-Example for a model already installed in Ollama:
+Docker Compose supplies its own default model (qwen2.5:3b) and context/output settings. Environment variables can override those values.
+
+### Choose a different local model
 
 **Windows PowerShell**
-```powershell
-$env:NOVA_MODEL = "qwen2.5:3b"
+
+\`\`\`powershell
+$env:NOVA_PROVIDER = "local"
+$env:NOVA_MODEL = "your-installed-ollama-model"
 python main.py
-```
+\`\`\`
 
 **Linux / macOS**
-```bash
-export NOVA_MODEL="qwen2.5:3b"
+
+\`\`\`bash
+export NOVA_PROVIDER=local
+export NOVA_MODEL=your-installed-ollama-model
 python main.py
-```
+\`\`\`
 
-Use a model that is actually installed in your Ollama instance. Hardware requirements depend on the chosen model, quantization, context size, and the amount of memory available.
+Use a model actually installed in your Ollama instance. Performance and memory requirements depend on model size, quantization, context length, and available hardware.
 
-## Running Nova
+## Commands
 
-Choose one of the supported terminal interfaces:
-
-```bash
-# Default full-screen Textual UI
-python main.py
-
-# prompt_toolkit CLI
-python main.py --prompt-toolkit
-
-# Legacy Rich interface
-python main.py --rich
-```
-
-The interfaces share Nova's core agent logic. The Textual interface runs agent work in a worker so model calls do not block its UI event loop.
-
-## Commands and permissions
-
-The supported commands can differ slightly by interface and version. Use `/help` in the running UI to see the commands available in that interface.
+Use **/help** inside the running terminal interface to see the commands supported by that UI version.
 
 | Command | Purpose |
 |---|---|
-| `/help` | Show the command list |
-| `/status` | Show a quick local runtime summary |
-| `/self` | Inspect runtime components and available model metadata |
-| `/model` | Query Ollama for model metadata |
-| `/tools` | Show registered tools and capability states |
-| `/doctor` | Run local diagnostics |
-| `/permissions` | Show current capability toggles |
-| `/web` | Toggle web access |
-| `/git` | Toggle Git and GitHub access |
-| `/pc` | Toggle PC, filesystem, terminal, and desktop capability |
-| `/memory` | Inspect saved long-term memory entries |
-| `/forget <category> <key>` | Remove a matching long-term memory entry |
-| `/clear` | Clear the current view or conversation, depending on the interface |
-| `/reset` | Start a fresh agent session |
-| `/exit` | Exit Nova |
+| /help | Show available commands |
+| /status | Show runtime status |
+| /self | Inspect Nova's runtime profile and components |
+| /model | Query model metadata when supported by the active backend |
+| /tools | List registered tools and capability states |
+| /doctor | Run runtime diagnostics |
+| /permissions | Show capability permissions |
+| /web | Toggle web access |
+| /git | Toggle Git and GitHub access |
+| /pc | Toggle filesystem, terminal, and desktop access |
+| /memory | Inspect long-term memory entries |
+| /forget category key | Remove a matching long-term memory entry |
+| /clear | Clear the current terminal view |
+| /reset | Start a new Nova session |
+| /exit | Exit Nova |
 
-Example:
+Some commands vary between interfaces and may evolve. Runtime **/help** output is authoritative.
 
-```text
-/forget profile gpu
-```
+## Project structure
 
-Capability toggles are not a substitute for operating-system isolation. Keep permissions limited to what you need, especially when asking Nova to operate on unfamiliar files or repositories.
+The repository is organized by responsibility instead of placing all agent logic in one file.
 
-## Memory and privacy
+\`\`\`text
+Nova-agent/
+├── agent/                       # Agent orchestration and decision workflow
+│   ├── core.py                  # NovaCore: connects agent services
+│   ├── router.py                # Parses and routes model-selected tool calls
+│   ├── planner.py               # Creates and updates task plans
+│   ├── verifier.py              # Verifies observable tool outcomes
+│   ├── self_knowledge.py        # Nova's self-knowledge component
+│   ├── self_reflection.py      # Evidence-based completion audit
+│   ├── introspection.py         # Runtime and model inspection
+│   ├── capability_probe.py     # Live capability/model probes
+│   ├── tool_awareness.py       # Builds tool context from the registry
+│   ├── diagnostics.py           # Runtime diagnostics
+│   └── identity.py              # Static Nova identity
+│
+├── model/                       # Model provider adapters
+│   ├── provider.py              # Selects the active backend
+│   ├── ollama.py                # Local Ollama implementation
+│   ├── remote.py                # OpenAI-compatible API implementation
+│   └── ...                      # Shared prompts and model helpers
+│
+├── tools/                       # Executable capabilities
+│   ├── __init__.py              # Loads tools from the manifest
+│   ├── registry.py              # Tool registry and metadata
+│   ├── filesystem.py            # File and directory operations
+│   ├── terminal.py              # Restricted program execution
+│   ├── web.py                   # Public web search/fetch
+│   ├── git.py                   # Local Git operations
+│   ├── github.py                # Read-only GitHub CLI integration
+│   ├── desktop.py               # Optional desktop automation
+│   └── ...                      # Tool-specific helpers
+│
+├── memory/                      # Memory and persistence
+│   ├── manager.py               # Long-term memory manager
+│   ├── extractor.py             # Candidate fact extraction
+│   ├── short_term.py            # Conversation context
+│   ├── knowledge.py             # Topic/fact knowledge store
+│   └── episodic.py              # Bounded tool-outcome history
+│
+├── config/
+│   ├── tools.json               # Declarative tool/capability manifest
+│   ├── runtime.py               # Loads manifest settings
+│   └── model_settings.py        # Desktop model settings persistence
+│
+├── ui/
+│   ├── launcher.py              # Selects terminal interface
+│   ├── textual_app.py           # Default Textual UI
+│   └── prompt_cli.py            # prompt_toolkit interface
+│
+├── utils/                       # Shared helpers and utilities
+├── tests/                       # Unit and regression tests
+├── sandbox/                     # Sandbox-related code
+├── projects/                    # Runtime workspace (normally Git-ignored)
+├── App.py                       # Optional PySide6 desktop GUI
+├── main.py                      # Terminal UI launch entry point
+├── requirements.txt              # Core dependencies
+├── requirements-optional.txt    # Optional integrations
+├── Dockerfile                   # Container image
+├── docker-compose.yml           # Nova + Ollama Compose setup
+├── .github/workflows/           # GitHub Actions CI
+├── LICENSE
+└── README.md
+\`\`\`
 
-Nova has multiple memory components for different purposes:
-
-- **Long-term memory:** selected user facts stored in `memory/long_term.json`. Use `/memory` to inspect entries and `/forget <category> <key>` to remove one.
-- **Knowledge memory:** persisted knowledge data managed by the knowledge-memory component.
-- **Episodic memory:** bounded summaries of tool outcomes, rather than a raw transcript of every tool input/output.
-- **Short-term conversation memory:** recent context maintained during the current session.
-
-The long-term memory extractor is designed to be conservative and reject credential-like values. That does not make Nova a secret manager, and it is not a guarantee that every sensitive value can be detected. **Do not provide passwords, API keys, access tokens, private keys, or other secrets for Nova to remember.**
-
-Runtime memory files are local application data and should not be committed. The repository's `.gitignore` excludes memory JSON files and the default projects workspace. Review your local configuration and any files you intentionally share before publishing logs or project artifacts.
-
-Nova uses a local Ollama model by default, but web search/fetch and any other enabled network-facing tools can contact external services. “Local-first” does not mean that every feature is offline.
-
-## Docker
-
-The Docker setup runs Nova and Ollama as separate containers. The Ollama model is stored in a named Docker volume, project files are mounted from your host, and Nova runs as a non-root user inside its container.
-
-**Prerequisites:** Docker Engine/Desktop with the Compose plugin. The example below uses CPU execution for Ollama by default; GPU passthrough depends on your OS and Docker/NVIDIA setup and is not configured automatically.
-
-### 1. Build the Nova image
-
-```bash
-docker compose build
-```
-
-### 2. Start Ollama
-
-```bash
-docker compose up -d ollama
-```
-
-### 3. Download the model into the Ollama container
-
-```bash
-docker compose exec ollama ollama pull qwen2.5:3b
-```
-
-To use a different model, set `NOVA_MODEL` in your environment before starting Nova and pull that model into the Ollama container first.
-
-### 4. Run Nova interactively
-
-```bash
-docker compose run --rm nova
-```
-
-The Compose setup mounts your host's `projects/` directory into Nova's workspace and uses a named volume for runtime memory data. Files created in the project workspace are therefore available on the host. To stop the Ollama service:
-
-```bash
-docker compose down
-```
-
-The named model and memory volumes are preserved by default. To remove those volumes too, use `docker compose down --volumes`; this deletes their persisted contents.
-
-The container is isolated from your host desktop and host filesystem except for explicitly mounted directories, but Nova can still execute commands and modify files within its container/workspace. Do not mount sensitive host directories or the Docker socket into the container.
+The diagram highlights the main modules; individual helper files and tests are omitted.
 
 ## Development and tests
 
-Install the core requirements, then run the test suite from the repository root:
+Run the tests from the repository root:
 
-```bash
+\`\`\`bash
 python -m unittest discover -s tests -p "test_*.py"
-```
+\`\`\`
 
-Compile the main Python packages:
+Compile the Python sources:
 
-```bash
+\`\`\`bash
 python -m compileall -q agent tools memory model ui main.py App.py
-```
+\`\`\`
 
-The GitHub Actions workflow runs these checks on pushes and pull requests targeting `main`. Unit tests use controlled test doubles for many tool/model paths; passing tests does not mean every integration has been exercised against a live Ollama server or real desktop.
+Smoke-test the terminal UI imports:
 
-Optional integrations can be installed separately:
+\`\`\`bash
+python -c "from ui.textual_app import NovaTextualApp; from ui.prompt_cli import main; print('UI imports OK')"
+\`\`\`
 
-```bash
-python -m pip install -r requirements-optional.txt
-```
+### CI workflow
 
-These extras include desktop automation, OCR, PySide6, and local image-generation dependencies. Some features need additional system software or model files. For example, `pytesseract` needs the Tesseract OCR application installed separately; installing the Python package alone is not enough.
+GitHub Actions currently:
 
-## Project layout
+1. Checks out the repository.
+2. Sets up Python 3.11.
+3. Compiles Python packages and entry points.
+4. Installs core dependencies.
+5. Smoke-tests Textual and prompt_toolkit imports.
+6. Runs the unit/regression test suite.
+7. Builds the Docker image if earlier steps pass.
 
-```text
-Nova-agent/
-├── agent/                  # Core orchestration, planning, routing, verification
-├── memory/                 # Memory implementations and persistence helpers
-├── model/                  # Ollama model adapter and prompts
-├── tools/                  # Tool registry and filesystem/web/Git/desktop tools
-├── ui/                     # Textual and prompt_toolkit terminal interfaces
-├── utils/                  # Shared utilities
-├── tests/                  # Unit and regression tests
-├── sandbox/                # Sandbox-related components
-├── projects/               # Runtime workspace (ignored by Git)
-├── App.py                  # Optional desktop GUI entry point
-├── main.py                 # Rich interface and CLI launch dispatch
-├── requirements.txt        # Core Python dependencies
-├── requirements-optional.txt
-├── Dockerfile
-├── docker-compose.yml
-├── .dockerignore
-├── .github/workflows/      # CI checks
-├── LICENSE
-└── README.md
-```
+Tests use controlled test doubles for many model and tool paths. A green test run does not mean every provider, desktop action, or real-world integration has been exercised.
 
-## Security notes and limitations
+## Repository snapshot
 
-Nova is an experimental agent with tools that can affect files and execute programs. Follow these precautions:
+These figures are a source-repository snapshot from the review on **30 October 2026**. They exclude runtime memory, downloaded models, virtual environments, and user workspace files.
 
-- Run it as a normal, non-administrator user.
-- Start with only the capabilities you need; turn off PC, Git, or web access when not needed.
-- Review proposed plans and tool results, particularly for destructive or irreversible actions.
-- Treat files, repository instructions, webpages, and command output as untrusted data.
+| Metric | Snapshot |
+|---|---:|
+| Tracked files | 86 |
+| Python files | 75 |
+| Test files | 26 |
+| Tracked file content | ~871 KB |
+| Tools in default manifest | 8 |
+| Default capability groups | 3 (web, git, pc) |
+| Model backends | 2 (Ollama and OpenAI-compatible API) |
+| Terminal interfaces | 3 |
+| Optional desktop GUI | PySide6 |
+
+### Latest reviewed changes and CI
+
+The latest reviewed main-branch commit at the time of this snapshot was **9518b521** — “Selfknowledge improvement” (18 October 2026). It included updates to self-knowledge, core integration, model handling, and tests, plus a large added Apptest.py file.
+
+The last reviewed GitHub Actions run for that commit executed **273 tests: 268 passed, 1 failed, and 4 were skipped**. The failure was **test_legitimate_paths_are_not_over_blocked** in **tests/test_filesystem_security.py**: a Windows-style path (C:/projects/nova/main.py) was incorrectly treated as a protected path on the Linux CI runner.
+
+Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the current run state. CI status may have changed after this snapshot.
+
+## Docker
+
+Nova can run in Docker with Ollama as a separate service. You need Docker Engine or Docker Desktop with the Compose plugin.
+
+Build the Nova image and start Ollama:
+
+\`\`\`bash
+docker compose build
+docker compose up -d ollama
+\`\`\`
+
+Download a model into the Ollama container:
+
+\`\`\`bash
+docker compose exec ollama ollama pull qwen2.5:3b
+\`\`\`
+
+Run Nova:
+
+\`\`\`bash
+docker compose run --rm nova
+\`\`\`
+
+The Compose setup stores Ollama model data and Nova memory in named volumes. It mounts the host **projects/** directory into the container workspace, so files created there are available on the host.
+
+The example uses CPU execution by default. GPU passthrough is not configured automatically and depends on the host OS, Docker, and NVIDIA setup.
+
+Stop services:
+
+\`\`\`bash
+docker compose down
+\`\`\`
+
+Remove named volumes too (this deletes persisted model and memory data):
+
+\`\`\`bash
+docker compose down --volumes
+\`\`\`
+
+Do not mount sensitive host directories or the Docker socket into the container. Isolation depends on the mounts, privileges, networking, and runtime configuration you choose.
+
+## Security and privacy
+
+Nova can run programs and change files when relevant tools are enabled. Treat it as software with real access, not as a chat-only application.
+
+- Run Nova as a normal user, not as an administrator.
+- Enable only the capabilities you need.
 - Use a separate test workspace for unfamiliar projects.
-- Never put secrets in prompts or long-term memory.
-- Keep Ollama and other local services updated and avoid exposing their ports publicly.
-- Remember that Docker limits access to the host only to the extent that you configure its mounts, networking, privileges, and runtime.
+- Review plans and tool results before destructive or irreversible operations.
+- Never put passwords, API keys, tokens, or private keys in prompts or memory.
+- Keep API credentials and settings files private. The desktop settings file currently includes the configured API key; permission restriction is best-effort and is not a secure credential vault.
+- A remote provider receives prompts and tool/file context sent to it. Local tools do not make remote inference private.
+- Web search and other network-enabled tools contact external services.
+- Keep Ollama, Git, Python, and optional dependencies updated.
+- Do not expose local model-server ports publicly without understanding the consequences.
 
-Nova's verification and safety checks reduce certain failure modes; they do not guarantee correctness, prevent every unsafe action, or replace human review. The project is not intended for unattended operation on important systems.
+Filesystem and terminal restrictions reduce some risks but do not create a hardened security sandbox. Verification can catch certain failures, but cannot guarantee correctness or prevent every unsafe action. Do not use Nova for unattended operation on important systems.
 
 ## Roadmap
 
-Development is incremental. Areas of ongoing work include:
+Development is ongoing. Current areas of focus include:
 
-- More reliable model-driven coding and repair loops
-- Better evidence-based tool selection and recovery
-- More general memory retrieval without task-specific keyword rules
-- Expanded regression coverage for real-world failures
-- Improved configuration and deployment ergonomics
-- Clearer runtime observability and permission boundaries
+- Fixing cross-platform filesystem path edge cases and keeping CI reliable.
+- Improving model-driven planning, tool selection, and recovery.
+- Keeping self-knowledge grounded in live runtime evidence.
+- Strengthening memory reliability and privacy safeguards.
+- Improving provider configuration and credential handling.
+- Expanding regression tests for real-world tool behaviour.
+- Improving desktop and terminal user experience.
 
-This list describes development direction, not a promise that every item is already implemented.
+This roadmap describes areas of work, not features guaranteed to be complete.
 
 ## License
 
-Nova-agent source code is distributed under the [MIT License](LICENSE). Third-party packages, Ollama models, and any optional image-generation model files have their own licenses and terms; those are not replaced by Nova's repository license.
+Nova-agent source code is distributed under the [MIT License](LICENSE). Third-party dependencies, Ollama models, remote model providers, and optional image-generation models have their own licences and terms. The repository's MIT license does not replace those terms.
 
 ---
 
