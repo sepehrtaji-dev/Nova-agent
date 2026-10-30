@@ -1319,6 +1319,7 @@ class NovaCore:
             )
 
         completed = False
+        goal_verified = False
         last_tool_error = None
         for step in range(
             self.max_steps
@@ -1397,8 +1398,45 @@ class NovaCore:
                     if (
                         goal_complete
                         and has_success
+                        and self.planner.is_complete(plan)
                     ):
-                        completed = True
+                        goal_check = self.planner.verify_goal(
+                            goal=message,
+                            plan=plan,
+                            tool_history=tool_history,
+                            allowed_tools=self._allowed_tools(),
+                        )
+                        if goal_check.get("complete") is True:
+                            goal_verified = True
+                            completed = True
+                            break
+                        additional_steps = goal_check.get("steps", [])
+                        if additional_steps:
+                            next_id = max(
+                                (
+                                    item.get("id", 0)
+                                    for item in plan.get("steps", [])
+                                    if isinstance(item, dict)
+                                    and isinstance(item.get("id", 0), int)
+                                ),
+                                default=0,
+                            ) + 1
+                            for extra_step in additional_steps:
+                                extra_step["id"] = next_id
+                                next_id += 1
+                            plan["steps"].extend(additional_steps)
+                            state = getattr(self, "execution_state", None)
+                            if isinstance(state, dict):
+                                state["last_plan"] = plan
+                            tool_history.append(
+                                "Goal verification found remaining work: "
+                                + str(goal_check.get("reason", ""))
+                            )
+                            continue
+                        last_tool_error = (
+                            "Goal verification could not confirm completion: "
+                            + str(goal_check.get("reason", ""))
+                        )
                         break
 
                     tool_history.append(
@@ -1814,8 +1852,48 @@ Nova must choose another useful action.
                 last_tool_error = None
 
                 if self.planner.is_complete(plan):
-                    completed = True
-                    self._status("Task plan completed.")
+                    goal_check = self.planner.verify_goal(
+                        goal=message,
+                        plan=plan,
+                        tool_history=tool_history,
+                        allowed_tools=self._allowed_tools(),
+                    )
+                    if goal_check.get("complete") is True:
+                        goal_verified = True
+                        completed = True
+                        self._status("User goal verified complete.")
+                        break
+
+                    additional_steps = goal_check.get("steps", [])
+                    if additional_steps:
+                        next_id = max(
+                            (
+                                item.get("id", 0)
+                                for item in plan.get("steps", [])
+                                if isinstance(item, dict)
+                                and isinstance(item.get("id", 0), int)
+                            ),
+                            default=0,
+                        ) + 1
+                        for extra_step in additional_steps:
+                            extra_step["id"] = next_id
+                            next_id += 1
+                        plan["steps"].extend(additional_steps)
+                        state = getattr(self, "execution_state", None)
+                        if isinstance(state, dict):
+                            state["last_plan"] = plan
+                        tool_history.append(
+                            "Goal verification found remaining work: "
+                            + str(goal_check.get("reason", ""))
+                        )
+                        self._status("Goal verification found more work...")
+                        continue
+
+                    last_tool_error = (
+                        "Goal verification could not confirm completion: "
+                        + str(goal_check.get("reason", ""))
+                    )
+                    self._status("Goal completion could not be verified...")
                     break
 
                 continue
@@ -1844,7 +1922,11 @@ Nova must choose another useful action.
 
             # Verification is now handled by Verifier above
 
-        if task_type == "computer" and self.planner.is_complete(plan):
+        if (
+            task_type == "computer"
+            and goal_verified
+            and self.planner.is_complete(plan)
+        ):
             completed = True
 
         # Audit the final claim against plan state and this run's verifier records.
