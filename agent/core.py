@@ -1151,7 +1151,6 @@ class NovaCore:
             else:
                 response = self._rewrite_unrequested_json(message, response)
                 self._extract_and_store_memory(message)
-                self._extract_and_store_memory(message)
                 self._status("Done")
                 self.short_memory.add("assistant", response)
                 return response
@@ -1289,6 +1288,7 @@ class NovaCore:
                         "I couldn't safely plan that request, so no tools were executed. "
                         "Please clarify what action you want me to perform."
                     )
+                self._extract_and_store_memory(message)
                 self._status("Done")
                 self.short_memory.add("assistant", response)
                 return response
