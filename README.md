@@ -114,10 +114,10 @@ Install Ollama: https://ollama.com/download
 
 Example:
 
-\`\`\`bash
+```bash
 ollama pull qwen2.5:3b
 ollama list
-\`\`\`
+```
 
 This is only an example model. You can use another model supported by your Ollama installation.
 
@@ -241,40 +241,40 @@ Optional dependencies in **requirements-optional.txt** include PySide6, desktop 
 
 ### 1. Clone the repository
 
-\`\`\`bash
+```bash
 git clone https://github.com/sepehrtaji-dev/Nova-agent.git
 cd Nova-agent
-\`\`\`
+```
 
 ### 2. Create a virtual environment
 
 **Windows PowerShell**
 
-\`\`\`powershell
+```powershell
 py -3.11 -m venv .venv
 .\\.venv\\Scripts\\Activate.ps1
 python -m pip install --upgrade pip
-\`\`\`
+```
 
 **Linux / macOS**
 
-\`\`\`bash
+```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-\`\`\`
+```
 
 ### 3. Install dependencies
 
-\`\`\`bash
+```bash
 python -m pip install -r requirements.txt
-\`\`\`
+```
 
 For the optional desktop GUI and integrations:
 
-\`\`\`bash
+```bash
 python -m pip install -r requirements-optional.txt
-\`\`\`
+```
 
 Install optional extras only if you need them. Some packages, especially local image-generation stacks, can be large and may need compatible hardware and separately downloaded model files.
 
@@ -284,27 +284,27 @@ Install optional extras only if you need them. Some packages, especially local i
 
 Install and start Ollama, then download a model:
 
-\`\`\`bash
+```bash
 ollama pull qwen2.5:3b
 ollama list
-\`\`\`
+```
 
 **Remote API — PowerShell example**
 
-\`\`\`powershell
+```powershell
 $env:NOVA_PROVIDER = "remote"
 $env:NOVA_API_BASE_URL = "https://api.openai.com/v1"
 $env:NOVA_API_MODEL = "your-model-name"
 $env:NOVA_API_KEY = "your-api-key"
-\`\`\`
+```
 
 Use the base URL and model name supplied by your provider. Never put a real API key in a committed file, issue, screenshot, or log.
 
 ### 5. Launch Nova
 
-\`\`\`bash
+```bash
 python main.py
-\`\`\`
+```
 
 The default launch opens the Textual terminal interface. See [Interfaces](#interfaces) for alternatives.
 
@@ -334,19 +334,19 @@ Docker Compose supplies its own default model (qwen2.5:3b) and context/output se
 
 **Windows PowerShell**
 
-\`\`\`powershell
+```powershell
 $env:NOVA_PROVIDER = "local"
 $env:NOVA_MODEL = "your-installed-ollama-model"
 python main.py
-\`\`\`
+```
 
 **Linux / macOS**
 
-\`\`\`bash
+```bash
 export NOVA_PROVIDER=local
 export NOVA_MODEL=your-installed-ollama-model
 python main.py
-\`\`\`
+```
 
 Use a model actually installed in your Ollama instance. Performance and memory requirements depend on model size, quantization, context length, and available hardware.
 
@@ -378,7 +378,7 @@ Some commands vary between interfaces and may evolve. Runtime **/help** output i
 
 The repository is organized by responsibility instead of placing all agent logic in one file.
 
-\`\`\`text
+```text
 Nova-agent/
 ├── agent/                       # Agent orchestration and decision workflow
 │   ├── core.py                  # NovaCore: connects agent services
@@ -440,7 +440,7 @@ Nova-agent/
 ├── .github/workflows/           # GitHub Actions CI
 ├── LICENSE
 └── README.md
-\`\`\`
+```
 
 The diagram highlights the main modules; individual helper files and tests are omitted.
 
@@ -448,21 +448,21 @@ The diagram highlights the main modules; individual helper files and tests are o
 
 Run the tests from the repository root:
 
-\`\`\`bash
+```bash
 python -m unittest discover -s tests -p "test_*.py"
-\`\`\`
+```
 
 Compile the Python sources:
 
-\`\`\`bash
+```bash
 python -m compileall -q agent tools memory model ui main.py App.py
-\`\`\`
+```
 
 Smoke-test the terminal UI imports:
 
-\`\`\`bash
+```bash
 python -c "from ui.textual_app import NovaTextualApp; from ui.prompt_cli import main; print('UI imports OK')"
-\`\`\`
+```
 
 ### CI workflow
 
@@ -508,22 +508,22 @@ Nova can run in Docker with Ollama as a separate service. You need Docker Engine
 
 Build the Nova image and start Ollama:
 
-\`\`\`bash
+```bash
 docker compose build
 docker compose up -d ollama
-\`\`\`
+```
 
 Download a model into the Ollama container:
 
-\`\`\`bash
+```bash
 docker compose exec ollama ollama pull qwen2.5:3b
-\`\`\`
+```
 
 Run Nova:
 
-\`\`\`bash
+```bash
 docker compose run --rm nova
-\`\`\`
+```
 
 The Compose setup stores Ollama model data and Nova memory in named volumes. It mounts the host **projects/** directory into the container workspace, so files created there are available on the host.
 
@@ -531,15 +531,15 @@ The example uses CPU execution by default. GPU passthrough is not configured aut
 
 Stop services:
 
-\`\`\`bash
+```bash
 docker compose down
-\`\`\`
+```
 
 Remove named volumes too (this deletes persisted model and memory data):
 
-\`\`\`bash
+```bash
 docker compose down --volumes
-\`\`\`
+```
 
 Do not mount sensitive host directories or the Docker socket into the container. Isolation depends on the mounts, privileges, networking, and runtime configuration you choose.
 
