@@ -1756,7 +1756,16 @@ Nova must choose another useful action.
                         ),
                         None,
                     )
-                    if matched_step is None:
+                    if (
+                        matched_step is None
+                        and (
+                            not isinstance(current_step_snapshot.get("tool"), str)
+                            or not isinstance(current_step_snapshot.get("input"), dict)
+                        )
+                    ):
+                        # Compatibility for older/custom plan objects without
+                        # structured tool metadata. Structured plans must match
+                        # the exact executed tool/input, never description alone.
                         executed_description = str(
                             current_step_snapshot.get("description", "")
                         ).strip().casefold()
