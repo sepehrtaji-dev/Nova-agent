@@ -414,6 +414,77 @@ class PlannerCodingLoopTests(unittest.TestCase):
         self.assertEqual(len(brain.prompts), 2)
         self.assertIn("VALIDATION FEEDBACK", brain.prompts[1])
 
+    def test_goal_verification_requests_remaining_steps_when_plan_is_not_enough(self):
+        class Brain:
+            def generate(self, prompt, json_mode=False):
+                self.prompt = prompt
+                return json.dumps({
+                    "complete": False,
+                    "reason": "The requested report exists, but the user also asked for validation.",
+                    "steps": [{
+                        "description": "Run the discovered test suite",
+                        "tool": "terminal",
+                        "input": {"command": "python -m unittest"},
+                    }],
+                })
+
+        brain = Brain()
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = {
+            "goal": "Inspect, report, and validate",
+            "steps": [{
+                "id": 1,
+                "description": "Write report",
+                "status": "completed",
+                "result": "report created",
+                "tool": "edit_file",
+                "input": {"path": "report.txt", "old": "a", "new": "b"},
+            }],
+        }
+        history = [
+            "BEGIN_RAW_TOOL_RESULT\nreport created\nEND_RAW_TOOL_RESULT\n"
+            "VERIFIER_STATUS: CONFIRMED\nVERIFIER_MESSAGE: write confirmed",
+        ]
+
+        result = planner.verify_goal(
+            goal="Inspect, report, and validate",
+            plan=plan,
+            tool_history=history,
+            allowed_tools=["read_file", "edit_file", "terminal"],
+        )
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(len(result["steps"]), 1)
+        self.assertEqual(result["steps"][0]["tool"], "terminal")
+        self.assertIn("do not confuse completing the current plan", brain.prompt.lower())
+
+    def test_goal_verification_refuses_completion_without_confirmed_evidence(self):
+        class Brain:
+            def generate(self, prompt, json_mode=False):
+                raise AssertionError("The model must not be asked to verify empty evidence.")
+
+        planner = Planner(brain=Brain(), tools=self.tools)
+        plan = {
+            "goal": "Do something",
+            "steps": [{
+                "id": 1,
+                "description": "Read module",
+                "status": "completed",
+                "result": "done",
+                "tool": "read_file",
+                "input": {"path": "module.py"},
+            }],
+        }
+
+        result = planner.verify_goal(
+            goal="Do something",
+            plan=plan,
+            tool_history=["No trusted verifier evidence."],
+        )
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["steps"], [])
+
     def test_plan_prompt_uses_project_evidence_not_a_fixed_workflow(self):
         brain = FakeBrain(json.dumps({
             "goal": "Improve a module",
