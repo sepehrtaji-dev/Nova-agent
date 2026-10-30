@@ -133,7 +133,7 @@ class FakePlanner:
         self.replan_calls = 0
         self.plan = None
 
-    def create_plan(self, goal, context):
+    def create_plan(self, goal, context, allowed_tools=None):
         self.plan = {
             "goal": goal,
             "steps": [{
@@ -415,7 +415,7 @@ class CoreTests(unittest.TestCase):
 
     def test_empty_plan_uses_plain_text_recovery_for_capability_question(self):
         class EmptyPlanner(FakePlanner):
-            def create_plan(self, goal, context):
+            def create_plan(self, goal, context, allowed_tools=None):
                 return {"goal": goal, "steps": []}
 
         class RecoveryBrain:
