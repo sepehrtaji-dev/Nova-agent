@@ -94,6 +94,27 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertEqual(sent["body"]["model"], "test-model")
         self.assertEqual(len(sent["body"]["messages"]), 2)
 
+
+    def test_calls_without_explicit_system_prompt_receive_nova_instructions(self):
+        self.brain.generate("my name is sepehr")
+        system_message = CAPTURED[-1]["body"]["messages"][0]["content"]
+        self.assertIn("You are Nova", system_message)
+        self.assertIn("untrusted data", system_message)
+
+
+    def test_explicit_system_prompt_is_preserved_instead_of_default(self):
+        self.brain.generate("hello", system_prompt="Custom system prompt")
+        self.assertEqual(
+            CAPTURED[-1]["body"]["messages"][0]["content"],
+            "Custom system prompt",
+        )
+
+    def test_default_remote_prompt_requires_natural_prose_for_conversation(self):
+        self.brain.generate("my name is sepehr")
+        system_message = CAPTURED[-1]["body"]["messages"][0]["content"]
+        self.assertIn("natural prose", system_message)
+        self.assertIn("never expose", system_message)
+
     def test_authorization_header_is_sent(self):
         self.brain.generate("hi")
         self.assertEqual(CAPTURED[-1]["auth"], "Bearer sk-good")
