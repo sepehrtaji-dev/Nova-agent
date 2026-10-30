@@ -685,7 +685,7 @@ class CoreTests(unittest.TestCase):
     def test_malformed_json_like_memory_output_is_detected(self):
         self.assertTrue(
             NovaCore._is_unrequested_json_response(
-                "my name is sepehr", '{\\n  name"sepehr"\\n}'
+                "my name is sepehr", '{ name"sepehr" }'
             )
         )
         self.assertTrue(
