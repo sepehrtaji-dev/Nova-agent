@@ -1212,7 +1212,8 @@ class NovaCore:
             else:
                 plan = self.planner.create_plan(
                     goal=message,
-                    context=self._conversation_context(max_chars=10000)
+                    context=self._conversation_context(max_chars=10000),
+                    allowed_tools=self._allowed_tools(),
                 )
             state = getattr(self, "execution_state", None)
             if not isinstance(state, dict):
@@ -1738,6 +1739,7 @@ Nova must choose another useful action.
                     tool_input=tool_input,
                     result=result,
                     success=True,
+                    allowed_tools=self._allowed_tools(),
                 )
 
                 # A planner/provider failure must not undo a verifier-confirmed
@@ -1805,7 +1807,8 @@ Nova must choose another useful action.
                 tool_name=tool_name,
                 tool_input=tool_input,
                 result=result,
-                success=False
+                success=False,
+                allowed_tools=self._allowed_tools(),
             )
 
             last_tool_error = (
