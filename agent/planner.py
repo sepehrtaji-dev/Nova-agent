@@ -485,16 +485,6 @@ Do not put generated file content in write_file input."""
                 target = step
                 break
         if target is None:
-            target = next(
-                (
-                    step for step in steps
-                    if isinstance(step, dict)
-                    and step.get("status") in {"pending", "in_progress"}
-                ),
-                None,
-            )
-
-        if target is None and success:
             target = {
                 "id": max(
                     (
@@ -504,15 +494,19 @@ Do not put generated file content in write_file input."""
                     ),
                     default=0,
                 ) + 1,
-                "description": f"Verified action: {tool_name}",
+                "description": (
+                    f"Verified action: {tool_name}"
+                    if success else f"Failed action: {tool_name}"
+                ),
                 "tool": tool_name,
                 "input": parsed_input if isinstance(parsed_input, dict) else {},
+                "status": "pending",
+                "result": None,
             }
             steps.append(target)
 
-        if target is not None:
-            target["status"] = "completed" if success else "failed"
-            target["result"] = result
+        target["status"] = "completed" if success else "failed"
+        target["result"] = result
         fallback["replan_error"] = str(reason)
         return fallback
 
@@ -557,13 +551,25 @@ Do not put generated file content in write_file input."""
             old_completed
         )
 
+        parsed_tool_input = tool_input
+        if isinstance(tool_input, str):
+            try:
+                parsed_tool_input = json.loads(tool_input)
+            except json.JSONDecodeError:
+                parsed_tool_input = None
+
+        # Associate the result only with the exact pending action that ran.
+        # The router may legitimately choose a different action than the next
+        # displayed plan item; never complete an unrelated step by position.
         current_step = None
-
         for step in steps:
-            if not isinstance(step, dict):
+            if not isinstance(step, dict) or step.get("status") == "completed":
                 continue
-
-            if step.get("status") != "completed":
+            if (
+                step.get("tool") == tool_name
+                and isinstance(parsed_tool_input, dict)
+                and step.get("input") == parsed_tool_input
+            ):
                 current_step = step
                 break
 
