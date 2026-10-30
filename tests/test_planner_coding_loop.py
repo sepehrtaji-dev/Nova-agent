@@ -2,6 +2,7 @@ import json
 import unittest
 
 from agent.planner import Planner
+from tools.registry import ToolRegistry
 
 
 class FakeTools:
@@ -129,6 +130,360 @@ class PlannerCodingLoopTests(unittest.TestCase):
 
         self.assertEqual(normalized[0]["status"], "completed")
         self.assertEqual(normalized[1]["status"], "pending")
+
+    def test_plan_rejects_inputs_that_violate_registered_tool_schema(self):
+        registry = ToolRegistry()
+        registry.register(
+            "read_file",
+            "Read a file",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string", "minLength": 1}},
+                "additionalProperties": False,
+            },
+        )
+        brain = FakeBrain(json.dumps({
+            "goal": "Read a file",
+            "steps": [{
+                "description": "Read the requested file",
+                "tool": "read_file",
+                "input": {"unexpected": "value"},
+            }],
+        }))
+        planner = Planner(brain=brain, tools=registry)
+
+        plan = planner.create_plan(
+            "Read the requested file",
+            allowed_tools=["read_file"],
+        )
+
+        self.assertEqual(plan["steps"], [])
+
+    def test_plan_never_offers_or_accepts_disabled_tools(self):
+        registry = ToolRegistry()
+        registry.register(
+            "read_file",
+            "Read a file",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string"}},
+            },
+        )
+        registry.register(
+            "terminal",
+            "Run a command",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["command"],
+                "properties": {"command": {"type": "string"}},
+            },
+        )
+        brain = FakeBrain(json.dumps({
+            "goal": "Read a file",
+            "steps": [{
+                "description": "Read the requested file",
+                "tool": "read_file",
+                "input": {"path": "secret.txt"},
+            }],
+        }))
+        planner = Planner(brain=brain, tools=registry)
+
+        plan = planner.create_plan(
+            "Read the requested file",
+            allowed_tools=["terminal"],
+        )
+
+        self.assertEqual(plan["steps"], [])
+        self.assertIn("- terminal:", brain.prompts[0])
+        self.assertNotIn("- read_file:", brain.prompts[0])
+
+    def test_verified_success_replans_and_can_add_evidence_driven_steps(self):
+        class SequenceBrain:
+            def __init__(self):
+                self.prompts = []
+            def generate(self, prompt, json_mode=False):
+                self.prompts.append(prompt)
+                return json.dumps({
+                    "goal": "Inspect and improve the module",
+                    "steps": [
+                        {
+                            "description": "Read the target module",
+                            "tool": "read_file",
+                            "input": {"path": "module.py"},
+                        },
+                        {
+                            "description": "Run the test suite discovered in the project",
+                            "tool": "terminal",
+                            "input": {"command": "python -m unittest"},
+                        },
+                    ],
+                })
+
+        brain = SequenceBrain()
+        planner = Planner(brain=brain, tools=self.tools)
+        old_plan = {
+            "goal": "Inspect and improve the module",
+            "steps": [{
+                "id": 1,
+                "description": "Read the target module",
+                "status": "pending",
+                "result": None,
+                "tool": "read_file",
+                "input": {"path": "module.py"},
+            }],
+        }
+
+        updated = planner.replan(
+            plan=old_plan,
+            goal="Inspect and improve the module",
+            tool_name="read_file",
+            tool_input={"path": "module.py"},
+            result="module source contents",
+            success=True,
+            allowed_tools=["read_file", "terminal"],
+        )
+
+        self.assertEqual(updated["steps"][0]["status"], "completed")
+        self.assertEqual(updated["steps"][0]["result"], "module source contents")
+        self.assertEqual(updated["steps"][1]["status"], "pending")
+        self.assertEqual(updated["steps"][1]["tool"], "terminal")
+
+    def test_success_for_unplanned_tool_does_not_complete_unrelated_pending_step(self):
+        class Brain:
+            def generate(self, prompt, json_mode=False):
+                return json.dumps({
+                    "goal": "Inspect a module",
+                    "steps": [{
+                        "description": "Read module.py",
+                        "tool": "read_file",
+                        "input": {"path": "module.py"},
+                    }],
+                })
+
+        planner = Planner(brain=Brain(), tools=self.tools)
+        old_plan = {
+            "goal": "Inspect a module",
+            "steps": [{
+                "id": 1,
+                "description": "Read module.py",
+                "status": "pending",
+                "result": None,
+                "tool": "read_file",
+                "input": {"path": "module.py"},
+            }],
+        }
+
+        updated = planner.replan(
+            plan=old_plan,
+            goal="Inspect a module",
+            tool_name="edit_file",
+            tool_input={"path": "module.py", "old": "before", "new": "after"},
+            result="edit completed",
+            success=True,
+        )
+
+        self.assertEqual(updated["steps"][0]["status"], "pending")
+        self.assertEqual(updated["steps"][0]["tool"], "read_file")
+
+    def test_failed_replan_fallback_retires_stale_step(self):
+        class InvalidBrain:
+            def generate(self, prompt, json_mode=False):
+                return "not valid JSON"
+
+        planner = Planner(brain=InvalidBrain(), tools=self.tools)
+        old_plan = {
+            "goal": "Inspect a module",
+            "steps": [{
+                "id": 1,
+                "description": "Read module.py",
+                "status": "pending",
+                "result": None,
+                "tool": "read_file",
+                "input": {"path": "module.py"},
+            }],
+        }
+
+        updated = planner.replan(
+            plan=old_plan,
+            goal="Inspect a module",
+            tool_name="read_file",
+            tool_input={"path": "module.py"},
+            result="File not found",
+            success=False,
+        )
+
+        self.assertEqual(updated["steps"][0]["status"], "failed")
+        self.assertEqual(updated["steps"][0]["result"], "File not found")
+        self.assertIsNone(planner.get_next_step(updated))
+        self.assertIn("replan_error", updated)
+
+    def test_failed_step_is_skipped_when_selecting_next_pending_step(self):
+        plan = {
+            "goal": "Recover from a failed read",
+            "steps": [
+                {"id": 1, "description": "Read missing file", "status": "failed"},
+                {"id": 2, "description": "List project files", "status": "pending"},
+            ],
+        }
+        self.assertEqual(
+            self.planner.get_next_step(plan)["description"],
+            "List project files",
+        )
+
+    def test_invalid_json_uses_a_distinct_format_repair_prompt(self):
+        class SequenceBrain:
+            def __init__(self):
+                self.responses = [
+                    "this is not JSON",
+                    json.dumps({
+                        "goal": "Read module",
+                        "steps": [{
+                            "description": "Read module.py",
+                            "tool": "read_file",
+                            "input": {"path": "module.py"},
+                        }],
+                    }),
+                ]
+                self.prompts = []
+            def generate(self, prompt, json_mode=False):
+                self.prompts.append(prompt)
+                return self.responses.pop(0)
+
+        brain = SequenceBrain()
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = planner.create_plan("Read module")
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertEqual(len(brain.prompts), 2)
+        self.assertIn("previous response was not valid planner JSON", brain.prompts[1])
+
+    def test_schema_rejection_triggers_argument_repair(self):
+        registry = ToolRegistry()
+        registry.register(
+            "read_file",
+            "Read a file",
+            lambda payload: payload,
+            capability="pc",
+            input_schema={
+                "type": "object",
+                "required": ["path"],
+                "properties": {"path": {"type": "string", "minLength": 1}},
+                "additionalProperties": False,
+            },
+        )
+
+        class SequenceBrain:
+            def __init__(self):
+                self.responses = [
+                    json.dumps({
+                        "goal": "Read module",
+                        "steps": [{
+                            "description": "Read module.py",
+                            "tool": "read_file",
+                            "input": {"wrong": "module.py"},
+                        }],
+                    }),
+                    json.dumps({
+                        "goal": "Read module",
+                        "steps": [{
+                            "description": "Read module.py",
+                            "tool": "read_file",
+                            "input": {"path": "module.py"},
+                        }],
+                    }),
+                ]
+                self.prompts = []
+            def generate(self, prompt, json_mode=False):
+                self.prompts.append(prompt)
+                return self.responses.pop(0)
+
+        brain = SequenceBrain()
+        planner = Planner(brain=brain, tools=registry)
+        plan = planner.create_plan("Read module", allowed_tools=["read_file"])
+
+        self.assertEqual(len(plan["steps"]), 1)
+        self.assertEqual(plan["steps"][0]["input"], {"path": "module.py"})
+        self.assertEqual(len(brain.prompts), 2)
+        self.assertIn("VALIDATION FEEDBACK", brain.prompts[1])
+
+    def test_goal_verification_requests_remaining_steps_when_plan_is_not_enough(self):
+        class Brain:
+            def generate(self, prompt, json_mode=False):
+                self.prompt = prompt
+                return json.dumps({
+                    "complete": False,
+                    "reason": "The requested report exists, but the user also asked for validation.",
+                    "steps": [{
+                        "description": "Run the discovered test suite",
+                        "tool": "terminal",
+                        "input": {"command": "python -m unittest"},
+                    }],
+                })
+
+        brain = Brain()
+        planner = Planner(brain=brain, tools=self.tools)
+        plan = {
+            "goal": "Inspect, report, and validate",
+            "steps": [{
+                "id": 1,
+                "description": "Write report",
+                "status": "completed",
+                "result": "report created",
+                "tool": "edit_file",
+                "input": {"path": "report.txt", "old": "a", "new": "b"},
+            }],
+        }
+        history = [
+            "BEGIN_RAW_TOOL_RESULT\nreport created\nEND_RAW_TOOL_RESULT\n"
+            "VERIFIER_STATUS: CONFIRMED\nVERIFIER_MESSAGE: write confirmed",
+        ]
+
+        result = planner.verify_goal(
+            goal="Inspect, report, and validate",
+            plan=plan,
+            tool_history=history,
+            allowed_tools=["read_file", "edit_file", "terminal"],
+        )
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(len(result["steps"]), 1)
+        self.assertEqual(result["steps"][0]["tool"], "terminal")
+        self.assertIn("do not confuse completing the current plan", brain.prompt.lower())
+
+    def test_goal_verification_refuses_completion_without_confirmed_evidence(self):
+        class Brain:
+            def generate(self, prompt, json_mode=False):
+                raise AssertionError("The model must not be asked to verify empty evidence.")
+
+        planner = Planner(brain=Brain(), tools=self.tools)
+        plan = {
+            "goal": "Do something",
+            "steps": [{
+                "id": 1,
+                "description": "Read module",
+                "status": "completed",
+                "result": "done",
+                "tool": "read_file",
+                "input": {"path": "module.py"},
+            }],
+        }
+
+        result = planner.verify_goal(
+            goal="Do something",
+            plan=plan,
+            tool_history=["No trusted verifier evidence."],
+        )
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["steps"], [])
 
     def test_plan_prompt_uses_project_evidence_not_a_fixed_workflow(self):
         brain = FakeBrain(json.dumps({

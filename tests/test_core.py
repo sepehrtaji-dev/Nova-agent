@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from agent.core import NovaCore
+from agent.planner import Planner
 from agent.verifier import VerificationResult
 
 
@@ -133,7 +134,7 @@ class FakePlanner:
         self.replan_calls = 0
         self.plan = None
 
-    def create_plan(self, goal, context):
+    def create_plan(self, goal, context, allowed_tools=None):
         self.plan = {
             "goal": goal,
             "steps": [{
@@ -170,7 +171,21 @@ class FakePlanner:
 
     def replan(self, **kwargs):
         self.replan_calls += 1
-        raise AssertionError("Successful verified actions must not trigger replan().")
+        plan = kwargs.get("plan") or self.plan
+        if kwargs.get("success") and isinstance(plan, dict):
+            for step in plan.get("steps", []):
+                if step.get("status") != "completed":
+                    step["status"] = "completed"
+                    step["result"] = kwargs.get("result")
+                    break
+        return plan
+
+    def verify_goal(self, **kwargs):
+        return {
+            "complete": True,
+            "reason": "The fake verifier confirms the goal.",
+            "steps": [],
+        }
 
 
 class FakeVerifier:
@@ -376,7 +391,7 @@ class CoreTests(unittest.TestCase):
         ]
         self.assertFalse(core._has_successful_tool(history))
 
-    def test_verified_write_completes_without_replan(self):
+    def test_verified_write_triggers_adaptive_replan_and_completes(self):
         core = NovaCore.__new__(NovaCore)
         core.status_callback = None
         core.brain = FakeBrain()
@@ -399,7 +414,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("created successfully", response.lower())
         self.assertEqual(len(core.tools.calls), 1)
         self.assertEqual(core.router.generate_calls, 1)
-        self.assertEqual(core.planner.replan_calls, 0)
+        self.assertEqual(core.planner.replan_calls, 1)
 
         tool_name, raw_input = core.tools.calls[0]
         self.assertEqual(tool_name, "write_file")
@@ -407,9 +422,218 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(payload["path"], "test_model.py")
         self.assertEqual(payload["location"], "projects")
 
+    def test_end_to_end_successful_results_expand_the_plan_until_goal_is_done(self):
+        class PlannerBrain:
+            def __init__(self):
+                self.responses = [
+                    {
+                        "goal": "Inspect source, write a report, and run tests",
+                        "steps": [{
+                            "description": "Read source",
+                            "tool": "read_file",
+                            "input": {"path": "module.py"},
+                        }],
+                    },
+                    {
+                        "goal": "Inspect source, write a report, and run tests",
+                        "steps": [
+                            {
+                                "description": "Read source",
+                                "tool": "read_file",
+                                "input": {"path": "module.py"},
+                            },
+                            {
+                                "description": "Write report",
+                                "tool": "write_file",
+                                "input": {"path": "report.txt", "content": "findings"},
+                            },
+                        ],
+                    },
+                    {
+                        "goal": "Inspect source, write a report, and run tests",
+                        "steps": [
+                            {
+                                "description": "Read source",
+                                "tool": "read_file",
+                                "input": {"path": "module.py"},
+                            },
+                            {
+                                "description": "Write report",
+                                "tool": "write_file",
+                                "input": {"path": "report.txt", "content": "findings"},
+                            },
+                            {
+                                "description": "Run tests",
+                                "tool": "terminal",
+                                "input": {"command": "python -m unittest"},
+                            },
+                        ],
+                    },
+                    {
+                        "goal": "Inspect source, write a report, and run tests",
+                        "steps": [
+                            {
+                                "description": "Read source",
+                                "tool": "read_file",
+                                "input": {"path": "module.py"},
+                                "status": "completed",
+                            },
+                            {
+                                "description": "Write report",
+                                "tool": "write_file",
+                                "input": {"path": "report.txt", "content": "findings"},
+                                "status": "completed",
+                            },
+                            {
+                                "description": "Run tests",
+                                "tool": "terminal",
+                                "input": {"command": "python -m unittest"},
+                                "status": "pending",
+                            },
+                        ],
+                    },
+                    {
+                        "complete": True,
+                        "reason": "The source was inspected, the report was written, and tests passed.",
+                        "steps": [],
+                    },
+                ]
+
+            def generate(self, prompt, json_mode=False):
+                return json.dumps(self.responses.pop(0))
+
+        class E2ETools:
+            def __init__(self):
+                self.calls = []
+                common = {"type": "object"}
+                self.tools = {
+                    "read_file": {
+                        "capability": "pc",
+                        "description": "Read a source file",
+                        "input_schema": {
+                            **common,
+                            "required": ["path"],
+                            "properties": {"path": {"type": "string", "minLength": 1}},
+                            "additionalProperties": False,
+                        },
+                    },
+                    "write_file": {
+                        "capability": "pc",
+                        "description": "Write a report file",
+                        "input_schema": {
+                            **common,
+                            "required": ["path", "content"],
+                            "properties": {
+                                "path": {"type": "string", "minLength": 1},
+                                "content": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "terminal": {
+                        "capability": "pc",
+                        "description": "Run project tests",
+                        "input_schema": {
+                            **common,
+                            "required": ["command"],
+                            "properties": {"command": {"type": "string", "minLength": 1}},
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+
+            def exists(self, name):
+                return name in self.tools
+
+            def validate_input(self, name, payload):
+                schema = self.tools[name]["input_schema"]
+                missing = [key for key in schema.get("required", []) if key not in payload]
+                if missing:
+                    return False, "Missing required input field(s): " + ", ".join(missing)
+                for key, value in payload.items():
+                    definition = schema["properties"].get(key, {})
+                    if definition.get("type") == "string" and not isinstance(value, str):
+                        return False, f"Input field '{key}' must be string."
+                return True, None
+
+            def execute(self, name, raw_input):
+                payload = json.loads(raw_input)
+                self.calls.append((name, payload))
+                return {
+                    "read_file": "source contents: function calculate()",
+                    "write_file": "report.txt created",
+                    "terminal": "all tests passed",
+                }[name]
+
+        class E2ERouter:
+            def classify_task(self, message, conversation, allowed_tools=None):
+                return "computer"
+
+            def decide(self, **kwargs):
+                summary = kwargs["plan"]
+                for line in summary.splitlines():
+                    if "[pending]" not in line or " | TOOL=" not in line:
+                        continue
+                    tool_part = line.split(" | TOOL=", 1)[1]
+                    tool_name, input_part = tool_part.split(" | INPUT=", 1)
+                    return {
+                        "action": "tool",
+                        "task_type": "computer",
+                        "tool": tool_name,
+                        "input": json.loads(input_part),
+                    }
+                return {
+                    "action": "respond",
+                    "task_type": "computer",
+                    "goal_complete": True,
+                }
+
+        class ConfirmingVerifier:
+            def verify(self, tool_name, tool_input, result):
+                return VerificationResult(
+                    "confirmed",
+                    f"{tool_name} result observed",
+                    f"{tool_name} confirmed",
+                )
+
+        core = NovaCore.__new__(NovaCore)
+        core.status_callback = None
+        core.brain = FakeBrain()
+        core.long_memory = FakeLongMemory()
+        core.short_memory = FakeMemory()
+        core.knowledge = FakeKnowledge()
+        core.extractor = FakeExtractor()
+        core.tools = E2ETools()
+        core.router = E2ERouter()
+        core.planner = Planner(PlannerBrain(), core.tools)
+        core.verifier = ConfirmingVerifier()
+        core.max_steps = 8
+        core.access = {"pc": True, "web": False, "git": False}
+        core.execution_state = {
+            "last_plan": None,
+            "verified_tools": [],
+            "last_verified": None,
+        }
+        core._direct_self_diagnostics_answer = lambda message: None
+        core._direct_evidence_answer = lambda message: None
+        core._direct_memory_answer = lambda message: None
+        core._extract_and_store_memory = lambda message: None
+        core._identity_system_prompt = lambda extra="": "Nova identity"
+        core._build_final_prompt = lambda **kwargs: "Final response prompt"
+
+        response = core.ask("Inspect source, write a report, and run tests")
+
+        self.assertIn("created successfully", response.lower())
+        self.assertEqual(
+            [name for name, _ in core.tools.calls],
+            ["read_file", "write_file", "terminal"],
+        )
+        self.assertTrue(core.planner.is_complete(core.execution_state["last_plan"]))
+        self.assertEqual(len(core.execution_state["verified_tools"]), 3)
+
     def test_empty_plan_uses_plain_text_recovery_for_capability_question(self):
         class EmptyPlanner(FakePlanner):
-            def create_plan(self, goal, context):
+            def create_plan(self, goal, context, allowed_tools=None):
                 return {"goal": goal, "steps": []}
 
         class RecoveryBrain:

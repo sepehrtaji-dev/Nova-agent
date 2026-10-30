@@ -188,7 +188,7 @@ class RouterTests(unittest.TestCase):
         )
 
         self.assertEqual(plan["steps"], [])
-        self.assertEqual(brain.calls, 1)
+        self.assertEqual(brain.calls, 2)
 
     def test_planner_keeps_only_steps_with_registered_tool_and_object_input(self):
         brain = FakeBrain(

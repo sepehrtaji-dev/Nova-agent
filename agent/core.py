@@ -1212,7 +1212,8 @@ class NovaCore:
             else:
                 plan = self.planner.create_plan(
                     goal=message,
-                    context=self._conversation_context(max_chars=10000)
+                    context=self._conversation_context(max_chars=10000),
+                    allowed_tools=self._allowed_tools(),
                 )
             state = getattr(self, "execution_state", None)
             if not isinstance(state, dict):
@@ -1318,6 +1319,7 @@ class NovaCore:
             )
 
         completed = False
+        goal_verified = False
         last_tool_error = None
         for step in range(
             self.max_steps
@@ -1396,8 +1398,45 @@ class NovaCore:
                     if (
                         goal_complete
                         and has_success
+                        and self.planner.is_complete(plan)
                     ):
-                        completed = True
+                        goal_check = self.planner.verify_goal(
+                            goal=message,
+                            plan=plan,
+                            tool_history=tool_history,
+                            allowed_tools=self._allowed_tools(),
+                        )
+                        if goal_check.get("complete") is True:
+                            goal_verified = True
+                            completed = True
+                            break
+                        additional_steps = goal_check.get("steps", [])
+                        if additional_steps:
+                            next_id = max(
+                                (
+                                    item.get("id", 0)
+                                    for item in plan.get("steps", [])
+                                    if isinstance(item, dict)
+                                    and isinstance(item.get("id", 0), int)
+                                ),
+                                default=0,
+                            ) + 1
+                            for extra_step in additional_steps:
+                                extra_step["id"] = next_id
+                                next_id += 1
+                            plan["steps"].extend(additional_steps)
+                            state = getattr(self, "execution_state", None)
+                            if isinstance(state, dict):
+                                state["last_plan"] = plan
+                            tool_history.append(
+                                "Goal verification found remaining work: "
+                                + str(goal_check.get("reason", ""))
+                            )
+                            continue
+                        last_tool_error = (
+                            "Goal verification could not confirm completion: "
+                            + str(goal_check.get("reason", ""))
+                        )
                         break
 
                     tool_history.append(
@@ -1721,24 +1760,140 @@ Nova must choose another useful action.
             )
 
             if succeeded:
-                if current_step_id is not None:
-                    self.planner.update_step(
-                        plan,
-                        current_step_id,
-                        result,
-                        status="completed"
+                # A verified result is new evidence. Revisit the remaining plan
+                # after every successful action so the model can add, remove, or
+                # reorder pending work based on what the tool actually found.
+                # Planner.replan preserves previously completed steps and only
+                # treats this action as complete when its result is verified.
+                current_step_snapshot = (
+                    dict(current_step)
+                    if isinstance(current_step, dict)
+                    else None
+                )
+                plan = self.planner.replan(
+                    plan=plan,
+                    goal=message,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    result=result,
+                    success=True,
+                    allowed_tools=self._allowed_tools(),
+                )
+
+                # A planner/provider failure must not undo a verifier-confirmed
+                # action. Reconcile the current step against the returned plan
+                # using its tool and exact input rather than trusting model text.
+                if current_step_snapshot is not None:
+                    parsed_executed_input = self._parse_tool_input(tool_input) or {}
+                    matched_step = next(
+                        (
+                            candidate for candidate in plan.get("steps", [])
+                            if isinstance(candidate, dict)
+                            and candidate.get("tool") == tool_name
+                            and candidate.get("input") == parsed_executed_input
+                        ),
+                        None,
                     )
+                    if (
+                        matched_step is None
+                        and (
+                            not isinstance(current_step_snapshot.get("tool"), str)
+                            or not isinstance(current_step_snapshot.get("input"), dict)
+                        )
+                    ):
+                        # Compatibility for older/custom plan objects without
+                        # structured tool metadata. Structured plans must match
+                        # the exact executed tool/input, never description alone.
+                        executed_description = str(
+                            current_step_snapshot.get("description", "")
+                        ).strip().casefold()
+                        matched_step = next(
+                            (
+                                candidate for candidate in plan.get("steps", [])
+                                if isinstance(candidate, dict)
+                                and str(candidate.get("description", "")).strip().casefold()
+                                == executed_description
+                            ),
+                            None,
+                        )
+                    if matched_step is not None and matched_step.get("status") != "completed":
+                        self.planner.update_step(
+                            plan,
+                            matched_step.get("id"),
+                            result,
+                            status="completed",
+                        )
+                    elif matched_step is None:
+                        # Keep the verified operation in the ledger even if the
+                        # model rewrites or omits its description during replan.
+                        completed_step = dict(current_step_snapshot)
+                        completed_step.update({
+                            "id": max(
+                                (
+                                    candidate.get("id", 0)
+                                    for candidate in plan.get("steps", [])
+                                    if isinstance(candidate, dict)
+                                    and isinstance(candidate.get("id", 0), int)
+                                ),
+                                default=0,
+                            ) + 1,
+                            "tool": tool_name,
+                            "input": parsed_executed_input,
+                            "status": "completed",
+                            "result": result,
+                        })
+                        plan.setdefault("steps", []).insert(0, completed_step)
 
-                # A verified success is authoritative. Never ask the LLM to
-                # re-plan a successful step, because it can accidentally reopen
-                # completed work or erase the progress we just verified.
+                state = getattr(self, "execution_state", None)
+                if isinstance(state, dict):
+                    state["last_plan"] = plan
+
                 workspace_revision += 1
-
                 last_tool_error = None
 
                 if self.planner.is_complete(plan):
-                    completed = True
-                    self._status("Task plan completed.")
+                    goal_check = self.planner.verify_goal(
+                        goal=message,
+                        plan=plan,
+                        tool_history=tool_history,
+                        allowed_tools=self._allowed_tools(),
+                    )
+                    if goal_check.get("complete") is True:
+                        goal_verified = True
+                        completed = True
+                        self._status("User goal verified complete.")
+                        break
+
+                    additional_steps = goal_check.get("steps", [])
+                    if additional_steps:
+                        next_id = max(
+                            (
+                                item.get("id", 0)
+                                for item in plan.get("steps", [])
+                                if isinstance(item, dict)
+                                and isinstance(item.get("id", 0), int)
+                            ),
+                            default=0,
+                        ) + 1
+                        for extra_step in additional_steps:
+                            extra_step["id"] = next_id
+                            next_id += 1
+                        plan["steps"].extend(additional_steps)
+                        state = getattr(self, "execution_state", None)
+                        if isinstance(state, dict):
+                            state["last_plan"] = plan
+                        tool_history.append(
+                            "Goal verification found remaining work: "
+                            + str(goal_check.get("reason", ""))
+                        )
+                        self._status("Goal verification found more work...")
+                        continue
+
+                    last_tool_error = (
+                        "Goal verification could not confirm completion: "
+                        + str(goal_check.get("reason", ""))
+                    )
+                    self._status("Goal completion could not be verified...")
                     break
 
                 continue
@@ -1752,7 +1907,8 @@ Nova must choose another useful action.
                 tool_name=tool_name,
                 tool_input=tool_input,
                 result=result,
-                success=False
+                success=False,
+                allowed_tools=self._allowed_tools(),
             )
 
             last_tool_error = (
@@ -1766,7 +1922,11 @@ Nova must choose another useful action.
 
             # Verification is now handled by Verifier above
 
-        if task_type == "computer" and self.planner.is_complete(plan):
+        if (
+            task_type == "computer"
+            and goal_verified
+            and self.planner.is_complete(plan)
+        ):
             completed = True
 
         # Audit the final claim against plan state and this run's verifier records.
