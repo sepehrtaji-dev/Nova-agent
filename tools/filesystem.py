@@ -16,6 +16,7 @@ Protected system paths are blocked even in system mode.
 """
 
 import os
+import ntpath
 import json
 import stat
 
@@ -137,16 +138,32 @@ class FileSystemTool:
 
         # Check the requested path and its resolved target: a harmless-looking
         # symlink must not redirect a read/write into a protected system file.
-        candidates = [os.path.abspath(full_path)]
-        try:
-            resolved = os.path.realpath(full_path)
-            if resolved not in candidates:
-                candidates.append(resolved)
-        except OSError:
-            pass
-        # Also test the raw text, so a POSIX path keeps its POSIX meaning even
-        # on Windows where abspath would rewrite it onto the current drive.
-        candidates.append(str(full_path))
+        raw_path = str(full_path)
+
+        # A Windows drive path is absolute in Windows syntax, but POSIX
+        # os.path.abspath() treats it as a relative filename. On Linux CI,
+        # e.g. "C:/projects/nova/main.py" can therefore become
+        # "/home/runner/work/.../C:/projects/nova/main.py" and falsely match
+        # the protected "/home" prefix. Do not resolve a foreign drive path
+        # against the host's current working directory. Its raw, normalized
+        # form is still checked against the cross-platform blocklist below.
+        foreign_windows_drive = (
+            os.name != "nt" and bool(ntpath.splitdrive(raw_path)[0])
+        )
+
+        candidates = []
+        if not foreign_windows_drive:
+            candidates.append(os.path.abspath(full_path))
+            try:
+                resolved = os.path.realpath(full_path)
+                if resolved not in candidates:
+                    candidates.append(resolved)
+            except OSError:
+                pass
+
+        # Always check the original spelling too. This preserves POSIX path
+        # meaning on Windows and Windows drive-path meaning on POSIX.
+        candidates.append(raw_path)
 
         blocked_prefixes = [normalize(item) for item in self._BLOCKED_PREFIXES]
         blocked_prefixes += [
