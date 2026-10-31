@@ -25,6 +25,7 @@ from rich.segment import Segment
 from rich.layout import Layout
 from rich.columns import Columns
 from rich.padding import Padding
+from rich.control import Control, ControlType
 
 from agent.core import NovaCore
 from agent.introspection import inspect_model, runtime_profile
@@ -34,7 +35,7 @@ from utils.math_parser import format_response_math
 # ── Theme ────────────────────────────────────────────────────────────────────
 
 theme = Theme({
-    "nova":       "bold bright_cyan",
+    "nova":       "bold #d97757",
     "user":       "bold white",
     "muted":      "dim",
     "accent":     "bright_blue",
@@ -43,7 +44,7 @@ theme = Theme({
     "error":      "bright_red",
     "tool":       "bright_magenta",
     "info":       "bright_blue",
-    "border":     "bright_cyan",
+    "border":     "#d97757",
     "border_dim": "grey30",
     "surface":    "grey15",
     "highlight":  "reverse",
@@ -57,6 +58,18 @@ console = Console(theme=theme)
 # Tool names are resolved from the live registry at runtime so newly
 # registered tools can appear in activity traces without editing this UI.
 TOOL_COLOR = "bright_magenta"
+
+# Claude Code look: coral accent, grey chrome, amber mode line
+CLAUDE = "#d97757"
+USER_BG = "on #373737"
+RULE_COLOR = "grey37"
+MODE_COLOR = "#f5a623"
+
+MASCOT = (
+    " ▐▛███▜▌ ",
+    "▝▜█████▛▘",
+    "  ▘▘ ▝▝  ",
+)
 
 ACCESS_META = {
     "web": ("WEB SEARCH",  "Web search access"),
@@ -132,7 +145,7 @@ def classify_status(message: str, tool_names=None) -> tuple[str, str, str]:
         return "ERROR", "bright_red", "error"
 
     if any(w in lower for w in ("verif", "confirm", "checking")):
-        return "CHECK", "bright_cyan", "verify"
+        return "CHECK", "#d97757", "verify"
 
     if any(w in lower for w in (
         "success", "completed", "complete", "done", "finished"
@@ -148,130 +161,102 @@ def classify_status(message: str, tool_names=None) -> tuple[str, str, str]:
         "think", "thinking", "reason", "processing", "preparing",
         "generating", "generating content"
     )):
-        return "THINK", "bright_cyan", "think"
+        return "THINK", "#d97757", "think"
 
     if any(w in lower for w in ("search", "web", "internet")):
         return "WEB", "bright_blue", "tool"
 
-    return "NOVA", "bright_cyan", "info"
+    return "NOVA", "#d97757", "info"
 
 
 # ── Layout Components ────────────────────────────────────────────────────────
 
+def format_duration(seconds: float) -> str:
+    total = int(round(seconds))
+    if total < 60:
+        return f"{total}s"
+    minutes, secs = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
+def clock_time() -> str:
+    return datetime.now().strftime("%I:%M %p").lstrip("0")
+
+
+def render_mascot() -> Text:
+    body = f"on {CLAUDE}"
+    art = Text()
+    # row 1: head with two dark eyes
+    art.append(" ")
+    for cell in "BEBEB":
+        if cell == "B":
+            art.append(" ", style=body)
+        else:
+            art.append("▀", style=CLAUDE)  # solid top edge, dark eye below
+    art.append(" ")
+    art.append("\n")
+    # row 2: wide body with arms
+    art.append(" " * 7, style=body)
+    art.append("\n")
+    # row 3: four feet
+    art.append("▀ ▀ ▀ ▀", style=CLAUDE)
+    return art
+
+
 def render_header(core: NovaCore) -> RenderableType:
     access = core.get_access()
     model_name = str(getattr(getattr(core, "brain", None), "model", "local")).strip()
-
-    # Top bar
-    top = Table(box=None, show_header=False, expand=True, padding=(0, 1))
-    top.add_column("brand", ratio=1, no_wrap=True)
-    top.add_column("mode", justify="center", no_wrap=True)
-    top.add_column("model", justify="right", no_wrap=True)
-
-    brand = Text()
-    brand.append("✦ ", style="bright_cyan")
-    brand.append("NOVA", style="bold white")
-    brand.append("  ", style="white")
-    brand.append("LOCAL AI AGENT", style="dim")
-
-    top.add_row(
-        brand,
-        Text("CHAT / AGENT", style="dim"),
-        Text(model_name.upper(), style="dim"),
-    )
-
-    # Permissions bar
-    perms = Table(box=None, show_header=False, expand=True, padding=(0, 1))
-    perms.add_column("web", ratio=1, no_wrap=True)
-    perms.add_column("git", ratio=1, justify="center", no_wrap=True)
-    perms.add_column("pc", ratio=1, justify="right", no_wrap=True)
-
-    perms.add_row(
-        access_pill("web", access["web"]),
-        access_pill("git", access["git"]),
-        access_pill("pc", access["pc"]),
-    )
-
-    # Runtime strip is derived from the live registry and config, without a network probe.
     profile = runtime_profile(core)
-    runtime = Text()
-    runtime.append(f"  {profile['enabled_tools']}/{profile['registered_tools']} tools enabled", style="bold bright_green")
-    runtime.append("   ·   ", style="dim")
-    runtime.append(f"CTX {profile['context_budget']:,}", style="bright_cyan")
-    runtime.append("   ·   ", style="dim")
-    runtime.append(f"PY {profile['python']}", style="dim")
 
-    # Command hint bar
-    hint = Text()
-    hint.append("  /self", style="bright_cyan")
-    hint.append(" inspect   ", style="dim")
-    hint.append("/model", style="bright_blue")
-    hint.append(" metadata   ", style="dim")
-    hint.append("/doctor", style="bright_yellow")
-    hint.append(" diagnostics   ", style="dim")
-    hint.append("/help", style="white")
+    version = str(profile["version"]).lstrip("vV")
+    info = Text()
+    info.append("Nova", style="bold white")
+    info.append(f" v{version}", style="dim")
+    info.append("\n")
+    info.append(f"{model_name} · {profile['provider']}", style="dim")
+    info.append("\n")
+    info.append(str(profile["working_directory"]), style="dim")
 
-    return Panel(
-        Group(top, perms, runtime, hint),
-        border_style="bright_cyan",
-        padding=(0, 0),
-        expand=True,
-    )
+    banner = Table(box=None, show_header=False, expand=False, padding=(0, 3), pad_edge=False)
+    banner.add_column("mascot", no_wrap=True)
+    banner.add_column("info", no_wrap=True, overflow="ellipsis")
+    banner.add_row(render_mascot(), info)
+
+    # One status line, in the spot where Claude Code shows its notice line.
+    status = Text()
+    for index, key in enumerate(("web", "git", "pc")):
+        if index:
+            status.append("   ")
+        status.append_text(access_pill(key, access[key]))
+    status.append("  ·  ", style="dim")
+    status.append(f"{profile['enabled_tools']}/{profile['registered_tools']} tools enabled", style="dim")
+    status.append("  ·  ", style="dim")
+    status.append(f"CTX {profile['context_budget']:,}", style="dim")
+    status.append("  ·  ", style="dim")
+    status.append("/help for commands", style="dim")
+
+    return Group(banner, Text(""), status)
 
 
 def render_welcome() -> RenderableType:
-    content = Text()
-    content.append(WELCOME_ART, style="bright_cyan")
-    content.append("\n\n")
-    content.append("Nova is ready.\n", style="bold white")
-    content.append(
-        "Ask naturally. Nova can plan tasks, use enabled tools, "
-        "inspect real results, re-plan, and finish the work.\n\n",
-        style="dim",
-    )
-    content.append(" /self ", style="bright_cyan")
-    content.append("runtime profile   ", style="dim")
-    content.append("/model ", style="bright_blue")
-    content.append("model metadata   ", style="dim")
-    content.append("/doctor ", style="bright_yellow")
-    content.append("health checks\n\n", style="dim")
-    content.append(
-        "Nova reports observed facts and metadata, not guessed capabilities or private model reasoning.",
-        style="dim italic",
-    )
-
-    return Panel(
-        content,
-        title="[bold bright_cyan]SESSION[/bold bright_cyan]",
-        border_style="grey30",
-        padding=(1, 2),
-        expand=True,
-    )
+    return Text("")
 
 
 def render_user(message: str) -> RenderableType:
-    label = Text()
-    label.append("YOU", style="bold white")
-    label.append("  ·  MESSAGE", style="dim")
-
-    return Group(
-        label,
-        Panel(
-            message,
-            border_style="grey37",
-            padding=(0, 1),
-            expand=True,
-        ),
+    row = Table(box=None, show_header=False, expand=True, padding=(0, 1), pad_edge=False, collapse_padding=True)
+    row.add_column("prompt", width=1, no_wrap=True)
+    row.add_column("message", ratio=1)
+    row.add_row(
+        Text("❯", style="grey62"),
+        Text(str(message), style="bold white"),
     )
+    return Padding(row, (0, 0), style=USER_BG, expand=True)
 
 
 def render_nova(message: str, elapsed: float | None = None) -> RenderableType:
-    label = Text()
-    label.append("NOVA", style="bold bright_cyan")
-
-    if elapsed is not None:
-        label.append(f"  ·  {elapsed:.2f}s", style="dim")
-
     message = format_response_math(message)
 
     try:
@@ -279,15 +264,23 @@ def render_nova(message: str, elapsed: float | None = None) -> RenderableType:
     except Exception:
         body = Text(str(message))
 
-    return Group(
-        label,
-        Panel(
-            body,
-            border_style="bright_cyan",
-            padding=(0, 1),
-            expand=True,
-        ),
-    )
+    row = Table(box=None, show_header=False, expand=True, padding=(0, 1), pad_edge=False, collapse_padding=True)
+    row.add_column("bullet", width=1, no_wrap=True)
+    row.add_column("body", ratio=1)
+    row.add_row(Text("●", style="bold white"), body)
+
+    if elapsed is None:
+        return row
+
+    thought = Text()
+    thought.append("  Thought for ", style="grey62")
+    thought.append(format_duration(elapsed), style="bold white")
+
+    footer = Text()
+    footer.append("✻ ", style="grey62")
+    footer.append(f"Worked for {format_duration(elapsed)} · done {clock_time()}", style="grey62")
+
+    return Group(thought, Text(""), row, Text(""), footer)
 
 
 def build_activity_panel(
@@ -296,20 +289,42 @@ def build_activity_panel(
     elapsed: float,
     event_count: int,
 ) -> RenderableType:
+    glyphs = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]
+    glyph = glyphs[int(elapsed * 8) % len(glyphs)]
+
+    label = str(current_status).strip()
+    if label.endswith("..."):
+        label = label[:-3] + "…"
+
+    status = Text()
+    status.append(f"{glyph} ", style=CLAUDE)
+    status.append(label, style=CLAUDE)
+
+    meta = [format_duration(elapsed)]
+    if event_count:
+        meta.append(f"{event_count} event{'s' if event_count != 1 else ''}")
+    if current_status not in ("Completed", "Request failed"):
+        meta.append("ctrl+c to interrupt")
+    status.append(f" ({' · '.join(meta)})", style="dim")
+
+    visible = list(events)[-12:]
+    if not visible:
+        return status
+
     table = Table(
         show_header=False,
         box=None,
         expand=True,
         padding=(0, 1),
+        pad_edge=False,
     )
 
+    table.add_column("branch", width=4, no_wrap=True, style="dim")
     table.add_column("time", width=9, no_wrap=True, style="dim")
     table.add_column("type", width=9, no_wrap=True)
     table.add_column("activity", ratio=1, overflow="ellipsis")
 
-    visible = list(events)[-12:]
-
-    for event in visible:
+    for index, event in enumerate(visible):
         kind = event.get("kind", "info")
 
         if kind == "confirm":
@@ -319,39 +334,18 @@ def build_activity_panel(
         elif kind == "tool":
             msg_style = "white"
         elif kind == "verify":
-            msg_style = "bright_cyan"
+            msg_style = CLAUDE
         else:
             msg_style = "dim"
 
         table.add_row(
+            "  ⎿" if index == 0 else "",
             event["time"],
             Text(event["label"], style=f"bold {event['color']}"),
             Text(event["message"], style=msg_style, overflow="ellipsis"),
         )
 
-    if not visible:
-        table.add_row(
-            "--:--:--",
-            Text("IDLE", style="dim"),
-            Text("Waiting for Nova...", style="dim"),
-        )
-
-    status = Text()
-    status.append("● ", style="bright_cyan")
-    status.append(current_status, style="bold white")
-
-    footer = Text()
-    footer.append(f"Events {event_count}", style="dim")
-    footer.append("  ·  ", style="dim")
-    footer.append(f"{elapsed:.1f}s", style="dim")
-
-    return Panel(
-        Group(status, Text(""), table, Text(""), footer),
-        title="[bold bright_cyan]LIVE ACTIVITY[/bold bright_cyan]",
-        border_style="bright_cyan",
-        padding=(0, 1),
-        expand=True,
-    )
+    return Group(status, table)
 
 
 def render_verify_summary(events: deque) -> Optional[RenderableType]:
@@ -362,33 +356,97 @@ def render_verify_summary(events: deque) -> Optional[RenderableType]:
     if not confirmed and not failed:
         return None
 
+    title = Text()
+    title.append("● ", style="bold bright_green" if not failed else "bold bright_red")
+    title.append("Verification", style="bold white")
+
     vtable = Table(
         box=None,
         show_header=False,
         expand=True,
         padding=(0, 1),
+        pad_edge=False,
     )
-    vtable.add_column("icon",    width=4,  no_wrap=True)
+    vtable.add_column("branch", width=4, no_wrap=True, style="dim")
+    vtable.add_column("icon",   width=1,  no_wrap=True)
     vtable.add_column("message", ratio=1)
 
+    first = True
     for e in confirmed:
         vtable.add_row(
+            "  ⎿" if first else "",
             Text("✓", style="bold bright_green"),
             Text(e["message"], style="bright_green"),
         )
+        first = False
     for e in failed:
         vtable.add_row(
+            "  ⎿" if first else "",
             Text("✗", style="bold bright_red"),
             Text(e["message"], style="bright_red"),
         )
+        first = False
 
-    return Panel(
-        vtable,
-        title="[bold bright_green]VERIFICATION[/bold bright_green]",
-        border_style="bright_green",
-        padding=(0, 1),
-        expand=True,
+    return Group(title, vtable)
+
+
+# ── Input box (rule · ❯ prompt · rule · mode line) ──────────────────────────
+
+def render_mode_line(core: NovaCore) -> RenderableType:
+    access = core.get_access()
+    state = " · ".join(
+        f"{key} {'on' if access[key] else 'off'}" for key in ("web", "git", "pc")
     )
+    line = Text()
+    line.append("  ⏵⏵ ", style=MODE_COLOR)
+    line.append(state, style=MODE_COLOR)
+    line.append(" (/help for commands)", style="dim")
+    return line
+
+
+def _erase_input_box(lines_up: int, total: int = 4):
+    """Wipe the 4-line input box (rule, prompt, rule, mode line) and park the
+    cursor on its first line, so the next print starts where the box began."""
+    console.control(Control.move_to_column(0))
+    if lines_up:
+        console.control(Control.move(0, -lines_up))
+    for index in range(total):
+        console.control(Control((ControlType.ERASE_IN_LINE, 2)))
+        if index < total - 1:
+            console.control(Control.move(0, 1))
+    console.control(Control.move(0, -(total - 1)))
+    console.control(Control.move_to_column(0))
+
+
+class InputPrompt(Prompt):
+    prompt_suffix = " "
+
+
+def read_input(core: NovaCore) -> str:
+    prompt = "[bold white]❯[/bold white]"
+    interactive = console.is_terminal and not console.legacy_windows
+
+    if not interactive:
+        console.print()
+        return InputPrompt.ask(prompt, console=console)
+
+    # Draw the whole box first, then move the cursor back into it.
+    console.print()
+    console.print(Rule(style=RULE_COLOR))
+    console.print()
+    console.print(Rule(style=RULE_COLOR))
+    console.print(render_mode_line(core))
+    console.control(Control.move(0, -3))
+
+    try:
+        text = InputPrompt.ask(prompt, console=console)
+    except (KeyboardInterrupt, EOFError):
+        _erase_input_box(1)
+        raise
+
+    # Enter was pressed: the box turns into the message bar, like Claude Code.
+    _erase_input_box(2)
+    return text
 
 
 def render_trace(events: deque, elapsed: float) -> Optional[RenderableType]:
@@ -414,7 +472,7 @@ def render_trace(events: deque, elapsed: float) -> Optional[RenderableType]:
         elif kind == "tool":
             msg_style = "white"
         elif kind == "verify":
-            msg_style = "bright_cyan"
+            msg_style = "#d97757"
         else:
             msg_style = "dim"
 
@@ -425,7 +483,7 @@ def render_trace(events: deque, elapsed: float) -> Optional[RenderableType]:
         )
 
     title = Text()
-    title.append("RUN TRACE", style="bold bright_cyan")
+    title.append("RUN TRACE", style="bold #d97757")
     title.append(f"  ·  {elapsed:.2f}s", style="dim")
 
     return Panel(
@@ -443,7 +501,7 @@ def render_permissions(core: NovaCore) -> RenderableType:
     table = Table(
         title="Capability Controls",
         box=box.ROUNDED,
-        border_style="bright_cyan",
+        border_style="#d97757",
         expand=False,
         padding=(0, 1),
     )
@@ -466,7 +524,7 @@ def render_permissions(core: NovaCore) -> RenderableType:
     return Group(
         table,
         Text(""),
-        Text("[dim]Use /web, /git, or /pc to toggle a capability.[/dim]", style="dim"),
+        Text("Use /web, /git, or /pc to toggle a capability.", style="dim"),
     )
 
 
@@ -496,7 +554,7 @@ def render_runtime_profile(core: NovaCore, include_model: bool = True) -> Render
         components.add_row(item["label"], item["implementation"], state)
 
     tools = Table(box=box.SIMPLE, expand=True, padding=(0, 1))
-    tools.add_column("Tool", style="bright_cyan")
+    tools.add_column("Tool", style="#d97757")
     tools.add_column("Capability", style="dim")
     tools.add_column("Permission", justify="right")
     for item in profile["tools"]:
@@ -506,9 +564,9 @@ def render_runtime_profile(core: NovaCore, include_model: bool = True) -> Render
         tools.add_row("No tools registered", "—", "—")
 
     sections = [
-        Panel(overview, title="[bold bright_cyan]RUNTIME IDENTITY[/bold bright_cyan]", border_style="bright_cyan", padding=(0, 1)),
-        Panel(components, title="[bold bright_cyan]LIVE AGENT COMPONENTS[/bold bright_cyan]", border_style="grey30", padding=(0, 1)),
-        Panel(tools, title="[bold bright_cyan]TOOL REGISTRY[/bold bright_cyan]", border_style="grey30", padding=(0, 1)),
+        Panel(overview, title="[bold #d97757]RUNTIME IDENTITY[/bold #d97757]", border_style="#d97757", padding=(0, 1)),
+        Panel(components, title="[bold #d97757]LIVE AGENT COMPONENTS[/bold #d97757]", border_style="grey30", padding=(0, 1)),
+        Panel(tools, title="[bold #d97757]TOOL REGISTRY[/bold #d97757]", border_style="grey30", padding=(0, 1)),
     ]
 
     if include_model:
@@ -560,13 +618,13 @@ def render_runtime_status(core: NovaCore) -> RenderableType:
     table.add_row("Components", f"{profile['present_components']}/{profile['component_count']} present")
     table.add_row("Context / output", f"{profile['context_budget']:,} / {profile['output_budget']:,} tokens configured")
     table.add_row("Permissions", ", ".join(f"{k}={'ON' if v else 'OFF'}" for k, v in profile["access"].items()))
-    return Panel(table, title="[bold bright_cyan]NOVA RUNTIME STATUS[/bold bright_cyan]", border_style="bright_cyan", padding=(1, 2), expand=True)
+    return Panel(table, title="[bold #d97757]NOVA RUNTIME STATUS[/bold #d97757]", border_style="#d97757", padding=(1, 2), expand=True)
 
 
 def render_tool_registry(core: NovaCore) -> RenderableType:
     profile = runtime_profile(core)
-    table = Table(title="Live Tool Registry", box=box.ROUNDED, border_style="bright_cyan", expand=True, padding=(0, 1))
-    table.add_column("Tool", style="bright_cyan")
+    table = Table(title="Live Tool Registry", box=box.ROUNDED, border_style="#d97757", expand=True, padding=(0, 1))
+    table.add_column("Tool", style="#d97757")
     table.add_column("Capability", style="dim")
     table.add_column("State", justify="center")
     table.add_column("Description", overflow="ellipsis")
@@ -601,11 +659,11 @@ def render_help() -> RenderableType:
     table = Table(
         title="Nova Controls",
         box=box.ROUNDED,
-        border_style="bright_cyan",
+        border_style="#d97757",
         expand=False,
         padding=(0, 1),
     )
-    table.add_column("Command", style="bright_cyan")
+    table.add_column("Command", style="#d97757")
     table.add_column("Action", style="white")
 
     rows = [
@@ -634,7 +692,7 @@ def render_spinner(status: str, frame: int) -> Text:
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     spinner = frames[frame % len(frames)]
     text = Text()
-    text.append(f"{spinner} ", style="bright_cyan")
+    text.append(f"{spinner} ", style="#d97757")
     text.append(status, style="bold white")
     return text
 
@@ -786,10 +844,7 @@ def main():
 
     while True:
         try:
-            console.print()
-            message = Prompt.ask(
-                "[bold bright_cyan]›[/bold bright_cyan]"
-            ).strip()
+            message = read_input(core).strip()
         except (KeyboardInterrupt, EOFError):
             break
 
@@ -865,29 +920,16 @@ def main():
                 console.print(verify)
 
         except KeyboardInterrupt:
-            console.print("\n[warning]Request interrupted.[/warning]")
+            console.print("\n[warning]  ⎿  Interrupted · What should Nova do instead?[/warning]")
         except Exception as exc:
-            console.print(
-                Panel(
-                    Text.from_markup(
-                        "[bold red]Nova encountered an error[/bold red]\n\n"
-                        f"{exc}"
-                    ),
-                    border_style="red",
-                    padding=(0, 1),
-                    expand=True,
-                )
-            )
+            err = Text()
+            err.append("● ", style="bold bright_red")
+            err.append("Nova encountered an error\n", style="bold bright_red")
+            err.append(f"  ⎿  {exc}", style="bright_red")
+            console.print(err)
 
     console.print()
-    console.print(
-        Panel(
-            "[dim]Nova session ended.[/dim]",
-            border_style="grey30",
-            padding=(0, 1),
-            expand=False,
-        )
-    )
+    console.print(Text("Nova session ended.", style="dim"))
 
 
 if __name__ == "__main__":
