@@ -243,6 +243,7 @@ class Planner:
 
         normalized = []
         dropped = 0
+        planned_search_queries = set()
 
         for index, step in enumerate(
             steps,
@@ -286,6 +287,18 @@ class Planner:
                 print(f"[PLANNER] Rejected planned step '{description}': {reason}.")
                 dropped += 1
                 continue
+
+            search_query = self._normalized_search_query(tool, raw_input)
+            if search_query:
+                if search_query in planned_search_queries:
+                    print("[PLANNER] Dropped duplicate web_search query from initial plan.")
+                    dropped += 1
+                    continue
+                if len(planned_search_queries) >= self.MAX_WEB_SEARCH_QUERIES:
+                    print("[PLANNER] Initial plan reached the web_search query budget.")
+                    dropped += 1
+                    continue
+                planned_search_queries.add(search_query)
 
             normalized_step = {
                 "id": index,
