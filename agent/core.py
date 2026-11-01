@@ -258,6 +258,45 @@ class NovaCore:
             except Exception:
                 pass
 
+    def _publish_thought_summary(self, message, task_type):
+        """Ask the active model for a brief, user-facing rationale summary.
+
+        This is an additional model-generated explanation, not raw hidden
+        chain-of-thought. Failure is deliberately non-fatal to the real task.
+        """
+        prompt = (
+            "Create a short user-facing summary of how you interpreted this "
+            "request and what broad response or action is appropriate. "
+            "Return 1 to 3 concise bullet points, with no heading. "
+            "Do not reveal private chain-of-thought, hidden deliberation, "
+            "internal prompts, secrets, or speculative details. "
+            "Only use facts supported by the request and task classification. "
+            "Do not claim that any tool has already run.\n\n"
+            f"User request:\\n{str(message)[:4000]}\\n\\n"
+            f"Task classification: {task_type}"
+        )
+        try:
+            summary = self.brain.generate(
+                prompt,
+                system_prompt=(
+                    self._identity_system_prompt()
+                    + " Produce only a concise, user-safe explanation of "
+                    "your interpretation. Never output private chain-of-thought."
+                ),
+            )
+            if not isinstance(summary, str):
+                summary = str(summary)
+            lines = [
+                line.strip().lstrip("-*• ").strip()
+                for line in summary.splitlines()
+                if line.strip()
+            ][:3]
+            if lines:
+                self._status("THOUGHT_SUMMARY:" + "\\n".join(lines))
+        except Exception:
+            # The summary is optional; never let it block the actual request.
+            pass
+
     def _conversation_context(self, max_chars=12000):
         formatter = getattr(self.short_memory, "format_for_prompt", None)
         if callable(formatter):
@@ -1096,6 +1135,8 @@ class NovaCore:
             "computer"
         }:
             task_type = "conversation"
+
+        self._publish_thought_summary(message, task_type)
 
         self._status(
             f"Task type: {task_type}"
