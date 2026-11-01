@@ -198,6 +198,23 @@ class FakeVerifier:
 
 
 class CoreTests(unittest.TestCase):
+    def test_conversation_personality_encourages_natural_social_replies(self):
+        prompt = NovaCore._conversation_personality_prompt().lower()
+
+        self.assertIn("greetings", prompt)
+        self.assertIn("how you are", prompt)
+        self.assertIn("speak naturally", prompt)
+        self.assertIn("respond directly", prompt)
+        self.assertIn("match the user's language", prompt)
+
+    def test_conversation_personality_preserves_truthfulness_and_agent_controls(self):
+        prompt = NovaCore._conversation_personality_prompt().lower()
+
+        self.assertIn("do not claim consciousness", prompt)
+        self.assertIn("answer honestly", prompt)
+        self.assertIn("must never change tool", prompt)
+        self.assertIn("verification", prompt)
+
     def test_identity_is_not_answered_by_a_fixed_core_rule(self):
         self.assertFalse(hasattr(NovaCore, "_direct_identity_answer"))
 

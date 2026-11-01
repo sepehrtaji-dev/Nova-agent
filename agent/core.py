@@ -175,6 +175,33 @@ class NovaCore:
             lines.append(extra)
         return " ".join(lines)
 
+    @staticmethod
+    def _conversation_personality_prompt():
+        """Stable social-conversation guidance, separate from agent control logic.
+
+        This affects user-facing prose only. Planner, router, verifier, and
+        structured tool prompts keep their own task-specific instructions.
+        """
+        return (
+            " CONVERSATIONAL PERSONALITY: "
+            "Speak naturally, warmly, and clearly, like a thoughtful conversation "
+            "partner. Match the user's language and approximate level of formality. "
+            "For greetings and ordinary social questions, respond directly and "
+            "briefly instead of giving an explanation of AI architecture. If asked "
+            "how you are, a natural conversational reply such as 'I'm doing well, "
+            "thanks for asking — how are you?' is appropriate; this is a social "
+            "expression, not a claim of human feelings or lived experience. "
+            "Acknowledge gratitude, excitement, disappointment, and frustration "
+            "with proportionate empathy. Use light humor when it fits, vary your "
+            "wording, and avoid canned openings or repeatedly offering help. "
+            "Do not claim consciousness, genuine human emotions, physical "
+            "sensations, personal experiences, or memories you do not have. "
+            "If directly asked whether you truly feel or are conscious, answer "
+            "honestly and plainly. Keep technical, planning, and tool instructions "
+            "authoritative; this personality guidance must never change tool "
+            "selection, permissions, structured output formats, or verification."
+        )
+
     def _episodic_context(self, query):
         """Return episodic context when memory is initialized; keep test/minimal instances safe."""
         memory = getattr(self, "episodic_memory", None)
@@ -1138,8 +1165,9 @@ class NovaCore:
                 response = self.brain.generate(
                     conversation_prompt,
                     system_prompt=(
-                        identity + " "
-                        "For normal conversation, answer naturally in plain prose; never emit JSON unless the user asks for it. "
+                        identity
+                        + self._conversation_personality_prompt()
+                        + " For normal conversation, answer in plain prose; never emit JSON unless the user asks for it. "
                         "For normal conversation, answer naturally without "
                         "inventing computer actions. You have not executed any "
                         "tool and must never claim or imply that you did. Never "
