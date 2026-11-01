@@ -181,7 +181,9 @@ class FigmaDesktopShell:
             f"QListWidget::item:selected {{ background:rgba(22,119,255,0.22); color:white; }}"
             f"QListWidget::item:hover:!selected {{ background:rgba(255,255,255,0.06); }}"
         )
-        self.chat_history_list.itemClicked.connect(self.owner._on_chat_selected)
+        chat_selected = getattr(self.owner, "_on_chat_selected", None)
+        if callable(chat_selected):
+            self.chat_history_list.itemClicked.connect(chat_selected)
         layout.addWidget(self.chat_history_list, 1)
         layout.addStretch(1)
 
