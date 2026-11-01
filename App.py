@@ -1808,10 +1808,17 @@ class NovaWindow(QMainWindow):
         self.input.setFocus()
 
     def _clear_chat_view(self):
+        shell = getattr(self, "_desktop_shell", None)
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
             widget = item.widget()
             if widget:
+                # The desktop shell keeps a Python reference to the welcome
+                # widget. Clear it before Qt schedules the C++ object for
+                # deletion, otherwise later sends may call hide() on a deleted
+                # Shiboken wrapper.
+                if shell and getattr(shell, "welcome_hero", None) is widget:
+                    shell.welcome_hero = None
                 widget.deleteLater()
         self.chat_container_layout.addStretch()
 
@@ -1834,14 +1841,16 @@ class NovaWindow(QMainWindow):
 
     def _render_current_chat(self):
         messages = self._restore_core_memory(self.current_chat_id)
-        if not messages:
-            return
         self._clear_chat_view()
-        shell = getattr(self, "_desktop_shell", None)
-        if shell and shell.welcome_hero:
-            shell.welcome_hero.hide()
+        if not messages:
+            self._welcome()
+            return
         for item in messages:
-            self._add_message(item["role"], item["content"], attachments=item.get("attachments") or [])
+            self._add_message(
+                item["role"],
+                item["content"],
+                attachments=item.get("attachments") or [],
+            )
         self._scroll_chat()
 
     def _refresh_chat_history(self, select_current=False):
@@ -1886,7 +1895,6 @@ class NovaWindow(QMainWindow):
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
         self._sync_capabilities()
-        self._welcome()
         self._render_current_chat()
         self.status_label.setText("Ready")
         self.live_badge.setText("IDLE")
