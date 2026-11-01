@@ -2047,7 +2047,7 @@ Nova must choose another useful action.
             # partial outcome even if the planner's separate goal check fails.
             self._status("Preparing final answer...")
 
-            if used_tools and tool_history:
+            if "read_file" in used_tools and tool_history:
                 evidence = "\\n\\n".join(tool_history)
                 summary_prompt = (
                     "Answer the user's original request using ONLY the tool "
