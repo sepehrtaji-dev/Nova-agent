@@ -2086,35 +2086,30 @@ Nova must choose another useful action.
             if not response and last_tool_error and not used_tools:
                 response = (
                     "I couldn't perform the requested computer operation. "
-                    "No tool operation was run.\n\n"
+                    "No tool operation was run.\\n\\n"
                     f"Reason: {last_tool_error}"
                 )
-            elif last_tool_error:
+            elif not response and last_tool_error:
                 response = (
-                    "I couldn't complete the "
-                    "requested computer operation.\n\n"
-                    f"Last tool result:\n"
-                    f"{last_tool_error}"
+                    "I couldn't complete the requested computer operation.\\n\\n"
+                    f"Last tool result:\\n{last_tool_error}"
                 )
-            elif used_tools:
+            elif not response and used_tools:
                 response = (
-                    "I couldn't verify full completion "
-                    "of the requested computer operation. "
-                    "One or more tool operations were attempted, "
+                    "I couldn't verify full completion of the requested computer "
+                    "operation. One or more tool operations were attempted, "
                     "but the plan was not fully completed."
                 )
-            elif tool_history:
+            elif not response and tool_history:
                 response = (
                     "I couldn't perform the requested computer operation. "
                     "The proposed tool decisions were rejected before execution, "
                     "so no tool operation was run."
                 )
-            else:
+            elif not response:
                 response = (
-                    "I couldn't perform the "
-                    "requested computer operation "
-                    "because no tool operation "
-                    "was successfully completed."
+                    "I couldn't perform the requested computer operation "
+                    "because no tool operation was successfully completed."
                 )
 
             self._extract_and_store_memory(message)
