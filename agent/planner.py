@@ -1178,7 +1178,7 @@ Schema:
             # Previously completed/failed queries consume the per-goal budget;
             # pending queries are retained so an unchanged plan is not erased.
             search_query = self._normalized_search_query(tool, raw_input)
-            if search_query:
+            if search_query and status != "completed":
                 prior_queries = {
                     self._normalized_search_query(
                         old_step.get("tool"), old_step.get("input")
