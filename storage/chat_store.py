@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,8 +33,17 @@ class ChatStore:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    @contextmanager
+    def _db(self):
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self):
-        with self._connect() as db:
+        with self._db() as db:
             db.execute("PRAGMA journal_mode = WAL")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS chats (
@@ -77,7 +87,7 @@ class ChatStore:
             rows = db.execute(
                 "SELECT c.id, c.title, c.created_at, c.updated_at, "
                 "(SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id) AS message_count "
-                "FROM chats c ORDER BY c.updated_at DESC LIMIT ?",
+                "FROM chats c ORDER BY c.updated_at DESC, c.rowid DESC LIMIT ?",
                 (max(1, min(int(limit), 1000)),),
             ).fetchall()
         return [dict(row) for row in rows]
