@@ -1,0 +1,1 @@
+"""Local application storage helpers."""

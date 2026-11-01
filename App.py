@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 from agent.core import NovaCore
 from utils.math_parser import format_response_math
 from ui.figma_desktop import FigmaDesktopShell
+from storage.chat_store import ChatStore
 
 
 # --------------------------------------------------------------------------- #
@@ -568,12 +569,6 @@ class TurnStatus(QFrame):
         self.updates_layout.setSpacing(3)
         text_layout.addLayout(self.updates_layout)
 
-        self.message = QLabel("Processing your request…")
-        self.message.setObjectName("turnStatusMessage")
-        self.message.setWordWrap(True)
-        self.updates_layout.addWidget(self.message)
-        self._seen_updates.add("Processing your request…")
-
         layout.addLayout(text_layout, 1)
 
         self.elapsed_timer = QTimer(self)
@@ -587,31 +582,23 @@ class TurnStatus(QFrame):
         self.title.setText(f"Thought summary · {seconds} {unit}")
 
     def update_status(self, message):
-        """Render model-generated summaries separately from execution events."""
+        """Show only the model-generated, user-safe thought summary."""
         message = str(message or "").strip()
-        if not message:
+        if not message.startswith("THOUGHT_SUMMARY:"):
             return
 
-        if message.startswith("THOUGHT_SUMMARY:"):
-            self.title.setText("Thought summary")
-            summary = message.partition(":")[2]
-            for line in summary.splitlines():
-                line = line.strip().lstrip("-*• ").strip()
-                if not line or line in self._seen_updates:
-                    continue
-                self._seen_updates.add(line)
-                bullet = QLabel(f"•  {line}")
-                bullet.setObjectName("turnStatusMessage")
-                bullet.setWordWrap(True)
-                self.updates_layout.addWidget(bullet)
-        elif message not in self._seen_updates:
-            self._seen_updates.add(message)
-            bullet = QLabel(f"•  {message}")
+        self.title.setText("Thought summary")
+        summary = message.partition(":")[2]
+        for line in summary.splitlines():
+            line = line.strip().lstrip("-*• ").strip()
+            if not line or line in self._seen_updates:
+                continue
+            self._seen_updates.add(line)
+            bullet = QLabel(f"•  {line}")
             bullet.setObjectName("turnStatusMessage")
             bullet.setWordWrap(True)
             self.updates_layout.addWidget(bullet)
 
-        # Keep the in-chat summary compact during long multi-step runs.
         while self.updates_layout.count() > 8:
             item = self.updates_layout.takeAt(0)
             widget = item.widget()
@@ -793,6 +780,10 @@ class NovaWindow(QMainWindow):
 
         self.core = self._create_core()
         self.core.set_access(**DEFAULT_ACCESS)
+        self.chat_store = ChatStore()
+        saved_chats = self.chat_store.list_chats()
+        self.current_chat_id = saved_chats[0]["id"] if saved_chats else self.chat_store.create_chat()
+        self._restore_core_memory(self.current_chat_id)
         self.thread = None
         self._autoscroll = True
         self.worker = None
@@ -810,6 +801,8 @@ class NovaWindow(QMainWindow):
         self._sync_capabilities()
         self._refresh_model_labels()
         self._welcome()
+        self._refresh_chat_history()
+        self._render_current_chat()
         if self._backend_error:
             self._add_activity(
                 "Saved remote provider could not be used, so Nova started on the "
@@ -1799,42 +1792,95 @@ class NovaWindow(QMainWindow):
             return
 
         access = self.core.get_access() if self.core else dict(DEFAULT_ACCESS)
-        # Re-apply the saved backend so a new chat keeps the configured provider
-        # instead of silently reverting to the local default.
         apply_to_environment(self._settings)
-        self.core = NovaCore()
-        restored_access = {
-            capability: access.get(capability, default)
-            for capability, default in DEFAULT_ACCESS.items()
-        }
-        restored_access.update({
-            capability: enabled
-            for capability, enabled in access.items()
-            if capability not in restored_access
-        })
-        self.core.set_access(**restored_access)
+        self.core = self._create_core()
+        self.core.set_access(**access)
+        self.current_chat_id = self.chat_store.create_chat()
+        self.core.short_memory.messages = []
         self._refresh_model_labels()
+        self._clear_chat_view()
+        self._clear_activity_view()
+        self.current_turn_status = None
+        self._sync_capabilities()
+        self._welcome()
+        self._refresh_chat_history(select_current=True)
+        self.status_label.setText("Ready")
+        self.input.setFocus()
 
+    def _clear_chat_view(self):
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-
         self.chat_container_layout.addStretch()
 
+    def _clear_activity_view(self):
         while self.activity_layout.count():
             item = self.activity_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-
         self.activity_layout.addStretch()
+
+    def _restore_core_memory(self, chat_id):
+        messages = self.chat_store.get_messages(chat_id)
+        self.core.short_memory.messages = [
+            {"role": item["role"], "content": item.get("context") or item["content"]}
+            for item in messages
+            if item.get("role") in {"user", "assistant"}
+        ][-self.core.short_memory.limit:]
+        return messages
+
+    def _render_current_chat(self):
+        messages = self._restore_core_memory(self.current_chat_id)
+        if not messages:
+            return
+        self._clear_chat_view()
+        shell = getattr(self, "_desktop_shell", None)
+        if shell and shell.welcome_hero:
+            shell.welcome_hero.hide()
+        for item in messages:
+            self._add_message(item["role"], item["content"], attachments=item.get("attachments") or [])
+        self._scroll_chat()
+
+    def _refresh_chat_history(self, select_current=False):
+        shell = getattr(self, "_desktop_shell", None)
+        listing = getattr(shell, "chat_history_list", None) if shell else None
+        if listing is None:
+            return
+        listing.blockSignals(True)
+        listing.clear()
+        for chat in self.chat_store.list_chats():
+            item = QListWidgetItem(chat["title"])
+            item.setData(Qt.UserRole, chat["id"])
+            item.setToolTip(f'{chat["title"]}\\n{chat["message_count"]} messages')
+            listing.addItem(item)
+            if chat["id"] == self.current_chat_id:
+                listing.setCurrentItem(item)
+        if select_current and listing.currentItem():
+            listing.scrollToItem(listing.currentItem())
+        listing.blockSignals(False)
+
+    def _on_chat_selected(self, item):
+        if self.busy or item is None:
+            return
+        chat_id = item.data(Qt.UserRole)
+        if not chat_id or chat_id == self.current_chat_id:
+            return
+        access = self.core.get_access()
+        apply_to_environment(self._settings)
+        self.core = self._create_core()
+        self.core.set_access(**access)
+        self.current_chat_id = str(chat_id)
+        self._refresh_model_labels()
+        self._clear_chat_view()
+        self._clear_activity_view()
         self.current_turn_status = None
         self._sync_capabilities()
         self._welcome()
+        self._render_current_chat()
         self.status_label.setText("Ready")
-        self.input.setFocus()
 
     def _add_message(self, role, text, attachments=None):
         shell = getattr(self, "_desktop_shell", None)
@@ -2038,6 +2084,11 @@ class NovaWindow(QMainWindow):
         self.attachments.clear()
         self._refresh_attachment_preview()
         self._add_message("user", user_text, attachments=attachments)
+        self.chat_store.add_message(
+            self.current_chat_id, "user", user_text,
+            attachments=attachments, context=message
+        )
+        self._refresh_chat_history(select_current=True)
         self._add_activity("Request received" + (f" with {len(attachments)} attachment(s)." if attachments else "."))
         self.current_turn_status = self._add_turn_status("Thinking…")
         self.status_label.setText("Working…")
@@ -2077,6 +2128,8 @@ class NovaWindow(QMainWindow):
 
     def _on_finished(self, response):
         self._add_message("nova", response)
+        self.chat_store.add_message(self.current_chat_id, "assistant", response)
+        self._refresh_chat_history(select_current=True)
         self._finish_request("Done")
 
     def _on_failed(self, error):
@@ -2086,6 +2139,11 @@ class NovaWindow(QMainWindow):
             f"Error: {error}"
         )
         self._add_activity(f"Error: {error}")
+        self.chat_store.add_message(
+            self.current_chat_id, "assistant",
+            "I hit an internal error while processing that request.\n\n" f"Error: {error}"
+        )
+        self._refresh_chat_history(select_current=True)
         self._finish_request("Error")
 
     def _finish_request(self, status):

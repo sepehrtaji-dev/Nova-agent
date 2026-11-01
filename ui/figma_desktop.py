@@ -74,6 +74,7 @@ class FigmaDesktopShell:
         self.workspace_activity = None
         self.workspace_stats = {}
         self.welcome_hero = None
+        self.chat_history_list = None
         self.extra_workspace_roots = []
 
     def build(self):
@@ -165,6 +166,25 @@ class FigmaDesktopShell:
         )
         new_chat.clicked.connect(self.owner._new_chat)
         layout.addWidget(new_chat)
+
+        history_title = label("YOUR CHATS", 11, MUTED, 600)
+        layout.addWidget(history_title)
+        self.chat_history_list = QListWidget()
+        self.chat_history_list.setObjectName("chatHistoryList")
+        self.chat_history_list.setSpacing(3)
+        self.chat_history_list.setFrameShape(QFrame.NoFrame)
+        self.chat_history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.chat_history_list.setStyleSheet(
+            f"QListWidget {{ background:transparent; color:{SECONDARY}; border:0; "
+            "font-size:12px; outline:0; }"
+            f"QListWidget::item {{ padding:9px 10px; border-radius:8px; }}"
+            f"QListWidget::item:selected {{ background:rgba(22,119,255,0.22); color:white; }}"
+            f"QListWidget::item:hover:!selected {{ background:rgba(255,255,255,0.06); }}"
+        )
+        chat_selected = getattr(self.owner, "_on_chat_selected", None)
+        if callable(chat_selected):
+            self.chat_history_list.itemClicked.connect(chat_selected)
+        layout.addWidget(self.chat_history_list, 1)
         layout.addStretch(1)
 
         status = QHBoxLayout()
@@ -242,6 +262,7 @@ class FigmaDesktopShell:
 
         suggestions = QHBoxLayout()
         suggestions.setSpacing(12)
+        suggestions.addStretch(1)
         for title, color, prompt in (
             ("✦  Generate ideas", GREEN, "Help me generate ideas for a project."),
             ("▦  Summarize a document", "#f59e0b", "Help me summarize a document."),
@@ -290,16 +311,26 @@ class FigmaDesktopShell:
         mark.setFixedSize(64, 64)
         mark.setStyleSheet(f"background:{BLUE}; border-radius:32px; color:white; font-size:28px; font-weight:800;")
         hero_layout.addWidget(mark, 0, Qt.AlignHCenter)
-        hero_layout.addWidget(label("Hello! I’m Nova, your AI assistant.", 30, TEXT, 700), 0, Qt.AlignHCenter)
-        hero_layout.addWidget(label("How can I assist you today?", 18, MUTED, 600), 0, Qt.AlignHCenter)
+        heading = label("Hello! I’m Nova, your AI assistant.", 30, TEXT, 700)
+        heading.setMaximumWidth(700)
+        heading.setMinimumHeight(78)
+        heading.setAlignment(Qt.AlignCenter)
+        hero_layout.addWidget(heading, 0, Qt.AlignHCenter)
+        subtitle = label("How can I assist you today?", 18, MUTED, 600)
+        subtitle.setMinimumHeight(30)
+        subtitle.setAlignment(Qt.AlignCenter)
+        hero_layout.addWidget(subtitle, 0, Qt.AlignHCenter)
         copy = label(
             "I can help you generate ideas, summarize long documents, write emails, "
             "or even just chat about your day. I'm here to make your workflow easier and more efficient.",
             15, SECONDARY
         )
-        copy.setMaximumWidth(620)
+        copy.setMaximumWidth(680)
+        copy.setMinimumHeight(76)
         copy.setAlignment(Qt.AlignCenter)
         hero_layout.addWidget(copy, 0, Qt.AlignHCenter)
+        hero.setMinimumHeight(340)
+        hero.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.welcome_hero = hero
         self.owner.chat_container_layout.insertWidget(0, hero)
 
