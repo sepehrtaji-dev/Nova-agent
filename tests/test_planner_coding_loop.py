@@ -658,6 +658,58 @@ class PlannerSearchLoopTests(unittest.TestCase):
         )
         self.assertEqual(normalized[0]["status"], "completed")
 
+    def test_successful_web_search_records_evidence_without_model_replanning(self):
+        class CountingBrain:
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, prompt, json_mode=False):
+                self.calls += 1
+                raise AssertionError("Successful web search must not trigger replanning.")
+
+        brain = CountingBrain()
+        planner = Planner(brain=brain, tools=self.planner.tools)
+        plan = {
+            "goal": "Research model parameters",
+            "steps": [
+                {
+                    "id": 1,
+                    "description": "Search model parameter count",
+                    "status": "pending",
+                    "result": None,
+                    "tool": "web_search",
+                    "input": {"query": "model parameter count"},
+                },
+                {
+                    "id": 2,
+                    "description": "Search model architecture",
+                    "status": "pending",
+                    "result": None,
+                    "tool": "web_search",
+                    "input": {"query": "model architecture"},
+                },
+            ],
+        }
+
+        updated = planner.replan(
+            plan=plan,
+            goal="Research model parameters",
+            tool_name="web_search",
+            tool_input={"query": "model parameter count"},
+            result="Found a reliable model specification.",
+            success=True,
+            allowed_tools=["web_search"],
+        )
+
+        self.assertIs(updated, plan)
+        self.assertEqual(brain.calls, 0)
+        self.assertEqual(updated["steps"][0]["status"], "completed")
+        self.assertEqual(
+            updated["steps"][0]["result"],
+            "Found a reliable model specification.",
+        )
+        self.assertEqual(updated["steps"][1]["status"], "pending")
+
     def test_distinct_search_query_budget_is_three_per_goal(self):
         old_plan = {
             "goal": "Research parameters",
