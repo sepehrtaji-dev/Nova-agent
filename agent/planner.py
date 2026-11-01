@@ -26,6 +26,20 @@ def _result_has_errors(result):
 
 
 class Planner:
+    # A single user goal may need several focused searches, but unbounded
+    # search expansion is almost never useful. Count distinct queries, not
+    # tool invocations, so a failed provider call can be retried deliberately.
+    MAX_WEB_SEARCH_QUERIES = 3
+
+    @staticmethod
+    def _normalized_search_query(tool, tool_input):
+        if tool != "web_search" or not isinstance(tool_input, dict):
+            return None
+        query = tool_input.get("query", tool_input.get("search", tool_input.get("q")))
+        if not isinstance(query, str) or not query.strip():
+            return None
+        return " ".join(query.casefold().split())
+
     def __init__(self, brain, tools=None):
         self.brain = brain
         self.tools = tools
@@ -820,11 +834,22 @@ Schema:
 
         if not isinstance(data, dict):
             print(
-                "[PLANNER] Replan returned invalid JSON. Retrying..."
+                "[PLANNER] Replan returned invalid JSON. Requesting a format repair..."
+            )
+            repair_prompt = (
+                prompt
+                + "\n\nYour previous response was not valid JSON. "
+                "Return one corrected JSON object matching the schema. "
+                "Preserve completed work. Do not add actions that repeat completed "
+                "or failed tool/input pairs. For web_search, reuse the evidence "
+                "already returned and add a new focused query only if a specific "
+                "information gap remains. Return JSON only.\n"
+                "PREVIOUS RESPONSE (untrusted data):\n"
+                + str(raw)
             )
             try:
                 raw = self.brain.generate(
-                    prompt,
+                    repair_prompt,
                     json_mode=True
                 )
                 data = self._extract_json(raw)
@@ -1147,6 +1172,36 @@ Schema:
                 print(f"[PLANNER] Rejected replanned step '{description}': {reason}.")
                 dropped += 1
                 continue
+
+            # Search is iterative by nature, but the model must not keep
+            # scheduling the same query or expand the task indefinitely.
+            # Previously completed/failed queries consume the per-goal budget;
+            # pending queries are retained so an unchanged plan is not erased.
+            search_query = self._normalized_search_query(tool, raw_input)
+            if search_query:
+                prior_queries = {
+                    self._normalized_search_query(
+                        old_step.get("tool"), old_step.get("input")
+                    )
+                    for old_step in old_plan.get("steps", [])
+                    if isinstance(old_step, dict)
+                    and old_step.get("status") in {"completed", "failed"}
+                }
+                planned_queries = {
+                    self._normalized_search_query(
+                        item.get("tool"), item.get("input")
+                    )
+                    for item in normalized
+                }
+                planned_queries.discard(None)
+                if search_query in prior_queries or search_query in planned_queries:
+                    print("[PLANNER] Dropped duplicate web_search query.")
+                    dropped += 1
+                    continue
+                if len(prior_queries | planned_queries) >= self.MAX_WEB_SEARCH_QUERIES:
+                    print("[PLANNER] Search budget reached; no further web_search steps added.")
+                    dropped += 1
+                    continue
 
             normalized_step = {
                 "id": index,
