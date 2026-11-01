@@ -59,10 +59,18 @@ class ChatStore:
                     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
                     role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
                     content TEXT NOT NULL,
+                    context TEXT NOT NULL DEFAULT '',
                     attachments TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 )
             """)
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(messages)")
+            }
+            if "context" not in columns:
+                db.execute(
+                    "ALTER TABLE messages ADD COLUMN context TEXT NOT NULL DEFAULT ''"
+                )
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id "
                 "ON messages(chat_id, id)"
@@ -95,7 +103,7 @@ class ChatStore:
     def get_messages(self, chat_id):
         with self._connect() as db:
             rows = db.execute(
-                "SELECT role, content, attachments, created_at "
+                "SELECT role, content, context, attachments, created_at "
                 "FROM messages WHERE chat_id=? ORDER BY id",
                 (str(chat_id),),
             ).fetchall()
@@ -108,16 +116,18 @@ class ChatStore:
             result.append({
                 "role": row["role"],
                 "content": row["content"],
+                "context": row["context"] or row["content"],
                 "attachments": attachments if isinstance(attachments, list) else [],
                 "created_at": row["created_at"],
             })
         return result
 
-    def add_message(self, chat_id, role, content, attachments=None):
+    def add_message(self, chat_id, role, content, attachments=None, context=None):
         role = str(role)
         if role not in {"user", "assistant"}:
             raise ValueError("Only user and assistant messages can be saved.")
         content = str(content or "")
+        context = str(context if context is not None else content)
         attachment_list = [
             str(item) for item in (attachments or [])
             if isinstance(item, (str, os.PathLike))
@@ -130,9 +140,9 @@ class ChatStore:
             if not exists:
                 raise KeyError(f"Unknown chat: {chat_id}")
             db.execute(
-                "INSERT INTO messages(chat_id, role, content, attachments, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (str(chat_id), role, content,
+                "INSERT INTO messages(chat_id, role, content, context, attachments, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(chat_id), role, content, context,
                  json.dumps(attachment_list, ensure_ascii=False), now),
             )
             if role == "user":
