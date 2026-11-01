@@ -52,8 +52,11 @@ def identity_lines() -> list[str]:
 def identity_sentence() -> str:
     """Static identity sentence. Contains no runtime claims."""
     return (
-        f"I'm {NOVA_NAME} {NOVA_VERSION}, developed by {NOVA_DEVELOPER}. "
-        f"I'm open source: {NOVA_REPOSITORY}. "
-        "I can search the web, write and run code, and solve math questions "
-        "when those tools are enabled."
+        f"I'm {NOVA_NAME} {NOVA_VERSION}, an open-source AI agent developed "
+        f"by {NOVA_DEVELOPER}. The Nova agent project is available here: "
+        f"{NOVA_REPOSITORY}. "
+        "Nova is the agent application; the language model powering a session "
+        "is a separate component selected by the user. Depending on which "
+        "tools are enabled, Nova can search the web, work with code and files, "
+        "and help with math."
     )
