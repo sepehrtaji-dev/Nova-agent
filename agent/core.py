@@ -18,7 +18,12 @@ from tools import load_tools
 from agent.diagnostics import RuntimeDiagnostics
 from agent.self_reflection import SelfReflection
 from agent.self_knowledge import SelfKnowledge
-from agent.identity import NOVA_DEVELOPER, identity_lines
+from agent.identity import (
+    NOVA_DEVELOPER,
+    NOVA_REPOSITORY,
+    NOVA_VERSION,
+    identity_lines,
+)
 
 
 class NovaCore:
