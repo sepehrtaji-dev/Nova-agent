@@ -587,16 +587,29 @@ class TurnStatus(QFrame):
         self.title.setText(f"Thought summary · {seconds} {unit}")
 
     def update_status(self, message):
-        """Append distinct status events; these are progress, not private CoT."""
+        """Render model-generated summaries separately from execution events."""
         message = str(message or "").strip()
-        if not message or message in self._seen_updates:
+        if not message:
             return
 
-        self._seen_updates.add(message)
-        bullet = QLabel(f"•  {message}")
-        bullet.setObjectName("turnStatusMessage")
-        bullet.setWordWrap(True)
-        self.updates_layout.addWidget(bullet)
+        if message.startswith("THOUGHT_SUMMARY:"):
+            self.title.setText("Thought summary")
+            summary = message.partition(":")[2]
+            for line in summary.splitlines():
+                line = line.strip().lstrip("-*• ").strip()
+                if not line or line in self._seen_updates:
+                    continue
+                self._seen_updates.add(line)
+                bullet = QLabel(f"•  {line}")
+                bullet.setObjectName("turnStatusMessage")
+                bullet.setWordWrap(True)
+                self.updates_layout.addWidget(bullet)
+        elif message not in self._seen_updates:
+            self._seen_updates.add(message)
+            bullet = QLabel(f"•  {message}")
+            bullet.setObjectName("turnStatusMessage")
+            bullet.setWordWrap(True)
+            self.updates_layout.addWidget(bullet)
 
         # Keep the in-chat summary compact during long multi-step runs.
         while self.updates_layout.count() > 8:
@@ -2055,8 +2068,10 @@ class NovaWindow(QMainWindow):
         self.thread.start()
 
     def _on_status(self, message):
-        self.status_label.setText(message)
-        self._add_activity(message)
+        is_thought_summary = str(message).startswith("THOUGHT_SUMMARY:")
+        if not is_thought_summary:
+            self.status_label.setText(message)
+            self._add_activity(message)
         if getattr(self, "current_turn_status", None):
             self.current_turn_status.update_status(message)
 
