@@ -539,34 +539,71 @@ class ActivityItem(QFrame):
 
 
 class TurnStatus(QFrame):
+    """Live, user-safe summary of Nova's reported execution progress."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("turnStatus")
+        self.started_at = datetime.now()
+        self._seen_updates = set()
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 9, 12, 9)
         layout.setSpacing(9)
 
-        self.dot = QLabel("●")
+        self.dot = QLabel("✳")
         self.dot.setObjectName("turnStatusDot")
         layout.addWidget(self.dot, 0, Qt.AlignTop)
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
+        text_layout.setSpacing(5)
 
-        self.title = QLabel("Nova")
+        self.title = QLabel("Thought summary · 0 seconds")
         self.title.setObjectName("turnStatusTitle")
         text_layout.addWidget(self.title)
 
-        self.message = QLabel("Thinking…")
+        self.updates_layout = QVBoxLayout()
+        self.updates_layout.setContentsMargins(0, 0, 0, 0)
+        self.updates_layout.setSpacing(3)
+        text_layout.addLayout(self.updates_layout)
+
+        self.message = QLabel("Processing your request…")
         self.message.setObjectName("turnStatusMessage")
         self.message.setWordWrap(True)
-        text_layout.addWidget(self.message)
+        self.updates_layout.addWidget(self.message)
+        self._seen_updates.add("Processing your request…")
 
         layout.addLayout(text_layout, 1)
 
+        self.elapsed_timer = QTimer(self)
+        self.elapsed_timer.setInterval(1000)
+        self.elapsed_timer.timeout.connect(self._refresh_elapsed)
+        self.elapsed_timer.start()
+
+    def _refresh_elapsed(self):
+        seconds = max(0, int((datetime.now() - self.started_at).total_seconds()))
+        unit = "second" if seconds == 1 else "seconds"
+        self.title.setText(f"Thought summary · {seconds} {unit}")
+
     def update_status(self, message):
-        self.message.setText(message)
+        """Append distinct status events; these are progress, not private CoT."""
+        message = str(message or "").strip()
+        if not message or message in self._seen_updates:
+            return
+
+        self._seen_updates.add(message)
+        bullet = QLabel(f"•  {message}")
+        bullet.setObjectName("turnStatusMessage")
+        bullet.setWordWrap(True)
+        self.updates_layout.addWidget(bullet)
+
+        # Keep the in-chat summary compact during long multi-step runs.
+        while self.updates_layout.count() > 8:
+            item = self.updates_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
 
 class CapabilityButton(QPushButton):
