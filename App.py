@@ -512,31 +512,65 @@ class MessageBubble(QFrame):
         layout.addLayout(content, 1)
 
 class ActivityItem(QFrame):
+    """Compact, structured event card for the live activity timeline."""
+
     def __init__(self, message, parent=None):
         super().__init__(parent)
+        raw = str(message or "").strip()
+        lowered = raw.casefold()
+
+        if any(token in lowered for token in ("error", "failed", "failure", "exception", "blocked")):
+            category, icon, accent = "ERROR", "!", "#fb7185"
+        elif any(token in lowered for token in ("complete", "completed", "verified", "done", "success")):
+            category, icon, accent = "SUCCESS", "✓", "#34d399"
+        elif any(token in lowered for token in ("search", "web", "browser")):
+            category, icon, accent = "WEB", "↗", "#38bdf8"
+        elif any(token in lowered for token in ("plan", "replan", "step", "tool", "execut")):
+            category, icon, accent = "AGENT", "⌘", "#a78bfa"
+        elif any(token in lowered for token in ("model", "provider", "api", "ollama")):
+            category, icon, accent = "MODEL", "◈", "#22d3ee"
+        else:
+            category, icon, accent = "INFO", "·", "#94a3b8"
+
         self.setObjectName("activityItem")
+        self.setProperty("eventType", category.lower())
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 7, 10, 7)
-        layout.setSpacing(9)
+        layout.setContentsMargins(10, 9, 10, 9)
+        layout.setSpacing(10)
 
-        dot = QLabel("●")
-        dot.setObjectName("activityDot")
-        layout.addWidget(dot)
+        marker = QLabel(icon)
+        marker.setAlignment(Qt.AlignCenter)
+        marker.setFixedSize(25, 25)
+        marker.setStyleSheet(
+            f"background: {accent}22; color: {accent}; border: 1px solid {accent}66; "
+            "border-radius: 8px; font-size: 13px; font-weight: 700;"
+        )
+        layout.addWidget(marker, 0, Qt.AlignTop)
 
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(1)
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(4)
 
+        meta = QHBoxLayout()
+        category_label = QLabel(category)
+        category_label.setStyleSheet(
+            f"color: {accent}; font-size: 9px; font-weight: 800; letter-spacing: 1px;"
+        )
+        meta.addWidget(category_label)
+        meta.addStretch()
         time_label = QLabel(datetime.now().strftime("%H:%M:%S"))
         time_label.setObjectName("activityTime")
-        text_layout.addWidget(time_label)
+        meta.addWidget(time_label)
+        content.addLayout(meta)
 
-        message_label = QLabel(message)
+        message_label = QLabel(raw)
         message_label.setWordWrap(True)
+        message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         message_label.setObjectName("activityText")
-        text_layout.addWidget(message_label)
-
-        layout.addLayout(text_layout, 1)
+        content.addWidget(message_label)
+        layout.addLayout(content, 1)
+        self.setToolTip(raw)
 
 
 class TurnStatus(QFrame):
@@ -2107,7 +2141,7 @@ class NovaWindow(QMainWindow):
             attachments=attachments, context=message
         )
         self._refresh_chat_history(select_current=True)
-        self._add_activity("Request received" + (f" with {len(attachments)} attachment(s)." if attachments else "."))
+        self._add_activity("New request received" + (f" · {len(attachments)} attachment(s)" if attachments else ""))
         self.current_turn_status = self._add_turn_status("Thinking…")
         self.status_label.setText("Working…")
         self.live_badge.setText("LIVE")
