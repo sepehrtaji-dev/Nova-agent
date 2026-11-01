@@ -821,7 +821,7 @@ Schema:
                 f"[PLANNER] Success: {success}"
             )
             print(
-                "[PLANNER] Sending result to Qwen..."
+                f"[PLANNER] Sending tool evidence to {self.brain.__class__.__name__} ({getattr(self.brain, 'model', 'model unavailable')})..."
             )
 
             raw = self.brain.generate(
@@ -830,7 +830,7 @@ Schema:
             )
 
             print(
-                "[PLANNER] Qwen response received."
+                f"[PLANNER] Replan response received from {self.brain.__class__.__name__}."
             )
 
         except Exception as e:
