@@ -960,6 +960,8 @@ class CoreTests(unittest.TestCase):
 
             def generate(self, prompt, system_prompt=None, json_mode=False):
                 self.prompts.append(prompt)
+                if "Create a short user-facing summary" in prompt:
+                    return "- The user requested a file operation.\\n- A concise status update is appropriate."
                 return self.responses.pop(0)
 
         brain = ScriptedBrain()
@@ -1013,6 +1015,8 @@ class CoreTests(unittest.TestCase):
 
         class OrderingBrain:
             def generate(self, prompt, system_prompt=None, json_mode=False):
+                if "Create a short user-facing summary" in prompt:
+                    return "- The user shared their name."
                 events.append(("generate", prompt))
                 return "Thanks for telling me, Sepehr."
 
