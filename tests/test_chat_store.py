@@ -12,7 +12,10 @@ class ChatStoreTests(unittest.TestCase):
             first = store.create_chat()
             second = store.create_chat()
 
-            store.add_message(first, "user", "Hello Nova", ["/tmp/notes.txt"])
+            store.add_message(
+                first, "user", "Hello Nova", ["/tmp/notes.txt"],
+                context="Hello Nova\\n\\n[Attached File: notes.txt] private document context"
+            )
             store.add_message(first, "assistant", "Hello! How can I help?")
             store.add_message(second, "user", "A separate conversation")
 
@@ -24,6 +27,7 @@ class ChatStoreTests(unittest.TestCase):
                 ["user", "assistant"],
             )
             self.assertEqual(first_messages[0]["attachments"], ["/tmp/notes.txt"])
+            self.assertIn("private document context", first_messages[0]["context"])
             self.assertEqual(len(second_messages), 1)
             self.assertEqual(second_messages[0]["content"], "A separate conversation")
 
