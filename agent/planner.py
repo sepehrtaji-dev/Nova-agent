@@ -742,7 +742,7 @@ Return JSON only with this schema:
                 "[PLANNER] Search evidence recorded; skipping replan "
                 "for this successful read-only tool."
             )
-            return previous_plan
+            return plan
 
         prompt = f"""
 You are Nova's task planner.
