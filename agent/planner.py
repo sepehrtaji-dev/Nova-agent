@@ -729,6 +729,21 @@ Return JSON only with this schema:
                 current_step.get("description", "")
             ).strip()
 
+        # A successful web search is evidence collection, not a workspace
+        # mutation. Record the exact completed search and continue the existing
+        # plan without another expensive model round-trip. Replanning after
+        # every search caused repeated searches and JSON-repair loops even when
+        # the search budget had already been reached.
+        if success and tool_name == "web_search":
+            if current_step is not None:
+                current_step["status"] = "completed"
+                current_step["result"] = result
+            print(
+                "[PLANNER] Search evidence recorded; skipping replan "
+                "for this successful read-only tool."
+            )
+            return previous_plan
+
         prompt = f"""
 You are Nova's task planner.
 
