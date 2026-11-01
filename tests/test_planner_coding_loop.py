@@ -607,7 +607,7 @@ class PlannerSearchLoopTests(unittest.TestCase):
         }
         proposed = [
             {
-                "description": "Keep completed search",
+                "description": "Search parameter count",
                 "status": "completed",
                 "tool": "web_search",
                 "input": {"query": "Model parameter count"},
