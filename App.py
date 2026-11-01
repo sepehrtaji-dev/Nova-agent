@@ -569,12 +569,6 @@ class TurnStatus(QFrame):
         self.updates_layout.setSpacing(3)
         text_layout.addLayout(self.updates_layout)
 
-        self.message = QLabel("Processing your request…")
-        self.message.setObjectName("turnStatusMessage")
-        self.message.setWordWrap(True)
-        self.updates_layout.addWidget(self.message)
-        self._seen_updates.add("Processing your request…")
-
         layout.addLayout(text_layout, 1)
 
         self.elapsed_timer = QTimer(self)
@@ -588,31 +582,23 @@ class TurnStatus(QFrame):
         self.title.setText(f"Thought summary · {seconds} {unit}")
 
     def update_status(self, message):
-        """Render model-generated summaries separately from execution events."""
+        """Show only the model-generated, user-safe thought summary."""
         message = str(message or "").strip()
-        if not message:
+        if not message.startswith("THOUGHT_SUMMARY:"):
             return
 
-        if message.startswith("THOUGHT_SUMMARY:"):
-            self.title.setText("Thought summary")
-            summary = message.partition(":")[2]
-            for line in summary.splitlines():
-                line = line.strip().lstrip("-*• ").strip()
-                if not line or line in self._seen_updates:
-                    continue
-                self._seen_updates.add(line)
-                bullet = QLabel(f"•  {line}")
-                bullet.setObjectName("turnStatusMessage")
-                bullet.setWordWrap(True)
-                self.updates_layout.addWidget(bullet)
-        elif message not in self._seen_updates:
-            self._seen_updates.add(message)
-            bullet = QLabel(f"•  {message}")
+        self.title.setText("Thought summary")
+        summary = message.partition(":")[2]
+        for line in summary.splitlines():
+            line = line.strip().lstrip("-*• ").strip()
+            if not line or line in self._seen_updates:
+                continue
+            self._seen_updates.add(line)
+            bullet = QLabel(f"•  {line}")
             bullet.setObjectName("turnStatusMessage")
             bullet.setWordWrap(True)
             self.updates_layout.addWidget(bullet)
 
-        # Keep the in-chat summary compact during long multi-step runs.
         while self.updates_layout.count() > 8:
             item = self.updates_layout.takeAt(0)
             widget = item.widget()
