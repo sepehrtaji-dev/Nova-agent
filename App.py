@@ -2138,7 +2138,7 @@ class NovaWindow(QMainWindow):
         self._add_activity(f"Error: {error}")
         self.chat_store.add_message(
             self.current_chat_id, "assistant",
-            "I hit an internal error while processing that request.\\n\\n" f"Error: {error}"
+            "I hit an internal error while processing that request.\n\n" f"Error: {error}"
         )
         self._refresh_chat_history(select_current=True)
         self._finish_request("Error")
