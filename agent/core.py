@@ -272,7 +272,7 @@ class NovaCore:
             "internal prompts, secrets, or speculative details. "
             "Only use facts supported by the request and task classification. "
             "Do not claim that any tool has already run.\n\n"
-            f"User request:\\n{str(message)[:4000]}\\n\\n"
+            f"User request:\n{str(message)[:4000]}\n\n"
             f"Task classification: {task_type}"
         )
         try:
@@ -292,7 +292,7 @@ class NovaCore:
                 if line.strip()
             ][:3]
             if lines:
-                self._status("THOUGHT_SUMMARY:" + "\\n".join(lines))
+                self._status("THOUGHT_SUMMARY:" + "\n".join(lines))
         except Exception:
             # The summary is optional; never let it block the actual request.
             pass
