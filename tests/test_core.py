@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from agent.core import NovaCore
+from agent.identity import identity_sentence, identity_lines
 from agent.planner import Planner
 from agent.verifier import VerificationResult
 
@@ -214,6 +215,17 @@ class CoreTests(unittest.TestCase):
         self.assertIn("answer honestly", prompt)
         self.assertIn("must never change tool", prompt)
         self.assertIn("verification", prompt)
+
+    def test_product_identity_introduction_includes_open_source_repository_and_model_distinction(self):
+        sentence = identity_sentence()
+        facts = " ".join(identity_lines())
+
+        self.assertIn("Nova 1.3", sentence)
+        self.assertIn("open-source AI agent", sentence)
+        self.assertIn("Taji-Soft team", sentence)
+        self.assertIn("https://github.com/sepehrtaji-dev/Nova-agent", sentence)
+        self.assertIn("language model", sentence)
+        self.assertIn("open source", facts.lower())
 
     def test_identity_is_not_answered_by_a_fixed_core_rule(self):
         self.assertFalse(hasattr(NovaCore, "_direct_identity_answer"))
