@@ -203,7 +203,8 @@ class CoreTests(unittest.TestCase):
 
         self.assertIn("greetings", prompt)
         self.assertIn("how you are", prompt)
-        self.assertIn("respond naturally", prompt)
+        self.assertIn("speak naturally", prompt)
+        self.assertIn("respond directly", prompt)
         self.assertIn("match the user's language", prompt)
 
     def test_conversation_personality_preserves_truthfulness_and_agent_controls(self):
