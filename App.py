@@ -1826,7 +1826,7 @@ class NovaWindow(QMainWindow):
     def _restore_core_memory(self, chat_id):
         messages = self.chat_store.get_messages(chat_id)
         self.core.short_memory.messages = [
-            {"role": item["role"], "content": item["content"]}
+            {"role": item["role"], "content": item.get("context") or item["content"]}
             for item in messages
             if item.get("role") in {"user", "assistant"}
         ][-self.core.short_memory.limit:]
@@ -2084,7 +2084,10 @@ class NovaWindow(QMainWindow):
         self.attachments.clear()
         self._refresh_attachment_preview()
         self._add_message("user", user_text, attachments=attachments)
-        self.chat_store.add_message(self.current_chat_id, "user", user_text, attachments=attachments)
+        self.chat_store.add_message(
+            self.current_chat_id, "user", user_text,
+            attachments=attachments, context=message
+        )
         self._refresh_chat_history(select_current=True)
         self._add_activity("Request received" + (f" with {len(attachments)} attachment(s)." if attachments else "."))
         self.current_turn_status = self._add_turn_status("Thinking…")
