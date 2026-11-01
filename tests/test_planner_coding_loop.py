@@ -576,5 +576,117 @@ class PlannerCodingLoopTests(unittest.TestCase):
         self.assertEqual(plan["steps"], [])
 
 
+class PlannerSearchLoopTests(unittest.TestCase):
+    def setUp(self):
+        registry = ToolRegistry()
+        registry.register(
+            "web_search",
+            "Search the web",
+            lambda payload: payload,
+            capability="web",
+            input_schema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string", "minLength": 1}},
+                "additionalProperties": False,
+            },
+        )
+        self.planner = Planner(brain=FakeBrain("{}"), tools=registry)
+
+    def test_replan_deduplicates_completed_and_repeated_search_queries(self):
+        old_plan = {
+            "goal": "Research model parameters",
+            "steps": [{
+                "id": 1,
+                "description": "Search parameter count",
+                "status": "completed",
+                "result": "Verified result",
+                "tool": "web_search",
+                "input": {"query": "Model parameter count"},
+            }],
+        }
+        proposed = [
+            {
+                "description": "Search parameter count",
+                "status": "completed",
+                "tool": "web_search",
+                "input": {"query": "Model parameter count"},
+            },
+            {
+                "description": "Repeat same search with different casing",
+                "status": "pending",
+                "tool": "web_search",
+                "input": {"query": "  MODEL   PARAMETER COUNT "},
+            },
+            {
+                "description": "Search architecture",
+                "status": "pending",
+                "tool": "web_search",
+                "input": {"query": "Model architecture"},
+            },
+            {
+                "description": "Search benchmark",
+                "status": "pending",
+                "tool": "web_search",
+                "input": {"query": "Model benchmark"},
+            },
+            {
+                "description": "Search another topic",
+                "status": "pending",
+                "tool": "web_search",
+                "input": {"query": "Model release date"},
+            },
+            {
+                "description": "Exceed search budget",
+                "status": "pending",
+                "tool": "web_search",
+                "input": {"query": "Model training dataset"},
+            },
+        ]
+
+        normalized = self.planner._normalize_replanned_steps(
+            proposed, old_plan, allowed_tools=["web_search"]
+        )
+
+        self.assertEqual(
+            [step["input"]["query"] for step in normalized],
+            [
+                "Model parameter count",
+                "Model architecture",
+                "Model benchmark",
+            ],
+        )
+        self.assertEqual(normalized[0]["status"], "completed")
+
+    def test_distinct_search_query_budget_is_three_per_goal(self):
+        old_plan = {
+            "goal": "Research parameters",
+            "steps": [
+                {
+                    "id": index,
+                    "description": f"Search {index}",
+                    "status": "completed",
+                    "result": "Search result",
+                    "tool": "web_search",
+                    "input": {"query": query},
+                }
+                for index, query in enumerate(
+                    ["query one", "query two", "query three"], start=1
+                )
+            ],
+        }
+        normalized = self.planner._normalize_replanned_steps(
+            [{
+                "description": "Search fourth topic",
+                "status": "pending",
+                "tool": "web_search",
+                "input": {"query": "query four"},
+            }],
+            old_plan,
+            allowed_tools=["web_search"],
+        )
+        self.assertEqual(normalized, [])
+
+
 if __name__ == "__main__":
     unittest.main()
