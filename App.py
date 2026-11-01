@@ -1877,10 +1877,20 @@ class NovaWindow(QMainWindow):
         self._clear_chat_view()
         self._clear_activity_view()
         self.current_turn_status = None
+        # A newly selected conversation is always idle. Re-enable the composer
+        # explicitly so stale widget state from a previous turn cannot leave the
+        # restored chat looking ready while its Send control remains disabled.
+        self.busy = False
+        self.worker = None
+        self.thread = None
+        self.input.setEnabled(True)
+        self.send_button.setEnabled(True)
         self._sync_capabilities()
         self._welcome()
         self._render_current_chat()
         self.status_label.setText("Ready")
+        self.live_badge.setText("IDLE")
+        self.input.setFocus()
 
     def _add_message(self, role, text, attachments=None):
         shell = getattr(self, "_desktop_shell", None)
