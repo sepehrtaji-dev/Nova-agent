@@ -812,17 +812,18 @@ Schema:
 }}
 """
 
+        brain_class = self.brain.__class__.__name__ if self.brain is not None else "UnknownBrain"
+        backend_name = (
+            "remote API" if brain_class == "OpenAICompatibleBrain"
+            else "local Ollama" if brain_class == "OllamaBrain"
+            else brain_class
+        )
+        model_name = str(getattr(self.brain, "model", "") or "model unavailable")
+
         try:
             print("\n[PLANNER] Replanning...")
-            print(
-                f"[PLANNER] Tool: {tool_name}"
-            )
-            print(
-                f"[PLANNER] Success: {success}"
-            )
-            print(
-                f"[PLANNER] Sending tool evidence to {self.brain.__class__.__name__} ({getattr(self.brain, 'model', 'model unavailable')})..."
-            )
+            print(f"[PLANNER] Trigger: {tool_name} · {'success' if success else 'failure'}")
+            print(f"[PLANNER] Sending tool evidence to {backend_name} ({model_name})...")
 
             raw = self.brain.generate(
                 prompt,
@@ -830,7 +831,7 @@ Schema:
             )
 
             print(
-                f"[PLANNER] Replan response received from {self.brain.__class__.__name__}."
+                f"[PLANNER] Replan response received from {backend_name} ({model_name})."
             )
 
         except Exception as e:
