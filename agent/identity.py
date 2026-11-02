@@ -7,8 +7,8 @@ many parameters it has, which tools are enabled -- is deliberately NOT here. It
 is derived at answer time from live state (see agent.capability_probe and
 agent.tool_awareness).
 
-That separation exists because hardcoding runtime claims has repeatedly made Nova
-describe itself incorrectly: it asserted Anthropic's authorship, reported
+That separation exists because hardcoding runtime claims has repeatedly made
+Nova describe itself incorrectly: it asserted Anthropic's authorship, reported
 "Ollama metadata" while running on a remote API, and stated "3 billion
 parameters" for models that had nothing of the sort. A static string can only be
 trusted for static facts.
@@ -20,7 +20,7 @@ import os
 # --- Static product facts ---------------------------------------------------
 # Overridable by environment so a fork can rebrand without editing source.
 NOVA_NAME = os.getenv("NOVA_NAME", "Nova")
-NOVA_VERSION = os.getenv("NOVA_VERSION", "1.3")
+NOVA_VERSION = os.getenv("NOVA_VERSION", "2.0")
 NOVA_DEVELOPER = os.getenv("NOVA_DEVELOPER", "Taji-Soft team")
 NOVA_REPOSITORY = os.getenv(
     "NOVA_REPOSITORY", "https://github.com/sepehrtaji-dev/Nova-agent"
