@@ -123,7 +123,7 @@ class VendorGuardTests(unittest.TestCase):
     def test_correct_answer_is_left_untouched(self):
         """The guard must not rewrite answers that are already right."""
         for text in (
-            "I'm Nova 1.3, developed by Taji-Soft team.",
+            "I'm Nova 2.0, developed by Taji-Soft team.",
             "No, I was not made by Anthropic. I am Nova.",
             "I'm not a product of OpenAI; I'm Nova, built by Taji-Soft.",
             "I can search the web and run code.",
