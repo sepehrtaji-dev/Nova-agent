@@ -4,7 +4,7 @@ Nova can run on a local Ollama model or on a stronger model hosted by a remote
 provider. Everything else in the agent -- the router, planner, verifier, memory,
 and every tool -- is unchanged: only the reasoning backend is swapped.
 
-When a remote provider is configured, the remote model is told it is **Nova 1.3
+When a remote provider is configured, the remote model is told it is **Nova 2.0
 running inside the Nova desktop application on this user's computer**, and it is
 given this machine's live environment and tool registry. Its tool calls execute
 locally through Nova, so it behaves as the agent rather than as a generic hosted
