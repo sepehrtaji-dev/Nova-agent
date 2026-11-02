@@ -169,7 +169,7 @@ class OpenAICompatibleBrain:
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.api_key}",
                     "Accept": "application/json",
-                    "User-Agent": "NovaAgent/1.3",
+                    "User-Agent": "NovaAgent/2.0",
                 },
             )
             try:
