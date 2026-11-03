@@ -652,10 +652,9 @@ class TurnStatus(QFrame):
     def update_status(self, message):
         """Show only the model-generated, user-safe thought summary."""
         message = str(message or "").strip()
-        if not message.startswith("THOUGHT_SUMMARY:"):
+        # Legacy model-generated reasoning events are intentionally hidden.
+        if message.startswith("THOUGHT_SUMMARY:"):
             return
-
-        self.title.setText("Thought summary")
         summary = message.partition(":")[2]
         for line in summary.splitlines():
             line = line.strip().lstrip("-*• ").strip()
