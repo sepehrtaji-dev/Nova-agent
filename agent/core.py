@@ -659,10 +659,9 @@ class NovaCore:
             f"- If evidence is missing or conflicting, say so.\n"
             f"- Prefer the newest verified evidence when facts conflict.\n"
             f"- Be direct and concise.\n\n"
-            f"Think step by step:\n"
-            f"1. What verified evidence is available?\n"
-            f"2. What does the user need to know?\n"
-            f"3. What is the most accurate, evidence-based answer?\n\n"
+            f"Use the evidence internally; do not reveal private reasoning, "
+            f"planning notes, or intermediate deliberation. Output only the "
+            f"final user-facing answer.\n\n"
             f"Answer the user from the evidence only:"
         )
 
@@ -841,6 +840,41 @@ class NovaCore:
                 return "Verified actions: " + "; ".join(summaries)
 
         return None
+    @staticmethod
+    def _tool_was_used(used_tools, tool_name):
+        """Check tool names in the execution ledger tuple format."""
+        if not isinstance(used_tools, (set, list, tuple)):
+            return False
+        return any(
+            (isinstance(entry, str) and entry == tool_name)
+            or (
+                isinstance(entry, (tuple, list))
+                and bool(entry)
+                and entry[0] == tool_name
+            )
+            for entry in used_tools
+        )
+
+    @staticmethod
+    def _read_file_fallback(tool_history, max_chars=12000):
+        """Show actual read_file output if the model returns no summary."""
+        if not isinstance(tool_history, list):
+            return ""
+        raw_results = []
+        for block in tool_history:
+            if not isinstance(block, str) or "TOOL_NAME: read_file" not in block:
+                continue
+            match = re.search(r"BEGIN_RAW_TOOL_RESULT\s*\n(.*?)\nEND_RAW_TOOL_RESULT", block, re.DOTALL)
+            if match and match.group(1).strip():
+                raw_results.append(match.group(1).strip())
+        if not raw_results:
+            return ""
+        content = "\n\n".join(raw_results)
+        if len(content) > max_chars:
+            content = content[:max_chars].rstrip() + "\n\n[Output truncated]"
+        return ("I read the file, but could not generate a reliable summary. "
+                "Here is the content returned by the file tool:\n\n" + content)
+
     def _build_verified_task_response(self, tool_history):
         if not tool_history:
             return "No verified computer action was completed."
@@ -1149,7 +1183,7 @@ class NovaCore:
         }:
             task_type = "conversation"
 
-        self._publish_thought_summary(message, task_type)
+        # Internal planning must never be emitted as a user-visible status.
 
         self._status(
             f"Task type: {task_type}"
@@ -2176,7 +2210,7 @@ Nova must choose another useful action.
                         "could not be generated.\\n\\n"
                         + evidence[:6000]
                     )
-            elif "read_file" in used_tools and tool_history:
+            elif self._tool_was_used(used_tools, "read_file") and tool_history:
                 evidence = "\\n\\n".join(tool_history)
                 summary_prompt = (
                     "Answer the user's original request using ONLY the tool "
@@ -2211,6 +2245,9 @@ Nova must choose another useful action.
                     response = ""
             else:
                 response = ""
+
+            if not response and self._tool_was_used(used_tools, "read_file"):
+                response = self._read_file_fallback(tool_history)
 
             if not response and last_tool_error and not used_tools:
                 response = (
@@ -2276,11 +2313,13 @@ Nova must choose another useful action.
             )
         )
 
-        if not isinstance(
-            response,
-            str
-        ):
+        if not isinstance(response, str):
             response = str(response)
+
+        if not response.strip():
+            response = self._read_file_fallback(tool_history)
+            if not response:
+                response = "The tool steps finished, but the model returned an empty final answer."
 
         self._status(
             "Done"
