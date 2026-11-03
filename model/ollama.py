@@ -191,10 +191,16 @@ class OllamaBrain:
         if not self.model:
             raise RuntimeError("No local Ollama model is available.")
 
+        def env_int(name, default, minimum):
+            try:
+                return max(minimum, int(os.getenv(name, str(default))))
+            except (TypeError, ValueError):
+                return default
+
         base_options = {
             "temperature": 0.1,
-            "num_ctx": max(2048, int(os.getenv("NOVA_NUM_CTX", "8192"))),
-            "num_predict": max(128, int(os.getenv("NOVA_NUM_PREDICT", "4096"))),
+            "num_ctx": env_int("NOVA_NUM_CTX", 8192, 2048),
+            "num_predict": env_int("NOVA_NUM_PREDICT", 4096, 128),
             "repeat_penalty": 1.3,
             "repeat_last_n": 128,
         }
