@@ -181,5 +181,59 @@ class OllamaBrain:
 
         return content.strip()
 
+    def generate_stream(
+        self, prompt, on_token, system_prompt=None, json_mode=False, options=None
+    ):
+        """Stream generated text chunks to on_token and return the full text."""
+        system = system_prompt or SYSTEM_PROMPT
+        if not self.model:
+            self.model = self._discover_model()
+        if not self.model:
+            raise RuntimeError("No local Ollama model is available.")
+
+        base_options = {
+            "temperature": 0.1,
+            "num_ctx": max(2048, int(os.getenv("NOVA_NUM_CTX", "8192"))),
+            "num_predict": max(128, int(os.getenv("NOVA_NUM_PREDICT", "4096"))),
+            "repeat_penalty": 1.3,
+            "repeat_last_n": 128,
+        }
+        if isinstance(options, dict):
+            base_options.update(options)
+
+        kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            "options": base_options,
+            "stream": True,
+        }
+        if json_mode:
+            kwargs["format"] = "json"
+
+        chunks = []
+        for part in ollama.chat(**kwargs):
+            if isinstance(part, dict):
+                message = part.get("message") or {}
+                token = message.get("content", "") if isinstance(message, dict) else ""
+            else:
+                message = getattr(part, "message", None)
+                token = (
+                    message.get("content", "")
+                    if isinstance(message, dict)
+                    else getattr(message, "content", "")
+                )
+            if not token:
+                continue
+            if not isinstance(token, str):
+                token = str(token)
+            chunks.append(token)
+            if callable(on_token):
+                on_token(token)
+
+        return "".join(chunks)
+
     def c_gen(self, prompt, json_mode=False):
         return self.generate(prompt, json_mode=json_mode)
