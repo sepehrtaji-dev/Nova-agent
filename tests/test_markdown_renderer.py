@@ -1,6 +1,7 @@
 import unittest
 from ui.markdown_renderer import render_markdown
 
+
 class MarkdownRendererTests(unittest.TestCase):
     def test_gfm_style_table_renders_as_html_table(self):
         rendered = render_markdown(
@@ -15,7 +16,9 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertNotIn("| Model |", rendered)
 
     def test_nested_lists_and_blockquotes(self):
-        rendered = render_markdown("> Summary\n\n- first\n  - nested\n1. second\n")
+        rendered = render_markdown(
+            "> Summary\n\n- first\n  - nested\n\n1. second\n"
+        )
         self.assertIn("<blockquote>", rendered)
         self.assertIn("<ul>", rendered)
         self.assertIn("<ol>", rendered)
@@ -28,7 +31,9 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("print(1)", rendered)
 
     def test_links_emphasis_and_strikethrough(self):
-        rendered = render_markdown("**bold**, *italic*, ~~removed~~ and [Nova](https://example.com)")
+        rendered = render_markdown(
+            "**bold**, *italic*, ~~removed~~ and [Nova](https://example.com)"
+        )
         self.assertIn("<strong>bold</strong>", rendered)
         self.assertIn("<em>italic</em>", rendered)
         self.assertIn("<del>removed</del>", rendered)
@@ -38,6 +43,7 @@ class MarkdownRendererTests(unittest.TestCase):
         rendered = render_markdown('<img src="x" onerror="alert(1)">')
         self.assertNotIn("<script", rendered)
         self.assertNotIn("onerror", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
