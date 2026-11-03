@@ -121,9 +121,10 @@ class EpisodicMemory:
         # Prefer the newest episode when relevance scores are equal.
         scored.sort(
             key=lambda pair: (
-                -pair[0],
+                pair[0],
                 str(pair[1].get("timestamp", "")),
             ),
+            reverse=True,
         )
         try:
             count = max(1, min(int(limit), 20))
