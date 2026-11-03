@@ -1219,8 +1219,16 @@ class CoreTests(unittest.TestCase):
                 ]
 
             def generate(self, prompt, json_mode=False):
+                # Goal verification is a distinct planner phase after the
+                # execution/replanning lifecycle; do not consume a replan fixture.
+                if "You are Nova's final goal verifier." in prompt:
+                    return json.dumps({
+                        "complete": True,
+                        "reason": "The failure was diagnosed and the report was created.",
+                        "steps": [],
+                    })
                 if not self.responses:
-                    raise AssertionError("Unexpected extra planner/model call")
+                    raise AssertionError("Unexpected extra planner/replan call")
                 return json.dumps(self.responses.pop(0))
 
         class RetryTools(FakeTools):
