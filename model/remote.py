@@ -257,6 +257,91 @@ class OpenAICompatibleBrain:
             transient=True,
         )
 
+    def generate_stream(
+        self, prompt, on_token, system_prompt=None, json_mode=False, options=None
+    ):
+        """Stream OpenAI-compatible SSE deltas to on_token and return full text."""
+        if not self.is_configured():
+            raise RemoteBrainError(
+                "Remote provider is not fully configured. " + self.configuration_help()
+            )
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": str(system_prompt or _DEFAULT_SYSTEM_PROMPT)},
+                {"role": "user", "content": str(prompt)},
+            ],
+            "temperature": 0.1,
+            "stream": True,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        if isinstance(options, dict):
+            for key in ("temperature", "top_p", "max_tokens"):
+                if key in options:
+                    payload[key] = options[key]
+
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "text/event-stream",
+                "User-Agent": "NovaAgent/2.0",
+            },
+        )
+        chunks = []
+        try:
+            context = ssl.create_default_context()
+            with urllib.request.urlopen(
+                request, timeout=self.timeout, context=context
+            ) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = event.get("choices") if isinstance(event, dict) else None
+                    if not isinstance(choices, list) or not choices:
+                        continue
+                    delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
+                    token = delta.get("content", "") if isinstance(delta, dict) else ""
+                    if not token:
+                        continue
+                    if not isinstance(token, str):
+                        token = str(token)
+                    chunks.append(token)
+                    if callable(on_token):
+                        on_token(token)
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:500]
+            except Exception:
+                pass
+            detail = _scrub(detail, self.api_key)
+            raise RemoteBrainError(
+                f"Remote provider returned HTTP {exc.code}: {detail}",
+                transient=exc.code in (408, 409, 429, 500, 502, 503, 504),
+            ) from exc
+        except urllib.error.URLError as exc:
+            self.last_error = _scrub(str(exc.reason), self.api_key)
+            raise RemoteBrainError(
+                f"Remote provider did not respond: {self.last_error}",
+                transient=True,
+            ) from exc
+
+        return "".join(chunks)
+
     @staticmethod
     def _extract_content(raw):
         """Pull the assistant text out of a chat-completions response body."""
