@@ -210,9 +210,9 @@ class CoreTests(unittest.TestCase):
 
     def test_read_file_fallback_returns_actual_tool_content(self):
         history = [
-            "STEP: 1\\nTOOL_NAME: read_file\\n"
-            "BEGIN_RAW_TOOL_RESULT\\n<html><body>Nova</body></html>\\n"
-            "END_RAW_TOOL_RESULT\\nVERIFIER_STATUS: CONFIRMED"
+            "STEP: 1\nTOOL_NAME: read_file\\n"
+            "BEGIN_RAW_TOOL_RESULT\n<html><body>Nova</body></html>\n"
+            "END_RAW_TOOL_RESULT\nVERIFIER_STATUS: CONFIRMED"
         ]
 
         response = NovaCore._read_file_fallback(history)
