@@ -125,19 +125,10 @@ def split_markdown_blocks(text):
 
 
 def _render_markdown_text(text):
-    import html
-    import re
+    from ui.markdown_renderer import render_markdown
 
-    text = format_response_math(str(text or ""))
-    escaped = html.escape(text)
-    escaped = re.sub(r"^### (.+)$", lambda m: "<h3>" + m.group(1) + "</h3>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^## (.+)$", lambda m: "<h2>" + m.group(1) + "</h2>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^# (.+)$", lambda m: "<h1>" + m.group(1) + "</h1>", escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"^[-*] (.+)$", lambda m: "• " + m.group(1), escaped, flags=re.MULTILINE)
-    escaped = re.sub(r"\*\*(.+?)\*\*", lambda m: "<strong>" + m.group(1) + "</strong>", escaped)
-    escaped = re.sub(r"`([^`\n]+)`", lambda m: "<code>" + m.group(1) + "</code>", escaped)
-    escaped = escaped.replace("\n", "<br>")
-    return escaped
+    source = format_response_math(str(text or ""))
+    return render_markdown(source)
 
 class CodeBlock(QFrame):
     def __init__(self, code, language="", parent=None):
@@ -219,6 +210,14 @@ def add_markdown_content(layout, text):
             strong { color: #ffffff; }
             code { background: #171b22; color: #d7d2ff; padding: 2px 4px; }
             a { color: #a99fff; }
+            p { margin: 4px 0 8px 0; }
+            ul, ol { margin: 4px 0 8px 0; }
+            blockquote { color: #c7c9d4; border-left: 3px solid #8b5cf6; margin-left: 6px; padding-left: 10px; }
+            table { border-collapse: collapse; margin: 8px 0 12px 0; }
+            th, td { border: 1px solid #41445b; padding: 7px 10px; }
+            th { background: #20243a; font-weight: 600; }
+            pre { background: #171b22; padding: 10px; }
+            hr { color: #41445b; }
         """)
         body.setHtml(_render_markdown_text(value))
         body.update_content_height()
