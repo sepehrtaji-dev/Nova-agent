@@ -114,10 +114,17 @@ class EpisodicMemory:
             searchable = " ".join(str(episode.get(key, "")) for key in (
                 "task", "tool", "status", "evidence", "outcome"
             )).casefold()
-            overlap = sum(1 for word in words if word in searchable)
+            searchable_words = set(re.findall(r"\\w+", searchable))
+            overlap = len(words & searchable_words)
             if overlap:
                 scored.append((overlap, episode))
-        scored.sort(key=lambda pair: (-pair[0], pair[1].get("timestamp", "")), reverse=False)
+        # Prefer the newest episode when relevance scores are equal.
+        scored.sort(
+            key=lambda pair: (
+                -pair[0],
+                str(pair[1].get("timestamp", "")),
+            ),
+        )
         try:
             count = max(1, min(int(limit), 20))
         except (TypeError, ValueError):
