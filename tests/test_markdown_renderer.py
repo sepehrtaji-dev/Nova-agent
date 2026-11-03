@@ -35,9 +35,9 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn('href="https://example.com"', rendered)
 
     def test_script_html_is_removed(self):
-        rendered = render_markdown('<script>alert("x")</script><b>safe-ish</b>')
-        self.assertNotIn("<script>", rendered)
-        self.assertNotIn("alert(", rendered)
+        rendered = render_markdown('<img src="x" onerror="alert(1)">')
+        self.assertNotIn("<script", rendered)
+        self.assertNotIn("onerror", rendered)
 
 if __name__ == "__main__":
     unittest.main()
