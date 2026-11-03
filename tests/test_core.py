@@ -1187,5 +1187,114 @@ class CoreTests(unittest.TestCase):
         self.assertIn("file was created", response.lower())
         self.assertEqual(events, ["generate", "generate", "extract"])
 
+
+    def test_end_to_end_failed_tool_is_diagnosed_replanned_and_retried(self):
+        goal = "Create report.txt after diagnosing any write failure"
+
+        class ScriptedPlannerBrain:
+            def __init__(self):
+                self.responses = [
+                    {"goal": goal, "steps": [
+                        {"description": "Create the requested report", "tool": "write_file",
+                         "input": {"path": "report.txt", "content": "final report"}}]},
+                    {"goal": goal, "steps": [
+                        {"description": "Create the requested report", "tool": "write_file",
+                         "input": {"path": "report.txt", "content": "final report"}},
+                        {"description": "Diagnose the write failure", "tool": "read_file",
+                         "input": {"path": "workspace_status.txt"}}]},
+                    {"goal": goal, "steps": [
+                        {"description": "Create the requested report", "tool": "write_file",
+                         "input": {"path": "report.txt", "content": "final report"}},
+                        {"description": "Diagnose the write failure", "tool": "read_file",
+                         "input": {"path": "workspace_status.txt"}},
+                        {"description": "Retry report creation with corrected settings", "tool": "write_file",
+                         "input": {"path": "report.txt", "content": "final report", "mode": "retry"}}]},
+                    {"goal": goal, "steps": [
+                        {"description": "Create the requested report", "tool": "write_file",
+                         "input": {"path": "report.txt", "content": "final report"}, "status": "failed"},
+                        {"description": "Diagnose the write failure", "tool": "read_file",
+                         "input": {"path": "workspace_status.txt"}, "status": "completed"},
+                        {"description": "Retry report creation with corrected settings", "tool": "write_file",
+                         "input": {"path": "report.txt", "content": "final report", "mode": "retry"},
+                         "status": "completed"}]},
+                    {"complete": True, "reason": "The failure was diagnosed and the report was created.", "steps": []},
+                ]
+
+            def generate(self, prompt, json_mode=False):
+                if not self.responses:
+                    raise AssertionError("Unexpected extra planner/model call")
+                return json.dumps(self.responses.pop(0))
+
+        class RetryTools(FakeTools):
+            def __init__(self):
+                super().__init__()
+                self.calls = []
+                self.tools["read_file"]["input_schema"]["additionalProperties"] = False
+                self.tools["write_file"]["input_schema"]["properties"]["mode"] = {
+                    "type": "string", "enum": ["retry"]}
+                self.tools["write_file"]["input_schema"]["additionalProperties"] = False
+
+            def execute(self, name, input_data):
+                payload = json.loads(input_data)
+                self.calls.append((name, payload))
+                if name == "write_file" and payload.get("mode") != "retry":
+                    return "ERROR: permission denied; report was not created"
+                if name == "read_file":
+                    return "Diagnostic: retry mode is required for this workspace"
+                return "FILE_CREATED\\nLocation: report.txt\\nBytes: 12"
+
+        class ReplanningRouter:
+            def classify_task(self, message, conversation, allowed_tools=None):
+                return "computer"
+
+            def decide(self, **kwargs):
+                for line in kwargs["plan"].splitlines():
+                    if "[pending]" not in line or " | TOOL=" not in line:
+                        continue
+                    tool_name, raw_input = line.split(" | TOOL=", 1)[1].split(" | INPUT=", 1)
+                    return {"action": "tool", "task_type": "computer",
+                            "tool": tool_name, "input": json.loads(raw_input)}
+                return {"action": "respond", "task_type": "computer", "goal_complete": True}
+
+        class ResultVerifier:
+            def verify(self, tool_name, tool_input, result):
+                if result.startswith("ERROR:"):
+                    return VerificationResult("failed", "permission denied", "write failed")
+                return VerificationResult("confirmed", result, f"{tool_name} confirmed")
+
+        core = NovaCore.__new__(NovaCore)
+        core.status_callback = None
+        core.brain = FakeBrain()
+        core.long_memory = FakeLongMemory()
+        core.short_memory = FakeMemory()
+        core.knowledge = FakeKnowledge()
+        core.extractor = FakeExtractor()
+        core.tools = RetryTools()
+        core.router = ReplanningRouter()
+        core.planner = Planner(ScriptedPlannerBrain(), core.tools)
+        core.verifier = ResultVerifier()
+        core.max_steps = 8
+        core.access = {"pc": True, "web": False, "git": False}
+        core.execution_state = {"last_plan": None, "verified_tools": [], "last_verified": None}
+        core._direct_self_diagnostics_answer = lambda message: None
+        core._direct_evidence_answer = lambda message: None
+        core._direct_memory_answer = lambda message: None
+        core._extract_and_store_memory = lambda message: None
+        core._identity_system_prompt = lambda extra="": "Nova identity"
+        core._build_final_prompt = lambda **kwargs: "Final response prompt"
+
+        response = core.ask(goal)
+
+        self.assertIn("created successfully", response.lower())
+        self.assertEqual(
+            [(name, payload.get("mode")) for name, payload in core.tools.calls],
+            [("write_file", None), ("read_file", None), ("write_file", "retry")],
+        )
+        final_plan = core.execution_state["last_plan"]
+        self.assertTrue(core.planner.is_complete(final_plan))
+        self.assertEqual([step["status"] for step in final_plan["steps"]],
+                         ["failed", "completed", "completed"])
+        self.assertEqual(len(core.execution_state["verified_tools"]), 2)
+
 if __name__ == "__main__":
     unittest.main()
