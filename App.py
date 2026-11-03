@@ -628,7 +628,7 @@ class TurnStatus(QFrame):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(5)
 
-        self.title = QLabel("Thought summary · 0 seconds")
+        self.title = QLabel("Working · 0 seconds")
         self.title.setObjectName("turnStatusTitle")
         text_layout.addWidget(self.title)
 
@@ -647,10 +647,10 @@ class TurnStatus(QFrame):
     def _refresh_elapsed(self):
         seconds = max(0, int((datetime.now() - self.started_at).total_seconds()))
         unit = "second" if seconds == 1 else "seconds"
-        self.title.setText(f"Thought summary · {seconds} {unit}")
+        self.title.setText(f"Working · {seconds} {unit}")
 
     def update_status(self, message):
-        """Show only the model-generated, user-safe thought summary."""
+        """Show transient task progress; never display model reasoning."""
         message = str(message or "").strip()
         # Legacy model-generated reasoning events are intentionally hidden.
         if message.startswith("THOUGHT_SUMMARY:"):
