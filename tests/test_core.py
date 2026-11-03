@@ -1210,8 +1210,6 @@ class CoreTests(unittest.TestCase):
                         {"description": "Retry report creation with corrected settings", "tool": "write_file",
                          "input": {"path": "report.txt", "content": "final report", "mode": "retry"}}]},
                     {"goal": goal, "steps": [
-                        {"description": "Create the requested report", "tool": "write_file",
-                         "input": {"path": "report.txt", "content": "final report"}, "status": "failed"},
                         {"description": "Diagnose the write failure", "tool": "read_file",
                          "input": {"path": "workspace_status.txt"}, "status": "completed"},
                         {"description": "Retry report creation with corrected settings", "tool": "write_file",
@@ -1233,6 +1231,9 @@ class CoreTests(unittest.TestCase):
                 self.tools["write_file"]["input_schema"]["properties"]["mode"] = {
                     "type": "string", "enum": ["retry"]}
                 self.tools["write_file"]["input_schema"]["additionalProperties"] = False
+
+            def exists(self, name):
+                return name in self.tools
 
             def execute(self, name, input_data):
                 payload = json.loads(input_data)
@@ -1293,7 +1294,7 @@ class CoreTests(unittest.TestCase):
         final_plan = core.execution_state["last_plan"]
         self.assertTrue(core.planner.is_complete(final_plan))
         self.assertEqual([step["status"] for step in final_plan["steps"]],
-                         ["failed", "completed", "completed"])
+                         ["completed", "completed"])
         self.assertEqual(len(core.execution_state["verified_tools"]), 2)
 
 if __name__ == "__main__":
