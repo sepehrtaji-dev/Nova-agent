@@ -495,16 +495,12 @@ Do not put generated file content in write_file input."""
             if isinstance(tool_history, list)
             else str(tool_history or "")
         )
-        trusted_history = re.sub(
-            r"BEGIN_RAW_TOOL_RESULT\s*.*?END_RAW_TOOL_RESULT",
-            "",
-            history,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
+        # Only trust verifier status appended after Nova closes a raw tool
+        # result. Arbitrary model/tool text can otherwise forge this marker.
         confirmed = re.findall(
-            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
-            trusted_history,
-            flags=re.IGNORECASE | re.MULTILINE,
+            r"END_RAW_TOOL_RESULT\\s*\\nVERIFIER_STATUS:\\s*CONFIRMED\\s*(?:\\n|$)",
+            history,
+            flags=re.IGNORECASE,
         )
         if not confirmed:
             return {
