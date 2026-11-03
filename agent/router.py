@@ -242,7 +242,10 @@ class ToolRouter:
                     or not isinstance(parsed_call.func, ast.Name)
                 ):
                     continue
-                if normalize_tool_name(parsed_call.func.id) != normalize_tool_name(tool_name):
+                if (
+                    normalize_tool_name(parsed_call.func.id)
+                    != normalize_tool_name(tool_name)
+                ):
                     continue
                 positional = [ast.literal_eval(arg) for arg in parsed_call.args]
                 if any(item.arg is None for item in parsed_call.keywords):
@@ -270,6 +273,7 @@ class ToolRouter:
                 "input": tool_input,
             }
 
+        return None
 
     def _parse_key_value_arguments(self, arguments):
         """Parse arguments in format: key="value", key='value', or key=value"""
