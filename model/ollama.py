@@ -63,7 +63,7 @@ class OllamaBrain:
         base_options = {
             "temperature": 0.1,
             "num_ctx": _env_int("NOVA_NUM_CTX", 8192, 2048),
-            "num_predict": _env_int("NOVA_NUM_PREDICT", 1536, 128),
+            "num_predict": _env_int("NOVA_NUM_PREDICT", 4096, 128),
             "repeat_penalty": 1.3,
             "repeat_last_n": 128,
         }
@@ -124,6 +124,55 @@ class OllamaBrain:
                 content = message.get("content", "")
             else:
                 content = getattr(message, "content", "")
+
+        if content is None:
+            content = ""
+        elif not isinstance(content, str):
+            content = str(content)
+
+        # Ollama reports "length" when generation stops at num_predict. Never
+        # silently present that partial text as a completed answer/file. Retry
+        # once with a larger output budget; if it still hits the cap, fail
+        # explicitly so callers can avoid writing a truncated source file.
+        done_reason = (
+            response.get("done_reason")
+            if isinstance(response, dict)
+            else getattr(response, "done_reason", None)
+        )
+        if str(done_reason or "").casefold() == "length":
+            current_budget = int(base_options.get("num_predict", 4096))
+            retry_budget = min(max(current_budget * 2, 8192), 16384)
+            if retry_budget <= current_budget:
+                raise RuntimeError(
+                    "Ollama reached the maximum output-token budget; "
+                    "the generated response may be incomplete."
+                )
+            retry_kwargs = dict(kwargs)
+            retry_options = dict(base_options)
+            retry_options["num_predict"] = retry_budget
+            retry_kwargs["options"] = retry_options
+            print(
+                f"[NOVA] Ollama output reached {current_budget} tokens; "
+                f"retrying once with {retry_budget} tokens."
+            )
+            response = ollama.chat(**retry_kwargs)
+            if isinstance(response, dict):
+                message = response.get("message", {})
+                content = message.get("content", "") if isinstance(message, dict) else ""
+                done_reason = response.get("done_reason")
+            else:
+                message = getattr(response, "message", None)
+                content = (
+                    message.get("content", "")
+                    if isinstance(message, dict)
+                    else getattr(message, "content", "")
+                )
+                done_reason = getattr(response, "done_reason", None)
+            if str(done_reason or "").casefold() == "length":
+                raise RuntimeError(
+                    f"Ollama still reached the {retry_budget}-token output limit; "
+                    "refusing to return a silently truncated response."
+                )
 
         if content is None:
             content = ""
