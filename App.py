@@ -1,5 +1,6 @@
 import mimetypes
 import os
+import re
 import sys
 import threading
 from datetime import datetime
