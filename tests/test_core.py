@@ -1103,16 +1103,16 @@ class CoreTests(unittest.TestCase):
         core.access = {"pc": True, "web": True, "git": True}
         core.router = ToolRouter(FakeBrain(), core.tools)
         html = (
-            "<!DOCTYPE html>\\n"
-            '<html lang="en">\\n'
-            "<body>Nova</body>\\n"
-            "</html>\\n"
+            "<!DOCTYPE html>\n"
+            '<html lang="en">\n'
+            "<body>Nova</body>\n"
+            "</html>\n"
         )
         response = (
-            "That sounds like a fun project. I will create the file now.\\n\\n"
+            "That sounds like a fun project. I will create the file now.\n\n"
             'writefile(path="index.html", location="projects", content="""'
             + html
-            + '""")\\n\\n'
+            + '""")\n\n'
             "I have created index.html in your projects folder."
         )
 
@@ -1127,16 +1127,16 @@ class CoreTests(unittest.TestCase):
 
     def test_mixed_prose_legacy_tool_call_is_executed_instead_of_returned_as_chat(self):
         html = (
-            "<!DOCTYPE html>\\n"
-            '<html lang="en">\\n'
-            "<body>Nova</body>\\n"
-            "</html>\\n"
+            "<!DOCTYPE html>\n"
+            '<html lang="en">\n'
+            "<body>Nova</body>\n"
+            "</html>\n"
         )
         mixed_tool_output = (
-            "I will create the requested page.\\n\\n"
+            "I will create the requested page.\n\n"
             'writefile(path="index.html", location="projects", content="""'
             + html
-            + '""")\\n\\n'
+            + '""")\n\n'
             "I have created index.html."
         )
 
