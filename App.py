@@ -631,7 +631,7 @@ class TurnStatus(QFrame):
         self.title.setObjectName("turnStatusTitle")
         text_layout.addWidget(self.title)
 
-        self.placeholder = QLabel("Interpreting your request…")
+        self.placeholder = QLabel("Preparing the task overview…")
         self.placeholder.setObjectName("turnStatusMessage")
         self.placeholder.setWordWrap(True)
         text_layout.addWidget(self.placeholder)
@@ -644,34 +644,45 @@ class TurnStatus(QFrame):
         layout.addLayout(text_layout, 1)
 
     def update_status(self, message):
-        """Accept only explicit model-generated decision-summary events."""
+        """Render the actual plan and factual execution events in this panel."""
         message = str(message or "").strip()
-        prefix = "MODEL_NOTE:"
-        if not message.startswith(prefix):
+        process_prefix = "THINKING_PROCESS:"
+        update_prefix = "THINKING_UPDATE:"
+
+        if message.startswith(process_prefix):
+            body = message[len(process_prefix):].strip()
+            if self.placeholder is not None:
+                self.placeholder.deleteLater()
+                self.placeholder = None
+            for raw_line in body.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                line = line[:500]
+                if line in self._seen_updates:
+                    continue
+                self._seen_updates.add(line)
+                is_heading = bool(re.match(r"^\\d+\\.\\s+", line))
+                label = QLabel(line if is_heading else "•  " + line)
+                label.setObjectName(
+                    "turnStatusTitle" if is_heading else "turnStatusMessage"
+                )
+                label.setWordWrap(True)
+                self.updates_layout.addWidget(label)
             return
 
-        summary = message[len(prefix):].strip()
-        lines = [
-            line.strip().lstrip("-*• ").strip()
-            for line in summary.splitlines()
-            if line.strip()
-        ][:3]
-        if not lines:
-            return
-
-        if self.placeholder is not None:
-            self.placeholder.deleteLater()
-            self.placeholder = None
-
-        for line in lines:
-            line = line[:240]
+        if message.startswith(update_prefix):
+            line = message[len(update_prefix):].strip()[:500]
             if not line or line in self._seen_updates:
-                continue
+                return
+            if self.placeholder is not None:
+                self.placeholder.deleteLater()
+                self.placeholder = None
             self._seen_updates.add(line)
-            bullet = QLabel(f"•  {line}")
-            bullet.setObjectName("turnStatusMessage")
-            bullet.setWordWrap(True)
-            self.updates_layout.addWidget(bullet)
+            label = QLabel("•  " + line)
+            label.setObjectName("turnStatusMessage")
+            label.setWordWrap(True)
+            self.updates_layout.addWidget(label)
 
 
 class CapabilityButton(QPushButton):
