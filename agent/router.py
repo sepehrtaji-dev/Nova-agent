@@ -175,17 +175,19 @@ class ToolRouter:
             name for name in getattr(self.tools, "tools", {})
             if isinstance(name, str)
         ]
-        normalized = lambda value: re.sub(r"[^a-z0-9]", "", value.casefold())
+        def normalize_tool_name(value):
+            return re.sub(r"[^a-z0-9]", "", value.casefold())
+
         by_normalized_name = {}
         for name in registered:
-            by_normalized_name.setdefault(normalized(name), []).append(name)
+            by_normalized_name.setdefault(normalize_tool_name(name), []).append(name)
 
         for match in re.finditer(r"(?<![\w.])([A-Za-z_]\w*)\s*\(", candidate):
             emitted_name = match.group(1)
             if self.tools.exists(emitted_name):
                 tool_name = emitted_name
             else:
-                matches = by_normalized_name.get(normalized(emitted_name), [])
+                matches = by_normalized_name.get(normalize_tool_name(emitted_name), [])
                 if len(matches) != 1:
                     continue
                 tool_name = matches[0]
@@ -235,9 +237,12 @@ class ToolRouter:
             call_source = candidate[match.start(1):close_paren + 1]
             try:
                 parsed_call = ast.parse(call_source, mode="eval").body
-                if not isinstance(parsed_call, ast.Call) or not isinstance(parsed_call.func, ast.Name):
+                if (
+                    not isinstance(parsed_call, ast.Call)
+                    or not isinstance(parsed_call.func, ast.Name)
+                ):
                     continue
-                if normalized(parsed_call.func.id) != normalized(tool_name):
+                if normalize_tool_name(parsed_call.func.id) != normalize_tool_name(tool_name):
                     continue
                 positional = [ast.literal_eval(arg) for arg in parsed_call.args]
                 if any(item.arg is None for item in parsed_call.keywords):
