@@ -114,7 +114,7 @@ class EpisodicMemory:
             searchable = " ".join(str(episode.get(key, "")) for key in (
                 "task", "tool", "status", "evidence", "outcome"
             )).casefold()
-            searchable_words = set(re.findall(r"\\w+", searchable))
+            searchable_words = set(re.findall(r"\w+", searchable))
             overlap = len(words & searchable_words)
             if overlap:
                 scored.append((overlap, episode))
