@@ -139,12 +139,16 @@ class KnowledgeMemory:
             )
             results.append((score, item))
 
-        results.sort(key=lambda item: item[0], reverse=True)
+        # Relevance is primary; newer memories win ties deterministically.
+        results.sort(
+            key=lambda item: (
+                item[0],
+                str(item[1].get("last_verified") or item[1].get("learned_at") or ""),
+            ),
+            reverse=True,
+        )
 
-        return [
-            item
-            for _, item in results[:limit]
-        ]
+        return [item for _, item in results[:limit]]
 
     def add(
         self,
