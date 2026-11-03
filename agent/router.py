@@ -180,7 +180,7 @@ class ToolRouter:
         for name in registered:
             by_normalized_name.setdefault(normalized(name), []).append(name)
 
-        for match in re.finditer(r"(?<![\\w.])([A-Za-z_]\\w*)\\s*\\(", candidate):
+        for match in re.finditer(r"(?<![\w.])([A-Za-z_]\w*)\s*\(", candidate):
             emitted_name = match.group(1)
             if self.tools.exists(emitted_name):
                 tool_name = emitted_name
@@ -207,7 +207,7 @@ class ToolRouter:
                 if quote is not None:
                     if escaped:
                         escaped = False
-                    elif char == "\\\\":
+                    elif char == "\\":
                         escaped = True
                     elif triple_quoted and candidate.startswith(quote * 3, index):
                         quote = None
