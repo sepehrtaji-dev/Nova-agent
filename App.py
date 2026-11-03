@@ -2216,8 +2216,12 @@ class NovaWindow(QMainWindow):
         self.thread.start()
 
     def _on_status(self, message):
-        is_model_note = str(message).startswith("MODEL_NOTE:")
-        if not is_model_note:
+        message = str(message)
+        is_thinking_event = message.startswith((
+            "THINKING_PROCESS:",
+            "THINKING_UPDATE:",
+        ))
+        if not is_thinking_event:
             self.status_label.setText(message)
             self._add_activity(message)
         if getattr(self, "current_turn_status", None):
