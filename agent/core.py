@@ -1189,6 +1189,7 @@ class NovaCore:
                 f"Relevant saved user memory:\n{self._long_memory_context(message)}\n\n"
                 f"Relevant past tool experiences:\n{self._episodic_context(message)}\n\n"
                 "Answer the user's actual question or statement directly in natural prose. "
+                "When the user asks you to inspect, read, edit, create, or return code from an attached file, that requested action takes priority over unrelated saved-memory facts: use the enabled file tools and complete the file task. Saved memory may supply a relevant value (such as a profile link) but must never replace the requested file operation. "
                 "Unless the user explicitly requests JSON, never return JSON, dictionaries, key-value objects, or internal memory representations. Treat saved-memory JSON as private context data and do not mirror its structure in your answer. "
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
