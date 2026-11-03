@@ -28,7 +28,7 @@ class ToolRegistry:
         }
 
     def validate_input(self, name, input_data):
-        """Validate arguments against the selected tool's declared JSON schema."""
+        """Validate tool arguments against the supported JSON Schema subset."""
         if not self.exists(name):
             return False, f"Unknown tool: {name}"
         if not isinstance(input_data, dict):
@@ -36,56 +36,81 @@ class ToolRegistry:
 
         schema = self.tools[name].get("input_schema")
         if not isinstance(schema, dict):
-            # The handler remains responsible for domain-specific validation
-            # when no machine-readable contract is declared.
             return True, None
-        if schema.get("type", "object") != "object":
-            return False, "Tool input schema must describe an object."
 
-        properties = schema.get("properties", {})
-        required = schema.get("required", [])
-        if not isinstance(properties, dict) or not isinstance(required, list):
-            return False, "Tool input schema is invalid."
-
-        missing = [
-            key for key in required
-            if isinstance(key, str)
-            and (key not in input_data or input_data[key] is None)
-        ]
-        if missing:
-            return False, "Missing required input field(s): " + ", ".join(missing)
-
-        if schema.get("additionalProperties") is False:
-            unknown = sorted(set(input_data) - set(properties))
-            if unknown:
-                return False, "Unexpected input field(s): " + ", ".join(unknown)
-
-        type_checks = {
-            "string": lambda value: isinstance(value, str),
-            "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
-            "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
-            "boolean": lambda value: isinstance(value, bool),
-            "object": lambda value: isinstance(value, dict),
-            "array": lambda value: isinstance(value, list),
-            "null": lambda value: value is None,
-        }
-        for key, value in input_data.items():
-            definition = properties.get(key)
+        def validate(value, definition, field):
             if not isinstance(definition, dict):
-                continue
+                return False, f"Schema for '{field}' is invalid."
+
             expected = definition.get("type")
-            check = type_checks.get(expected)
-            if check is not None and not check(value):
-                return False, f"Input field '{key}' must be {expected}."
+            checks = {
+                "string": lambda item: isinstance(item, str),
+                "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
+                "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
+                "boolean": lambda item: isinstance(item, bool),
+                "object": lambda item: isinstance(item, dict),
+                "array": lambda item: isinstance(item, list),
+                "null": lambda item: item is None,
+            }
+            if expected in checks and not checks[expected](value):
+                return False, f"Input field '{field}' must be {expected}."
+
+            if "enum" in definition and value not in definition["enum"]:
+                return False, f"Input field '{field}' is not an allowed value."
+
             if isinstance(value, str):
                 if len(value) < int(definition.get("minLength", 0)):
-                    return False, f"Input field '{key}' is too short."
-                max_length = definition.get("maxLength")
-                if max_length is not None and len(value) > int(max_length):
-                    return False, f"Input field '{key}' is too long."
-            if "enum" in definition and value not in definition["enum"]:
-                return False, f"Input field '{key}' is not an allowed value."
-        return True, None
+                    return False, f"Input field '{field}' is too short."
+                maximum = definition.get("maxLength")
+                if maximum is not None and len(value) > int(maximum):
+                    return False, f"Input field '{field}' is too long."
+
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if "minimum" in definition and value < definition["minimum"]:
+                    return False, f"Input field '{field}' is below its minimum."
+                if "maximum" in definition and value > definition["maximum"]:
+                    return False, f"Input field '{field}' exceeds its maximum."
+
+            if isinstance(value, dict):
+                properties = definition.get("properties", {})
+                required = definition.get("required", [])
+                if not isinstance(properties, dict) or not isinstance(required, list):
+                    return False, f"Object schema for '{field}' is invalid."
+                missing = [
+                    key for key in required
+                    if isinstance(key, str) and (key not in value or value[key] is None)
+                ]
+                if missing:
+                    return False, f"Missing required input field(s) in '{field}': " + ", ".join(missing)
+                if definition.get("additionalProperties") is False:
+                    unknown = sorted(set(value) - set(properties))
+                    if unknown:
+                        return False, f"Unexpected input field(s) in '{field}': " + ", ".join(unknown)
+                for key, item in value.items():
+                    if key in properties:
+                        valid, reason = validate(item, properties[key], f"{field}.{key}")
+                        if not valid:
+                            return valid, reason
+
+            if isinstance(value, list):
+                minimum = definition.get("minItems")
+                maximum = definition.get("maxItems")
+                if minimum is not None and len(value) < int(minimum):
+                    return False, f"Input field '{field}' has too few items."
+                if maximum is not None and len(value) > int(maximum):
+                    return False, f"Input field '{field}' has too many items."
+                item_schema = definition.get("items")
+                if isinstance(item_schema, dict):
+                    for index, item in enumerate(value):
+                        valid, reason = validate(item, item_schema, f"{field}[{index}]")
+                        if not valid:
+                            return valid, reason
+
+            return True, None
+
+        if schema.get("type", "object") != "object":
+            return False, "Tool input schema must describe an object."
+        return validate(input_data, schema, "input")
 
     def exists(self, name):
 
