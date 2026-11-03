@@ -608,12 +608,11 @@ class ActivityItem(QFrame):
 
 
 class TurnStatus(QFrame):
-    """Live, user-safe summary of Nova's reported execution progress."""
+    """Displays only the model's concise, user-safe decision summary."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("turnStatus")
-        self.started_at = datetime.now()
         self._seen_updates = set()
 
         layout = QHBoxLayout(self)
@@ -628,9 +627,14 @@ class TurnStatus(QFrame):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(5)
 
-        self.title = QLabel("Working · 0 seconds")
+        self.title = QLabel("Model's perspective")
         self.title.setObjectName("turnStatusTitle")
         text_layout.addWidget(self.title)
+
+        self.placeholder = QLabel("The model's summary will appear here.")
+        self.placeholder.setObjectName("turnStatusMessage")
+        self.placeholder.setWordWrap(True)
+        text_layout.addWidget(self.placeholder)
 
         self.updates_layout = QVBoxLayout()
         self.updates_layout.setContentsMargins(0, 0, 0, 0)
@@ -639,25 +643,28 @@ class TurnStatus(QFrame):
 
         layout.addLayout(text_layout, 1)
 
-        self.elapsed_timer = QTimer(self)
-        self.elapsed_timer.setInterval(1000)
-        self.elapsed_timer.timeout.connect(self._refresh_elapsed)
-        self.elapsed_timer.start()
-
-    def _refresh_elapsed(self):
-        seconds = max(0, int((datetime.now() - self.started_at).total_seconds()))
-        unit = "second" if seconds == 1 else "seconds"
-        self.title.setText(f"Working · {seconds} {unit}")
-
     def update_status(self, message):
-        """Show transient task progress; never display model reasoning."""
+        """Accept only explicit model-generated decision-summary events."""
         message = str(message or "").strip()
-        # Legacy model-generated reasoning events are intentionally hidden.
-        if message.startswith("THOUGHT_SUMMARY:"):
+        prefix = "MODEL_NOTE:"
+        if not message.startswith(prefix):
             return
-        summary = message.partition(":")[2]
-        for line in summary.splitlines():
-            line = line.strip().lstrip("-*• ").strip()
+
+        summary = message[len(prefix):].strip()
+        lines = [
+            line.strip().lstrip("-*• ").strip()
+            for line in summary.splitlines()
+            if line.strip()
+        ][:3]
+        if not lines:
+            return
+
+        if self.placeholder is not None:
+            self.placeholder.deleteLater()
+            self.placeholder = None
+
+        for line in lines:
+            line = line[:240]
             if not line or line in self._seen_updates:
                 continue
             self._seen_updates.add(line)
@@ -665,12 +672,6 @@ class TurnStatus(QFrame):
             bullet.setObjectName("turnStatusMessage")
             bullet.setWordWrap(True)
             self.updates_layout.addWidget(bullet)
-
-        while self.updates_layout.count() > 8:
-            item = self.updates_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
 
 
 class CapabilityButton(QPushButton):
@@ -2204,8 +2205,8 @@ class NovaWindow(QMainWindow):
         self.thread.start()
 
     def _on_status(self, message):
-        is_thought_summary = str(message).startswith("THOUGHT_SUMMARY:")
-        if not is_thought_summary:
+        is_model_note = str(message).startswith("MODEL_NOTE:")
+        if not is_model_note:
             self.status_label.setText(message)
             self._add_activity(message)
         if getattr(self, "current_turn_status", None):
