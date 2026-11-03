@@ -210,9 +210,9 @@ class CoreTests(unittest.TestCase):
 
     def test_read_file_fallback_returns_actual_tool_content(self):
         history = [
-            "STEP: 1\\nTOOL_NAME: read_file\\n"
-            "BEGIN_RAW_TOOL_RESULT\\n<html><body>Nova</body></html>\\n"
-            "END_RAW_TOOL_RESULT\\nVERIFIER_STATUS: CONFIRMED"
+            "STEP: 1\nTOOL_NAME: read_file\n"
+            "BEGIN_RAW_TOOL_RESULT\n<html><body>Nova</body></html>\n"
+            "END_RAW_TOOL_RESULT\nVERIFIER_STATUS: CONFIRMED"
         ]
 
         response = NovaCore._read_file_fallback(history)
@@ -396,7 +396,7 @@ class CoreTests(unittest.TestCase):
         core._remember_verified_tool_result(
             "desktop",
             '{"action":"screenshot"}',
-            "Screenshot saved: C:\\Users\\Test\\nova.png",
+            "Screenshot saved: C:\\Users\\Test\nova.png",
             verification,
         )
 
@@ -417,7 +417,7 @@ class CoreTests(unittest.TestCase):
             core._validate_tool_request(
                 "request",
                 "edit_file",
-                {"path": "C:\\Temp\\note.txt", "location": "system", "old": "a", "new": "b"},
+                {"path": "C:\\Temp\note.txt", "location": "system", "old": "a", "new": "b"},
             )[0],
             True,
         )
@@ -425,7 +425,7 @@ class CoreTests(unittest.TestCase):
             core._validate_tool_request(
                 "request",
                 "delete_file",
-                {"path": "C:\\Temp\\note.txt", "location": "system"},
+                {"path": "C:\\Temp\note.txt", "location": "system"},
             )[0],
             True,
         )
@@ -998,7 +998,7 @@ class CoreTests(unittest.TestCase):
             def generate(self, prompt, system_prompt=None, json_mode=False):
                 self.prompts.append(prompt)
                 if "Create a short user-facing summary" in prompt:
-                    return "- The user requested a file operation.\\n- A concise status update is appropriate."
+                    return "- The user requested a file operation.\n- A concise status update is appropriate."
                 return self.responses.pop(0)
 
         brain = ScriptedBrain()
@@ -1355,7 +1355,7 @@ class CoreTests(unittest.TestCase):
                     return "ERROR: permission denied; report was not created"
                 if name == "read_file":
                     return "Diagnostic: retry mode is required for this workspace"
-                return "FILE_CREATED\\nLocation: report.txt\\nBytes: 12"
+                return "FILE_CREATED\nLocation: report.txt\nBytes: 12"
 
         class ReplanningRouter:
             def classify_task(self, message, conversation, allowed_tools=None):
