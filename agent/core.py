@@ -298,11 +298,25 @@ class NovaCore:
                 for line in summary.splitlines()
                 if line.strip()
             ][:3]
-            if lines:
-                self._status("MODEL_NOTE:" + "\n".join(lines))
         except Exception:
-            # The summary is optional; never let it block the real request.
-            pass
+            lines = []
+
+        # Never leave the Thinking Process panel empty. If the model cannot
+        # produce a summary, publish a transparent, classification-based
+        # fallback rather than a fake model quote or a blank placeholder.
+        if not lines:
+            if task_type == "computer":
+                lines = [
+                    "I interpreted this as a task that requires an action in your workspace.",
+                    "I will identify the relevant tool, inspect the available result, and verify the outcome before reporting completion.",
+                ]
+            else:
+                lines = [
+                    "I interpreted this as a conversational request.",
+                    "I will answer directly using the request and the available context.",
+                ]
+
+        self._status("MODEL_NOTE:" + "\n".join(lines))
 
     def _conversation_context(self, max_chars=12000):
         formatter = getattr(self.short_memory, "format_for_prompt", None)
