@@ -18,7 +18,7 @@ _ALLOWED_ATTRIBUTES = {
     "th": ["align"], "td": ["align"], "ol": ["start"],
     "input": ["type", "checked", "disabled"],
 }
-_EXTENSIONS = ["extra", "sane_lists", "nl2br"]
+_EXTENSIONS = ["extra", "sane_lists", "nl2br", "pymdownx.tilde"]
 
 def render_markdown(source: str) -> str:
     """Render Markdown to sanitized HTML suitable for QTextBrowser."""
