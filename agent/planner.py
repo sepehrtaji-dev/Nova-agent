@@ -381,6 +381,7 @@ Rules:
 Schema:
 {{
   "goal": "short goal",
+  "visible_summary": "brief user-facing explanation of the request interpretation and high-level approach; do not include private chain-of-thought",
   "steps": [
     {{
       "tool": "registered tool name",
@@ -476,8 +477,12 @@ Do not put generated file content in write_file input."""
                     f"{type(e).__name__}: {e}"
                 )
 
+        visible_summary = data.get("visible_summary", "")
+        if not isinstance(visible_summary, str):
+            visible_summary = ""
         return {
             "goal": str(data.get("goal") or goal).strip(),
+            "visible_summary": visible_summary.strip()[:1600],
             "steps": steps
         }
 
