@@ -663,6 +663,14 @@ class TurnStatus(QFrame):
         self.elapsed_timer.stop()
         self._refresh_elapsed()
 
+    def finish(self):
+        """Stop the elapsed-time display when the turn ends."""
+        if not self.thought_text:
+            self.thought_label.setText(
+                "This model did not provide a visible thought summary."
+            )
+        self._finish_thought()
+
     def update_status(self, message):
         """Render only streamed model-authored notes and factual tool updates."""
         message = str(message or "").strip()
@@ -2312,6 +2320,7 @@ class NovaWindow(QMainWindow):
     def _finish_request(self, status):
         # Turn status is temporary progress UI, not a permanent chat message.
         if getattr(self, "current_turn_status", None):
+            self.current_turn_status.finish()
             item = self.chat_container_layout.indexOf(self.current_turn_status)
             if item >= 0:
                 self.chat_container_layout.takeAt(item)
