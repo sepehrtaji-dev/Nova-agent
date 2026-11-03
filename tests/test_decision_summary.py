@@ -30,20 +30,25 @@ class DecisionSummaryTests(unittest.TestCase):
         self.assertIn("Do not reveal private chain-of-thought", prompt)
         self.assertIn("Do not claim that any tool has already run", prompt)
 
-    def test_empty_summary_does_not_publish_an_empty_event(self):
+    def test_empty_model_summary_uses_transparent_fallback(self):
         core, events = self.make_core("  \n ")
-
-        core._publish_decision_summary("Hello", "conversation")
-
-        self.assertEqual(events, [])
-
-    def test_summary_generation_failure_does_not_interrupt_task(self):
-        core, events = self.make_core("")
-        core.brain.generate.side_effect = RuntimeError("model unavailable")
 
         core._publish_decision_summary("Please read index.html", "computer")
 
-        self.assertEqual(events, [])
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0].startswith("MODEL_NOTE:"))
+        self.assertIn("requires an action in your workspace", events[0])
+        self.assertIn("verify the outcome", events[0])
+
+    def test_summary_generation_failure_uses_fallback(self):
+        core, events = self.make_core("")
+        core.brain.generate.side_effect = RuntimeError("model unavailable")
+
+        core._publish_decision_summary("Hello", "conversation")
+
+        self.assertEqual(len(events), 1)
+        self.assertIn("conversational request", events[0])
+        self.assertIn("answer directly", events[0])
 
 
 if __name__ == "__main__":
