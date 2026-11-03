@@ -4,3 +4,4 @@ textual>=0.50,<2
 prompt_toolkit>=3.0,<4
 Markdown>=3.7,<4
 bleach>=6.2,<7
+pymdown-extensions>=10.14,<11
