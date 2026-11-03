@@ -1095,6 +1095,74 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(decision["tool"], "write_file")
                 self.assertEqual(json.loads(decision["input"]), payload["input"])
 
+    def test_conversation_tool_call_extracts_mixed_prose_alias_and_triple_quoted_content(self):
+        from agent.router import ToolRouter
+
+        core = NovaCore.__new__(NovaCore)
+        core.tools = FakeTools()
+        core.access = {"pc": True, "web": True, "git": True}
+        core.router = ToolRouter(FakeBrain(), core.tools)
+        html = (
+            "<!DOCTYPE html>\\n"
+            '<html lang="en">\\n'
+            "<body>Nova</body>\\n"
+            "</html>\\n"
+        )
+        response = (
+            "That sounds like a fun project. I will create the file now.\\n\\n"
+            'writefile(path="index.html", location="projects", content="""'
+            + html
+            + '""")\\n\\n'
+            "I have created index.html in your projects folder."
+        )
+
+        decision = core._conversation_tool_call(response)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision["tool"], "write_file")
+        self.assertEqual(
+            json.loads(decision["input"]),
+            {"path": "index.html", "location": "projects", "content": html},
+        )
+
+    def test_mixed_prose_legacy_tool_call_is_executed_instead_of_returned_as_chat(self):
+        html = (
+            "<!DOCTYPE html>\\n"
+            '<html lang="en">\\n'
+            "<body>Nova</body>\\n"
+            "</html>\\n"
+        )
+        mixed_tool_output = (
+            "I will create the requested page.\\n\\n"
+            'writefile(path="index.html", location="projects", content="""'
+            + html
+            + '""")\\n\\n'
+            "I have created index.html."
+        )
+
+        class ScriptedBrain:
+            def __init__(self):
+                self.responses = [mixed_tool_output, "The file was created and verified."]
+                self.prompts = []
+
+            def generate(self, prompt, system_prompt=None, json_mode=False):
+                self.prompts.append(prompt)
+                if "Create a short user-facing summary" in prompt:
+                    return "- Created the requested HTML file."
+                return self.responses.pop(0)
+
+        core = self._make_conversation_core(ScriptedBrain())
+        response = core.ask("create index.html containing a Nova page")
+
+        self.assertIn("created and verified", response.lower())
+        self.assertEqual(len(core.tools.calls), 1)
+        self.assertEqual(core.tools.calls[0][0], "write_file")
+        self.assertEqual(
+            json.loads(core.tools.calls[0][1]),
+            {"path": "index.html", "location": "projects", "content": html},
+        )
+        self.assertTrue(core.execution_state["last_reflection"]["complete"])
+
     def test_conversation_tool_call_rejects_invalid_or_disabled_tools(self):
         from agent.router import ToolRouter
 
