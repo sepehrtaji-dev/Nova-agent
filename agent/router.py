@@ -168,38 +168,58 @@ class ToolRouter:
                 "input": tool_input,
             }
 
-        # Some small local models omit quotes around a plain-text argument.
-        # Discover the tool name from the registry rather than maintaining a
-        # list of tool-specific parsing rules.
-        registered = sorted(
-            (name for name in self.tools.tools if isinstance(name, str)),
-            key=len,
-            reverse=True,
-        )
-        for tool_name in registered:
-            match = re.search(
-                rf"(?<![\w.]){re.escape(tool_name)}\s*\(",
-                candidate,
-            )
-            if not match:
+        # Models sometimes put a tool call inside explanatory prose and may
+        # omit separators in the tool name (for example, writefile vs write_file).
+        # Resolve only unambiguous normalized names from the live registry.
+        registered = [
+            name for name in getattr(self.tools, "tools", {})
+            if isinstance(name, str)
+        ]
+        normalized = lambda value: re.sub(r"[^a-z0-9]", "", value.casefold())
+        by_normalized_name = {}
+        for name in registered:
+            by_normalized_name.setdefault(normalized(name), []).append(name)
+
+        for match in re.finditer(r"(?<![\\w.])([A-Za-z_]\\w*)\\s*\\(", candidate):
+            emitted_name = match.group(1)
+            if self.tools.exists(emitted_name):
+                tool_name = emitted_name
+            else:
+                matches = by_normalized_name.get(normalized(emitted_name), [])
+                if len(matches) != 1:
+                    continue
+                tool_name = matches[0]
+
+            open_paren = candidate.find("(", match.start(1) + len(emitted_name))
+            if open_paren < 0:
                 continue
-            open_paren = candidate.find("(", match.start())
+
+            # Find the matching ')' without being confused by quoted strings,
+            # including multiline triple-quoted file contents.
             depth = 0
             quote = None
+            triple_quoted = False
             escaped = False
             close_paren = None
-            for index in range(open_paren, len(candidate)):
+            index = open_paren
+            while index < len(candidate):
                 char = candidate[index]
-                if quote:
+                if quote is not None:
                     if escaped:
                         escaped = False
-                    elif char == "\\":
+                    elif char == "\\\\":
                         escaped = True
-                    elif char == quote:
+                    elif triple_quoted and candidate.startswith(quote * 3, index):
                         quote = None
-                    continue
-                if char in {"'", '"'}:
+                        triple_quoted = False
+                        index += 2
+                    elif not triple_quoted and char == quote:
+                        quote = None
+                elif char in {"'", '"'}:
                     quote = char
+                    triple_quoted = candidate.startswith(char * 3, index)
+                    if triple_quoted:
+                        index += 2
                 elif char == "(":
                     depth += 1
                 elif char == ")":
@@ -207,16 +227,37 @@ class ToolRouter:
                     if depth == 0:
                         close_paren = index
                         break
+                index += 1
+
             if close_paren is None:
                 continue
-            raw_argument = candidate[open_paren + 1:close_paren].strip()
-            if not raw_argument:
-                return None
+
+            call_source = candidate[match.start(1):close_paren + 1]
             try:
-                positional_value = ast.literal_eval(raw_argument)
-            except (ValueError, TypeError, SyntaxError):
-                positional_value = raw_argument
-            tool_input = self._input_from_positional(tool_name, positional_value)
+                parsed_call = ast.parse(call_source, mode="eval").body
+                if not isinstance(parsed_call, ast.Call) or not isinstance(parsed_call.func, ast.Name):
+                    continue
+                if normalized(parsed_call.func.id) != normalized(tool_name):
+                    continue
+                positional = [ast.literal_eval(arg) for arg in parsed_call.args]
+                if any(item.arg is None for item in parsed_call.keywords):
+                    continue
+                keywords = {
+                    item.arg: ast.literal_eval(item.value)
+                    for item in parsed_call.keywords
+                }
+            except (SyntaxError, ValueError, TypeError):
+                continue
+
+            if len(positional) == 1 and not keywords:
+                tool_input = self._input_from_positional(tool_name, positional[0])
+            elif not positional and keywords:
+                tool_input = json.dumps(keywords, ensure_ascii=False)
+            elif len(positional) == 1 and isinstance(positional[0], dict) and not keywords:
+                tool_input = json.dumps(positional[0], ensure_ascii=False)
+            else:
+                continue
+
             return {
                 "action": "tool",
                 "task_type": "computer",
@@ -224,7 +265,6 @@ class ToolRouter:
                 "input": tool_input,
             }
 
-        return None
 
     def _parse_key_value_arguments(self, arguments):
         """Parse arguments in format: key="value", key='value', or key=value"""
