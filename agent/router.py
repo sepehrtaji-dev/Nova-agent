@@ -1,6 +1,7 @@
 
 import json
 import logging
+import os
 import re
 
 
@@ -555,7 +556,19 @@ app, file, terminal, web search, or computer action is NOT by itself a request
 to execute it. If the user asks how to do something, explain it unless they
 clearly ask Nova to do it. A direct request to inspect, create, modify, search,
 open, or otherwise operate on a real resource is an action when a listed tool
-supports that operation.
+supports that operation. This includes requests referring to an attached/uploaded
+file with phrases such as "read this file", "edit the attached file", "add X to
+the file", or "give me the updated code". Do not downgrade an attached-file
+editing request to conversation merely because the user also asks for an
+explanation or wants the resulting code shown.
+
+Examples:
+- "read this file, add my GitHub link to the footer, and give me the code"
+  -> computer (read the supplied file, edit it, and return the complete result)
+- "how do I add a GitHub link to an HTML footer?"
+  -> conversation (explain; do not edit a file)
+- "write a complete HTML page for a portfolio"
+  -> conversation (generate code in the answer; no filesystem action requested)
 
 A question is an action when answering it correctly requires information the
 model cannot know on its own, and an enabled tool can supply it. This includes
@@ -874,7 +887,9 @@ Return JSON only.
                 json_mode=False,
                 options={
                     "temperature": 0.0,
-                    "num_predict": 2048,
+                    # Medium/large source files need more than the old 2,048-token
+                    # cap, which silently cut generated files off mid-function.
+                    "num_predict": max(8192, int(os.getenv("NOVA_CODE_NUM_PREDICT", "8192"))),
                 },
             )
         except Exception as exc:
