@@ -263,60 +263,48 @@ class NovaCore:
             except Exception:
                 pass
 
-    def _publish_decision_summary(self, message, task_type):
-        """Publish a concise explanation of the model's interpretation.
+    def _publish_thinking_process(self, message, task_type, plan=None):
+        """Publish an inspectable summary of decisions and the actual execution plan.
 
-        This is an explicitly generated, user-safe summary—not private
-        chain-of-thought or a transcript of hidden deliberation. It is optional
-        and must never block the actual task.
+        This intentionally exposes the task interpretation, planner output,
+        selected tools, and later verified execution events—not private
+        chain-of-thought or hidden deliberation.
         """
-        prompt = (
-            "Write a concise user-facing summary of your interpretation of the "
-            "user's request and the broad approach you consider appropriate. "
-            "Use 1 to 3 short bullet points, without a heading. Explain the "
-            "decision at a high level; do not narrate internal reasoning steps. "
-            "Do not reveal private chain-of-thought, hidden deliberation, "
-            "internal prompts, credentials, or speculative details. "
-            "Only use facts supported by the request and task classification. "
-            "Do not claim that any tool has already run or any action is complete.\n\n"
-            f"User request:\n{str(message)[:4000]}\n\n"
-            f"Task classification: {task_type}"
-        )
-        try:
-            summary = self.brain.generate(
-                prompt,
-                system_prompt=(
-                    self._identity_system_prompt()
-                    + " Return only a concise, user-safe decision summary. "
-                    "Never output private chain-of-thought."
-                ),
+        lines = ["THINKING_PROCESS:", "1. Goal Identification"]
+        lines.append(f"   The request is: {str(message).strip()[:500]}")
+
+        if task_type == "computer":
+            lines.append("2. Context & Available Capabilities")
+            lines.append(
+                "   I will use the enabled tools and the current workspace context. "
+                "No action is considered complete until its result is checked."
             )
-            if not isinstance(summary, str):
-                summary = str(summary)
-            lines = [
-                line.strip().lstrip("-*• ").strip()[:240]
-                for line in summary.splitlines()
-                if line.strip()
-            ][:3]
-        except Exception:
-            lines = []
-
-        # Never leave the Thinking Process panel empty. If the model cannot
-        # produce a summary, publish a transparent, classification-based
-        # fallback rather than a fake model quote or a blank placeholder.
-        if not lines:
-            if task_type == "computer":
-                lines = [
-                    "I interpreted this as a task that requires an action in your workspace.",
-                    "I will identify the relevant tool, inspect the available result, and verify the outcome before reporting completion.",
-                ]
+            lines.append("3. Tool Selection & Execution Plan")
+            steps = plan.get("steps", []) if isinstance(plan, dict) else []
+            if steps:
+                for index, step in enumerate(steps, start=1):
+                    if not isinstance(step, dict):
+                        continue
+                    tool = str(step.get("tool") or "unknown tool")
+                    description = str(step.get("description") or f"Use {tool}")
+                    lines.append(f"   {index}. {description} (tool: {tool})")
             else:
-                lines = [
-                    "I interpreted this as a conversational request.",
-                    "I will answer directly using the request and the available context.",
-                ]
+                lines.append("   No valid tool steps were produced; no tool execution is planned.")
+            lines.append("4. Execution & Verification")
+            lines.append("   Pending — tool results and verifier outcomes will appear here as they happen.")
+        else:
+            lines.append("2. Context Identification")
+            lines.append("   This request can be answered conversationally without executing a workspace tool.")
+            lines.append("3. Response Plan")
+            lines.append("   Prepare a direct answer grounded in the current conversation and available context.")
 
-        self._status("MODEL_NOTE:" + "\n".join(lines))
+        self._status("\\n".join(lines))
+
+    def _publish_thinking_update(self, message):
+        """Append a factual execution or verification event to the Thinking Process."""
+        text = str(message or "").strip()
+        if text:
+            self._status("THINKING_UPDATE:" + text[:500])
 
     def _conversation_context(self, max_chars=12000):
         formatter = getattr(self.short_memory, "format_for_prompt", None)
@@ -1199,10 +1187,6 @@ class NovaCore:
         }:
             task_type = "conversation"
 
-        # Publish a model-generated, user-safe interpretation summary.
-        # Execution/status events remain in the separate Activity Log.
-        self._publish_decision_summary(message, task_type)
-
         self._status(
             f"Task type: {task_type}"
         )
@@ -1212,6 +1196,7 @@ class NovaCore:
         detected_call = None
 
         if task_type == "conversation":
+            self._publish_thinking_process(message, task_type)
             self._status("Preparing conversational answer...")
 
             # Self-description is answered by the model, not by a canned string.
@@ -1452,6 +1437,7 @@ class NovaCore:
             self._status(
                 "Plan ready..."
             )
+            self._publish_thinking_process(message, task_type, plan)
 
         completed = False
         goal_verified = False
@@ -1862,6 +1848,9 @@ Nova must choose another useful action.
             self._status(
                 f"Using {tool_name}..."
             )
+            self._publish_thinking_update(
+                f"Executing {tool_name} with validated input."
+            )
 
             try:
                 result = self.tools.execute(
@@ -1885,6 +1874,9 @@ Nova must choose another useful action.
                 result
             )
             succeeded = verification.confirmed()
+            self._publish_thinking_update(
+                f"{tool_name}: verification {verification.status.upper()} — {verification.message}"
+            )
 
             self._status(
                 f"{'✓ Confirmed' if succeeded else '✗ Failed'}: {verification.message}"
@@ -2079,6 +2071,9 @@ Nova must choose another useful action.
                 dict(current_step)
                 if isinstance(current_step, dict)
                 else None
+            )
+            self._publish_thinking_update(
+                f"{tool_name} did not pass verification. Updating the plan using the actual tool result."
             )
             plan = self.planner.replan(
                 plan=plan,
