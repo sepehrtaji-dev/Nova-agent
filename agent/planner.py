@@ -495,16 +495,12 @@ Do not put generated file content in write_file input."""
             if isinstance(tool_history, list)
             else str(tool_history or "")
         )
-        trusted_history = re.sub(
-            r"BEGIN_RAW_TOOL_RESULT\s*.*?END_RAW_TOOL_RESULT",
-            "",
-            history,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
+        # Only trust verifier status appended after Nova closes a raw tool
+        # result. Arbitrary model/tool text can otherwise forge this marker.
         confirmed = re.findall(
-            r"^VERIFIER_STATUS:\s*CONFIRMED\s*$",
-            trusted_history,
-            flags=re.IGNORECASE | re.MULTILINE,
+            r"END_RAW_TOOL_RESULT\s*\nVERIFIER_STATUS:\s*CONFIRMED\s*(?:\n|$)",
+            history,
+            flags=re.IGNORECASE,
         )
         if not confirmed:
             return {
@@ -1139,39 +1135,17 @@ Schema:
                 "status"
             )
 
-            if status not in {
-                "pending",
-                "completed"
-            }:
-                if (
-                    old
-                    and old.get(
-                        "status"
-                    ) == "completed"
-                ):
-                    status = "completed"
-                else:
-                    status = "pending"
-
-            # Only previously completed steps have authoritative completion evidence.
-            # A model cannot mark a new or previously-pending step complete by assertion.
-            if (
-                status == "completed"
-                and (not old or old.get("status") != "completed")
-            ):
+            # Execution outcomes are runtime evidence, not model-owned state.
+            # Preserve both completed and failed outcomes across every replan.
+            old_status = old.get("status") if old else None
+            if old_status in {"completed", "failed"}:
+                status = old_status
+            else:
                 status = "pending"
 
-            result = None
-
-            if (
-                old
-                and old.get(
-                    "status"
-                ) == "completed"
-            ):
-                result = old.get(
-                    "result"
-                )
+            # A model cannot assert completion or failure for a step that has
+            # not actually produced that outcome in the prior execution ledger.
+            result = old.get("result") if old_status in {"completed", "failed"} else None
 
             tool = step.get("tool")
             raw_input = step.get("input")

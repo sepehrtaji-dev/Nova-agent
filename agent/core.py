@@ -2023,6 +2023,11 @@ Nova must choose another useful action.
             # Failed/unverifiable actions are the only point where adaptive
             # replanning is useful. The real failure result is sent to the
             # planner so it can add or change corrective work.
+            failed_step_snapshot = (
+                dict(current_step)
+                if isinstance(current_step, dict)
+                else None
+            )
             plan = self.planner.replan(
                 plan=plan,
                 goal=message,
@@ -2032,6 +2037,36 @@ Nova must choose another useful action.
                 success=False,
                 allowed_tools=self._allowed_tools(),
             )
+
+            # A failed action must not remain pending in the replanned plan:
+            # otherwise the router may immediately execute the same unchanged
+            # operation again before reaching the newly-added diagnostic step.
+            # Keep it in the plan as failed evidence; a deliberate retry must
+            # be represented as a separate step (typically with changed input).
+            if failed_step_snapshot is not None:
+                failed_step_id = failed_step_snapshot.get("id")
+                failed_step = next(
+                    (
+                        candidate for candidate in plan.get("steps", [])
+                        if isinstance(candidate, dict)
+                        and candidate.get("id") == failed_step_id
+                        and candidate.get("tool") == tool_name
+                        and candidate.get("input") == (
+                            self._parse_tool_input(tool_input) or {}
+                        )
+                    ),
+                    None,
+                )
+                if failed_step is not None:
+                    self.planner.update_step(
+                        plan,
+                        failed_step_id,
+                        result,
+                        status="failed",
+                    )
+                state = getattr(self, "execution_state", None)
+                if isinstance(state, dict):
+                    state["last_plan"] = plan
 
             last_tool_error = (
                 f"{tool_name}: {verification.message}\n"

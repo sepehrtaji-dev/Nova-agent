@@ -35,7 +35,19 @@ class MemoryStorage:
             try:
                 shutil.copy2(self.path, backup_path)
             except OSError:
-                pass
+                logger.warning("Could not preserve corrupted memory file at %s", backup_path)
+
+            # Restore the last known-good snapshot when available. Keep the
+            # damaged source untouched so recovery never destroys user data.
+            for candidate in (self.path + ".bak", self.path + ".backup"):
+                try:
+                    with open(candidate, "r", encoding="utf-8") as handle:
+                        recovered = json.load(handle)
+                    if isinstance(recovered, dict):
+                        return recovered
+                except (OSError, json.JSONDecodeError, TypeError):
+                    continue
+
             return {
                 "profile": {},
                 "projects": [],

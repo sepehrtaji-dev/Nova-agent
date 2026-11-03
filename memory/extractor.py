@@ -123,7 +123,7 @@ class MemoryExtractor:
         if not text:
             return False
         return bool(re.search(
-            r"\b(?:remember|don't forget|do not forget|call me|my name is|"
+            r"(?:\b(?:remember|don't forget|do not forget|call me|my name is|"
             r"i am|i'm|i use|i prefer|i like|i want you to remember|"
             r"my project|i am working on|i'm working on|my computer|"
             r"my pc|my gpu|my cpu|my setup|my workflow|my preference|"
@@ -131,7 +131,9 @@ class MemoryExtractor:
             r"my job|my work|my school|my university|my team|"
             r"my company|my boss|my colleague|my friend|my family|"
             r"my wife|my husband|my son|my daughter|my parent|"
-            r"my mother|my father|my brother|my sister)\b",
+            r"my mother|my father|my brother|my sister)\b|"
+            r"اسمم|اسم من|من دارم|من استفاده می‌کنم|من ترجیح می‌دم|"
+            r"یادت باشه|به خاطر بسپار|من کار می‌کنم|پروژه‌م|سیستمم)",
             text,
         ))
 

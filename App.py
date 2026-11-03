@@ -461,6 +461,41 @@ class ComposerEdit(QPlainTextEdit):
         self.fit_height()
 
 
+class StreamingMessageBubble(QFrame):
+    """Temporary assistant bubble that reveals completed text one word at a time."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("novaBubble")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 14)
+        layout.setSpacing(12)
+
+        avatar = QLabel()
+        avatar.setFixedSize(34, 34)
+        avatar.setPixmap(make_avatar("N", 34))
+        avatar.setAlignment(Qt.AlignTop)
+        layout.addWidget(avatar, 0, Qt.AlignTop)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(8)
+        name = QLabel("Nova")
+        name.setObjectName("messageName")
+        content.addWidget(name)
+
+        self.body = QLabel("")
+        self.body.setWordWrap(True)
+        self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.body.setStyleSheet("color: #f5f7fa; font-size: 13px;")
+        content.addWidget(self.body)
+        layout.addLayout(content, 1)
+
+    def set_visible_text(self, text):
+        self.body.setText(str(text))
+        self.body.adjustSize()
+
+
 class MessageBubble(QFrame):
     def __init__(self, role, text, parent=None, attachments=None):
         super().__init__(parent)
@@ -2178,7 +2213,57 @@ class NovaWindow(QMainWindow):
             self.current_turn_status.update_status(message)
 
     def _on_finished(self, response):
-        self._add_message("nova", response)
+        response = str(response)
+        words = response.split()
+        if not words:
+            self._add_message("nova", response)
+            self._persist_finished_response(response)
+            return
+
+        stretch = self.chat_container_layout.takeAt(
+            self.chat_container_layout.count() - 1
+        )
+        bubble = StreamingMessageBubble()
+        self.chat_container_layout.addWidget(bubble)
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+        self._scroll_chat()
+
+        self._stream_words = words
+        self._stream_index = 0
+        self._stream_response = response
+        self._stream_bubble = bubble
+        self._stream_timer = QTimer(self)
+        self._stream_timer.setInterval(22)
+        self._stream_timer.timeout.connect(self._reveal_response_word)
+        self._stream_timer.start()
+
+    def _reveal_response_word(self):
+        words = getattr(self, "_stream_words", [])
+        index = getattr(self, "_stream_index", 0)
+        bubble = getattr(self, "_stream_bubble", None)
+        if bubble is None or index >= len(words):
+            timer = getattr(self, "_stream_timer", None)
+            if timer:
+                timer.stop()
+                timer.deleteLater()
+            response = getattr(self, "_stream_response", "")
+            if bubble is not None:
+                position = self.chat_container_layout.indexOf(bubble)
+                if position >= 0:
+                    self.chat_container_layout.takeAt(position)
+                bubble.deleteLater()
+            self._add_message("nova", response)
+            self._persist_finished_response(response)
+            self._stream_bubble = None
+            self._stream_timer = None
+            return
+
+        self._stream_index = index + 1
+        bubble.set_visible_text(" ".join(words[:self._stream_index]))
+        self._scroll_chat()
+
+    def _persist_finished_response(self, response):
         self.chat_store.add_message(self.current_chat_id, "assistant", response)
         self._refresh_chat_history(select_current=True)
         self._finish_request("Done")
