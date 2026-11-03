@@ -617,6 +617,7 @@ class TurnStatus(QFrame):
         self.started_at = datetime.now()
         self.finished = False
         self.thought_text = ""
+        self.body_visible = True
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 9, 12, 9)
@@ -630,26 +631,49 @@ class TurnStatus(QFrame):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(5)
 
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
         self.title = QLabel("Thought for 0 seconds")
         self.title.setObjectName("turnStatusTitle")
-        text_layout.addWidget(self.title)
+        header.addWidget(self.title)
+        header.addStretch(1)
+
+        self.toggle_button = QPushButton("⌄")
+        self.toggle_button.setObjectName("thoughtToggle")
+        self.toggle_button.setFixedSize(24, 22)
+        self.toggle_button.setFlat(True)
+        self.toggle_button.setCursor(Qt.PointingHandCursor)
+        self.toggle_button.clicked.connect(self._toggle_body)
+        header.addWidget(self.toggle_button)
+        text_layout.addLayout(header)
+
+        self.body_widget = QWidget()
+        body_layout = QVBoxLayout(self.body_widget)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(5)
 
         self.thought_label = QLabel("Waiting for the model…")
         self.thought_label.setObjectName("turnStatusMessage")
         self.thought_label.setWordWrap(True)
         self.thought_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        text_layout.addWidget(self.thought_label)
+        body_layout.addWidget(self.thought_label)
 
         self.updates_layout = QVBoxLayout()
         self.updates_layout.setContentsMargins(0, 0, 0, 0)
         self.updates_layout.setSpacing(3)
-        text_layout.addLayout(self.updates_layout)
+        body_layout.addLayout(self.updates_layout)
+        text_layout.addWidget(self.body_widget)
         layout.addLayout(text_layout, 1)
 
         self.elapsed_timer = QTimer(self)
         self.elapsed_timer.setInterval(250)
         self.elapsed_timer.timeout.connect(self._refresh_elapsed)
         self.elapsed_timer.start()
+
+    def _toggle_body(self):
+        self.body_visible = not self.body_visible
+        self.body_widget.setVisible(self.body_visible)
+        self.toggle_button.setText("⌄" if self.body_visible else "›")
 
     def _refresh_elapsed(self):
         seconds = max(0, int((datetime.now() - self.started_at).total_seconds()))
