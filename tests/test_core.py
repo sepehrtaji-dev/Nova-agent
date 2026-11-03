@@ -198,6 +198,43 @@ class FakeVerifier:
 
 
 class CoreTests(unittest.TestCase):
+    def test_tool_was_used_matches_execution_ledger_tuple(self):
+        used_tools = {
+            ("read_file", '{"path": "index.html"}', 0),
+            ("write_file", '{"path": "index.html"}', 1),
+        }
+
+        self.assertTrue(NovaCore._tool_was_used(used_tools, "read_file"))
+        self.assertTrue(NovaCore._tool_was_used(used_tools, "write_file"))
+        self.assertFalse(NovaCore._tool_was_used(used_tools, "web_search"))
+
+    def test_read_file_fallback_returns_actual_tool_content(self):
+        history = [
+            "STEP: 1\\nTOOL_NAME: read_file\\n"
+            "BEGIN_RAW_TOOL_RESULT\\n<html><body>Nova</body></html>\\n"
+            "END_RAW_TOOL_RESULT\\nVERIFIER_STATUS: CONFIRMED"
+        ]
+
+        response = NovaCore._read_file_fallback(history)
+
+        self.assertIn("<html><body>Nova</body></html>", response)
+        self.assertIn("could not generate a reliable summary", response)
+
+    def test_final_prompt_does_not_request_step_by_step_reasoning(self):
+        core = NovaCore.__new__(NovaCore)
+        core._tool_capability_context = lambda: "Tools available"
+        core._conversation_context = lambda max_chars=12000: "No history"
+        core._long_memory_context = lambda message: "No memory"
+        core.diagnostics = None
+        prompt = core._build_final_prompt(
+            message="read index.html",
+            tool_context="verified file data",
+            knowledge_context="",
+        ).lower()
+
+        self.assertNotIn("think step by step", prompt)
+        self.assertIn("do not reveal private reasoning", prompt)
+
     def test_conversation_personality_encourages_natural_social_replies(self):
         prompt = NovaCore._conversation_personality_prompt().lower()
 
