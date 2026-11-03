@@ -609,12 +609,14 @@ class ActivityItem(QFrame):
 
 
 class TurnStatus(QFrame):
-    """Displays only the model's concise, user-safe decision summary."""
+    """ChatGPT-style panel for model-authored, user-facing thought summaries."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("turnStatus")
-        self._seen_updates = set()
+        self.started_at = datetime.now()
+        self.finished = False
+        self.thought_text = ""
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 9, 12, 9)
@@ -628,62 +630,69 @@ class TurnStatus(QFrame):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(5)
 
-        self.title = QLabel("Thinking Process")
+        self.title = QLabel("Thought for 0 seconds")
         self.title.setObjectName("turnStatusTitle")
         text_layout.addWidget(self.title)
 
-        self.placeholder = QLabel("Preparing the task overview…")
-        self.placeholder.setObjectName("turnStatusMessage")
-        self.placeholder.setWordWrap(True)
-        text_layout.addWidget(self.placeholder)
+        self.thought_label = QLabel("Waiting for the model…")
+        self.thought_label.setObjectName("turnStatusMessage")
+        self.thought_label.setWordWrap(True)
+        self.thought_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        text_layout.addWidget(self.thought_label)
 
         self.updates_layout = QVBoxLayout()
         self.updates_layout.setContentsMargins(0, 0, 0, 0)
         self.updates_layout.setSpacing(3)
         text_layout.addLayout(self.updates_layout)
-
         layout.addLayout(text_layout, 1)
 
-    def update_status(self, message):
-        """Render the actual plan and factual execution events in this panel."""
-        message = str(message or "").strip()
-        process_prefix = "THINKING_PROCESS:"
-        update_prefix = "THINKING_UPDATE:"
+        self.elapsed_timer = QTimer(self)
+        self.elapsed_timer.setInterval(250)
+        self.elapsed_timer.timeout.connect(self._refresh_elapsed)
+        self.elapsed_timer.start()
 
-        if message.startswith(process_prefix):
-            body = message[len(process_prefix):].strip()
-            if self.placeholder is not None:
-                self.placeholder.deleteLater()
-                self.placeholder = None
-            for raw_line in body.splitlines():
-                line = raw_line.strip()
-                if not line:
-                    continue
-                line = line[:500]
-                if line in self._seen_updates:
-                    continue
-                self._seen_updates.add(line)
-                is_heading = bool(re.match(r"^\d+\.\s+", line))
-                label = QLabel(line if is_heading else "•  " + line)
-                label.setObjectName(
-                    "turnStatusTitle" if is_heading else "turnStatusMessage"
-                )
-                label.setWordWrap(True)
-                self.updates_layout.addWidget(label)
+    def _refresh_elapsed(self):
+        seconds = max(0, int((datetime.now() - self.started_at).total_seconds()))
+        unit = "second" if seconds == 1 else "seconds"
+        self.title.setText(f"Thought for {seconds} {unit}")
+
+    def _finish_thought(self):
+        if self.finished:
+            return
+        self.finished = True
+        self.elapsed_timer.stop()
+        self._refresh_elapsed()
+
+    def update_status(self, message):
+        """Render only streamed model-authored notes and factual tool updates."""
+        message = str(message or "").strip()
+
+        if message == "MODEL_THOUGHT_START":
+            self.thought_text = ""
+            self.thought_label.setText("")
+            self.started_at = datetime.now()
+            self.finished = False
+            self.elapsed_timer.start()
+            self._refresh_elapsed()
             return
 
-        if message.startswith(update_prefix):
-            line = message[len(update_prefix):].strip()[:500]
-            if not line or line in self._seen_updates:
-                return
-            if self.placeholder is not None:
-                self.placeholder.deleteLater()
-                self.placeholder = None
-            self._seen_updates.add(line)
-            label = QLabel("•  " + line)
-            label.setObjectName("turnStatusMessage")
-            label.setWordWrap(True)
-            self.updates_layout.addWidget(label)
+        if message.startswith("MODEL_THOUGHT_DELTA:"):
+            delta = message[len("MODEL_THOUGHT_DELTA:"):]
+            self.thought_text += delta
+            self.thought_label.setText(self.thought_text)
+            return
+
+        if message == "MODEL_THOUGHT_END":
+            self._finish_thought()
+            return
+
+        if message.startswith("THINKING_UPDATE:"):
+            line = message[len("THINKING_UPDATE:"):].strip()
+            if line:
+                label = QLabel("•  " + line[:500])
+                label.setObjectName("turnStatusMessage")
+                label.setWordWrap(True)
+                self.updates_layout.addWidget(label)
 
 
 class CapabilityButton(QPushButton):
@@ -2219,7 +2228,9 @@ class NovaWindow(QMainWindow):
     def _on_status(self, message):
         message = str(message)
         is_thinking_event = message.startswith((
-            "THINKING_PROCESS:",
+            "MODEL_THOUGHT_START",
+            "MODEL_THOUGHT_DELTA:",
+            "MODEL_THOUGHT_END",
             "THINKING_UPDATE:",
         ))
         if not is_thinking_event:
