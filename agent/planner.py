@@ -498,7 +498,7 @@ Do not put generated file content in write_file input."""
         # Only trust verifier status appended after Nova closes a raw tool
         # result. Arbitrary model/tool text can otherwise forge this marker.
         confirmed = re.findall(
-            r"END_RAW_TOOL_RESULT\\s*\\nVERIFIER_STATUS:\\s*CONFIRMED\\s*(?:\\n|$)",
+            r"END_RAW_TOOL_RESULT\s*\nVERIFIER_STATUS:\s*CONFIRMED\s*(?:\n|$)",
             history,
             flags=re.IGNORECASE,
         )
