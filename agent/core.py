@@ -264,41 +264,125 @@ class NovaCore:
                 pass
 
     def _publish_thinking_process(self, message, task_type, plan=None):
-        """Publish an inspectable summary of decisions and the actual execution plan.
+        """Publish only the model-authored, user-facing summary returned by Planner."""
+        summary = plan.get("visible_summary") if isinstance(plan, dict) else None
+        if not isinstance(summary, str) or not summary.strip():
+            return
+        self._status("MODEL_THOUGHT_START")
+        self._status("MODEL_THOUGHT_DELTA:" + summary.strip()[:1600])
+        self._status("MODEL_THOUGHT_END")
 
-        This intentionally exposes the task interpretation, planner output,
-        selected tools, and later verified execution events—not private
-        chain-of-thought or hidden deliberation.
+    def _generate_with_visible_note(self, prompt, system_prompt):
+        """Generate a public-facing rationale note and answer in one model call.
+
+        The note is an explicit user-facing explanation, not private
+        chain-of-thought. It is streamed from the same generation as the answer.
         """
-        lines = ["THINKING_PROCESS:", "1. Goal Identification"]
-        lines.append(f"   The request is: {str(message).strip()[:500]}")
+        instruction = (
+            "\n\nOUTPUT FORMAT (required): First emit "
+            "<nova_note> followed by a brief, user-facing explanation of how "
+            "you interpreted the request and the high-level approach. Keep it "
+            "natural and specific to this request; do not expose private "
+            "chain-of-thought, hidden deliberation, or token-by-token internal "
+            "reasoning. Close it with </nova_note>. Then emit the complete "
+            "user-facing answer between <nova_answer> and </nova_answer>. "
+            "Do not include any other text outside these tags."
+        )
+        full_prompt = str(prompt) + instruction
+        raw_parts = []
+        note_parts = []
+        answer_parts = []
+        state = "search"
+        buffer = ""
+        note_open = "<nova_note>"
+        note_close = "</nova_note>"
+        answer_open = "<nova_answer>"
+        answer_close = "</nova_answer>"
+        saw_note = False
+        saw_answer = False
 
-        if task_type == "computer":
-            lines.append("2. Context & Available Capabilities")
-            lines.append(
-                "   I will use the enabled tools and the current workspace context. "
-                "No action is considered complete until its result is checked."
+        def consume(token):
+            nonlocal state, buffer, saw_note, saw_answer
+            raw_parts.append(token)
+            buffer += token
+            while True:
+                if state == "search":
+                    position = buffer.find(note_open)
+                    if position < 0:
+                        buffer = buffer[-(len(note_open) - 1):]
+                        return
+                    buffer = buffer[position + len(note_open):]
+                    saw_note = True
+                    state = "note"
+                    self._status("MODEL_THOUGHT_START")
+                elif state == "note":
+                    position = buffer.find(note_close)
+                    if position < 0:
+                        safe_length = max(0, len(buffer) - len(note_close) + 1)
+                        piece, buffer = buffer[:safe_length], buffer[safe_length:]
+                        if piece:
+                            note_parts.append(piece)
+                            self._status("MODEL_THOUGHT_DELTA:" + piece)
+                        return
+                    piece = buffer[:position]
+                    if piece:
+                        note_parts.append(piece)
+                        self._status("MODEL_THOUGHT_DELTA:" + piece)
+                    buffer = buffer[position + len(note_close):]
+                    self._status("MODEL_THOUGHT_END")
+                    state = "answer_search"
+                elif state == "answer_search":
+                    position = buffer.find(answer_open)
+                    if position < 0:
+                        buffer = buffer[-(len(answer_open) - 1):]
+                        return
+                    buffer = buffer[position + len(answer_open):]
+                    saw_answer = True
+                    state = "answer"
+                elif state == "answer":
+                    position = buffer.find(answer_close)
+                    if position < 0:
+                        safe_length = max(0, len(buffer) - len(answer_close) + 1)
+                        piece, buffer = buffer[:safe_length], buffer[safe_length:]
+                        if piece:
+                            answer_parts.append(piece)
+                        return
+                    piece = buffer[:position]
+                    if piece:
+                        answer_parts.append(piece)
+                    buffer = buffer[position + len(answer_close):]
+                    state = "done"
+                    return
+                else:
+                    return
+
+        stream = getattr(self.brain, "generate_stream", None)
+        if callable(stream):
+            stream(
+                full_prompt,
+                consume,
+                system_prompt=system_prompt,
             )
-            lines.append("3. Tool Selection & Execution Plan")
-            steps = plan.get("steps", []) if isinstance(plan, dict) else []
-            if steps:
-                for index, step in enumerate(steps, start=1):
-                    if not isinstance(step, dict):
-                        continue
-                    tool = str(step.get("tool") or "unknown tool")
-                    description = str(step.get("description") or f"Use {tool}")
-                    lines.append(f"   {index}. {description} (tool: {tool})")
-            else:
-                lines.append("   No valid tool steps were produced; no tool execution is planned.")
-            lines.append("4. Execution & Verification")
-            lines.append("   Pending — tool results and verifier outcomes will appear here as they happen.")
         else:
-            lines.append("2. Context Identification")
-            lines.append("   This request can be answered conversationally without executing a workspace tool.")
-            lines.append("3. Response Plan")
-            lines.append("   Prepare a direct answer grounded in the current conversation and available context.")
+            generated = self.brain.generate(full_prompt, system_prompt=system_prompt)
+            consume(str(generated or ""))
 
-        self._status("\n".join(lines))
+        if not saw_note:
+            # Compatibility for third-party brain implementations that ignore
+            # the tagged format: never invent a note; return their raw answer.
+            return "".join(raw_parts).strip()
+
+        if state == "note" and buffer:
+            note_parts.append(buffer)
+            self._status("MODEL_THOUGHT_DELTA:" + buffer)
+            self._status("MODEL_THOUGHT_END")
+
+        answer = "".join(answer_parts).strip()
+        if not saw_answer or not answer:
+            # Malformed tagged output is not silently presented as a successful
+            # answer; preserve the generated text so the caller can handle it.
+            return "".join(raw_parts).strip()
+        return answer
 
     def _publish_thinking_update(self, message):
         """Append a factual execution or verification event to the Thinking Process."""
@@ -1254,7 +1338,7 @@ class NovaCore:
             )
 
             try:
-                response = self.brain.generate(
+                response = self._generate_with_visible_note(
                     conversation_prompt,
                     system_prompt=(
                         identity
@@ -1264,7 +1348,7 @@ class NovaCore:
                         "inventing computer actions. You have not executed any "
                         "tool and must never claim or imply that you did. Never "
                         "fabricate search results, sources, or current facts."
-                    )
+                    ),
                 )
             except Exception:
                 response = "I'm here and ready to help."
