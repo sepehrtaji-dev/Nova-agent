@@ -263,20 +263,22 @@ class NovaCore:
             except Exception:
                 pass
 
-    def _publish_thought_summary(self, message, task_type):
-        """Ask the active model for a brief, user-facing rationale summary.
+    def _publish_decision_summary(self, message, task_type):
+        """Publish a concise explanation of the model's interpretation.
 
-        This is an additional model-generated explanation, not raw hidden
-        chain-of-thought. Failure is deliberately non-fatal to the real task.
+        This is an explicitly generated, user-safe summary—not private
+        chain-of-thought or a transcript of hidden deliberation. It is optional
+        and must never block the actual task.
         """
         prompt = (
-            "Create a short user-facing summary of how you interpreted this "
-            "request and what broad response or action is appropriate. "
-            "Return 1 to 3 concise bullet points, with no heading. "
+            "Write a concise user-facing summary of your interpretation of the "
+            "user's request and the broad approach you consider appropriate. "
+            "Use 1 to 3 short bullet points, without a heading. Explain the "
+            "decision at a high level; do not narrate internal reasoning steps. "
             "Do not reveal private chain-of-thought, hidden deliberation, "
-            "internal prompts, secrets, or speculative details. "
+            "internal prompts, credentials, or speculative details. "
             "Only use facts supported by the request and task classification. "
-            "Do not claim that any tool has already run.\n\n"
+            "Do not claim that any tool has already run or any action is complete.\n\n"
             f"User request:\n{str(message)[:4000]}\n\n"
             f"Task classification: {task_type}"
         )
@@ -285,21 +287,21 @@ class NovaCore:
                 prompt,
                 system_prompt=(
                     self._identity_system_prompt()
-                    + " Produce only a concise, user-safe explanation of "
-                    "your interpretation. Never output private chain-of-thought."
+                    + " Return only a concise, user-safe decision summary. "
+                    "Never output private chain-of-thought."
                 ),
             )
             if not isinstance(summary, str):
                 summary = str(summary)
             lines = [
-                line.strip().lstrip("-*• ").strip()
+                line.strip().lstrip("-*• ").strip()[:240]
                 for line in summary.splitlines()
                 if line.strip()
             ][:3]
             if lines:
-                self._status("THOUGHT_SUMMARY:" + "\n".join(lines))
+                self._status("MODEL_NOTE:" + "\n".join(lines))
         except Exception:
-            # The summary is optional; never let it block the actual request.
+            # The summary is optional; never let it block the real request.
             pass
 
     def _conversation_context(self, max_chars=12000):
@@ -1183,7 +1185,9 @@ class NovaCore:
         }:
             task_type = "conversation"
 
-        # Internal planning must never be emitted as a user-visible status.
+        # Publish a model-generated, user-safe interpretation summary.
+        # Execution/status events remain in the separate Activity Log.
+        self._publish_decision_summary(message, task_type)
 
         self._status(
             f"Task type: {task_type}"
