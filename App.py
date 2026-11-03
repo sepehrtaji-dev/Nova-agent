@@ -663,7 +663,7 @@ class TurnStatus(QFrame):
                 if line in self._seen_updates:
                     continue
                 self._seen_updates.add(line)
-                is_heading = bool(re.match(r"^\\d+\\.\\s+", line))
+                is_heading = bool(re.match(r"^\d+\.\s+", line))
                 label = QLabel(line if is_heading else "•  " + line)
                 label.setObjectName(
                     "turnStatusTitle" if is_heading else "turnStatusMessage"
