@@ -627,11 +627,11 @@ class TurnStatus(QFrame):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(5)
 
-        self.title = QLabel("Model's perspective")
+        self.title = QLabel("Thinking Process")
         self.title.setObjectName("turnStatusTitle")
         text_layout.addWidget(self.title)
 
-        self.placeholder = QLabel("The model's summary will appear here.")
+        self.placeholder = QLabel("Interpreting your request…")
         self.placeholder.setObjectName("turnStatusMessage")
         self.placeholder.setWordWrap(True)
         text_layout.addWidget(self.placeholder)
