@@ -396,7 +396,7 @@ class CoreTests(unittest.TestCase):
         core._remember_verified_tool_result(
             "desktop",
             '{"action":"screenshot"}',
-            "Screenshot saved: C:\\Users\\Test\nova.png",
+            "Screenshot saved: C:\\Users\\Test\\nova.png",
             verification,
         )
 
@@ -417,7 +417,7 @@ class CoreTests(unittest.TestCase):
             core._validate_tool_request(
                 "request",
                 "edit_file",
-                {"path": "C:\\Temp\note.txt", "location": "system", "old": "a", "new": "b"},
+                {"path": "C:\\Temp\\note.txt", "location": "system", "old": "a", "new": "b"},
             )[0],
             True,
         )
@@ -425,7 +425,7 @@ class CoreTests(unittest.TestCase):
             core._validate_tool_request(
                 "request",
                 "delete_file",
-                {"path": "C:\\Temp\note.txt", "location": "system"},
+                {"path": "C:\\Temp\\note.txt", "location": "system"},
             )[0],
             True,
         )
