@@ -298,7 +298,7 @@ class NovaCore:
             lines.append("3. Response Plan")
             lines.append("   Prepare a direct answer grounded in the current conversation and available context.")
 
-        self._status("\\n".join(lines))
+        self._status("\n".join(lines))
 
     def _publish_thinking_update(self, message):
         """Append a factual execution or verification event to the Thinking Process."""
