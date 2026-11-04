@@ -23,6 +23,7 @@ DEFAULT_SETTINGS = {
     "api_base_url": "https://api.openai.com/v1",
     "api_model": "",
     "api_key": "",
+    "effort": "medium",
 }
 
 
@@ -107,6 +108,10 @@ def apply_to_environment(settings: dict) -> dict:
         provider = "local"
 
     applied = {"NOVA_PROVIDER": provider}
+    effort = str(settings.get("effort", "medium")).strip().lower()
+    if effort not in {"off", "low", "medium", "high", "max", "novacode"}:
+        effort = "medium"
+    applied["NOVA_EFFORT"] = effort
 
     api_model = str(settings.get("api_model", "")).strip()
     base_url = str(settings.get("api_base_url", "")).strip()

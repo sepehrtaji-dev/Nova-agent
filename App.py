@@ -851,7 +851,9 @@ class NovaWindow(QMainWindow):
 
     def _on_effort_changed(self, name):
         self._effort = name
+        self._settings["effort"] = name
         self._apply_effort(name)
+        save_settings(self._settings)
 
     def _restore_core_memory(self, chat_id):
         messages = self.chat_store.get_messages(chat_id)
