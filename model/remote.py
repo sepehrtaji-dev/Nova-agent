@@ -155,6 +155,11 @@ class OpenAICompatibleBrain:
             for key in ("temperature", "top_p", "max_tokens"):
                 if key in options:
                     payload[key] = options[key]
+            # Nova's local Ollama backend calls this num_predict. Translate it
+            # to the OpenAI-compatible completion limit instead of silently
+            # dropping it on remote requests (notably generated report files).
+            if "max_tokens" not in options and "num_predict" in options:
+                payload["max_tokens"] = options["num_predict"]
 
         body = json.dumps(payload).encode("utf-8")
         url = f"{self.base_url}/chat/completions"

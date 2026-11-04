@@ -936,9 +936,14 @@ Return JSON only.
                 json_mode=False,
                 options={
                     "temperature": 0.0,
-                    # Medium/large source files need more than the old 2,048-token
-                    # cap, which silently cut generated files off mid-function.
-                    "num_predict": max(8192, int(os.getenv("NOVA_CODE_NUM_PREDICT", "8192"))),
+                    # Reports and summaries do not need a source-code-sized
+                    # completion. Keep them bounded so the follow-up generation
+                    # call after web research cannot run unnecessarily long.
+                    "num_predict": (
+                        max(2048, int(os.getenv("NOVA_DOCUMENT_NUM_PREDICT", "2048")))
+                        if is_text_document
+                        else max(8192, int(os.getenv("NOVA_CODE_NUM_PREDICT", "8192")))
+                    ),
                 },
             )
         except Exception as exc:

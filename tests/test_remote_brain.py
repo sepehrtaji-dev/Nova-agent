@@ -95,6 +95,17 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertEqual(len(sent["body"]["messages"]), 2)
 
 
+    def test_num_predict_is_mapped_to_remote_max_tokens(self):
+        self.brain.generate("write a short report", options={"num_predict": 2048})
+        self.assertEqual(CAPTURED[-1]["body"]["max_tokens"], 2048)
+
+    def test_explicit_max_tokens_takes_precedence_over_num_predict(self):
+        self.brain.generate(
+            "write a short report",
+            options={"num_predict": 8192, "max_tokens": 1024},
+        )
+        self.assertEqual(CAPTURED[-1]["body"]["max_tokens"], 1024)
+
     def test_calls_without_explicit_system_prompt_receive_nova_instructions(self):
         self.brain.generate("my name is sepehr")
         system_message = CAPTURED[-1]["body"]["messages"][0]["content"]

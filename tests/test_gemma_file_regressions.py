@@ -43,6 +43,20 @@ class GemmaFileRegressionTests(unittest.TestCase):
         self.assertIn("attached/uploaded", brain.prompt)
         self.assertIn("give me the updated code", brain.prompt)
 
+    def test_markdown_report_generation_uses_bounded_document_budget(self):
+        brain = CaptureBrain(response="# Research report\\n\\nVerified summary.")
+        router = ToolRouter(brain, Registry())
+
+        result = router.generate_file_content(
+            user_request="Summarize the verified web research",
+            path="research-summary.md",
+            location="projects",
+            tool_history="Verified search result: source title and factual snippet.",
+        )
+
+        self.assertIn("Verified summary", result)
+        self.assertEqual(brain.options["num_predict"], 2048)
+
     def test_file_generation_uses_large_output_budget(self):
         brain = CaptureBrain(response="<!doctype html>\n<html>\n<body>complete</body>\n</html>")
         router = ToolRouter(brain, Registry())
