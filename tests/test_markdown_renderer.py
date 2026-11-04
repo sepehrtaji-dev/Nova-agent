@@ -26,7 +26,7 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("nested", rendered)
 
     def test_fenced_code_and_inline_code(self):
-        rendered = render_markdown("Run \`python app.py\`:\n\n    print(1)\n")
+        rendered = render_markdown("Run `python app.py`:\n\n    print(1)\n")
         self.assertIn("<code>python app.py</code>", rendered)
         self.assertIn("<pre>", rendered)
         self.assertIn("print(1)", rendered)
