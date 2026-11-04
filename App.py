@@ -1,4 +1,5 @@
 import mimetypes
+import math
 import os
 import re
 import sys
@@ -15,7 +16,7 @@ from config.model_settings import (
 )
 
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QAction
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QAction, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -34,6 +35,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QStyle,
+    QStyleOptionSlider,
     QTextBrowser,
     QPlainTextEdit,
     QVBoxLayout,
@@ -451,6 +454,65 @@ class MessageWidget(QFrame):
         layout.addLayout(content, 1)
 
 
+class EffortSlider(QSlider):
+    """Horizontal effort slider with a subtle animated halo at maximum effort."""
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self._phase = 0.0
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(35)
+        self._pulse_timer.timeout.connect(self._advance_pulse)
+        self.valueChanged.connect(self._sync_pulse)
+        self._sync_pulse(self.value())
+
+    def _sync_pulse(self, value):
+        if value == self.maximum():
+            if not self._pulse_timer.isActive():
+                self._pulse_timer.start()
+        else:
+            self._pulse_timer.stop()
+        self.update()
+
+    def _advance_pulse(self):
+        self._phase = (self._phase + 0.075) % (2 * math.pi)
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.value() != self.maximum():
+            return
+
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle = self.style().subControlRect(
+            QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self
+        )
+        center = handle.center()
+        pulse = (math.sin(self._phase) + 1.0) / 2.0
+        radius = 13.0 + pulse * 4.0
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        gradient = QRadialGradient(center, radius)
+        gradient.setColorAt(0.0, QColor(168, 85, 247, int(42 + pulse * 34)))
+        gradient.setColorAt(0.48, QColor(88, 166, 255, int(24 + pulse * 22)))
+        gradient.setColorAt(1.0, QColor(88, 166, 255, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(center, radius, radius)
+
+        # Two tiny orbiting sparks make the max state feel active without
+        # changing the slider's geometry or interfering with mouse input.
+        for offset, color in ((0.0, QColor(190, 130, 255)), (math.pi, QColor(110, 205, 255))):
+            angle = self._phase + offset
+            x = center.x() + math.cos(angle) * 11.0
+            y = center.y() + math.sin(angle) * 7.0
+            painter.setBrush(color)
+            painter.drawEllipse(QPointF(x, y), 1.5, 1.5)
+        painter.end()
+
+
 class EffortSelector(QWidget):
     changed = Signal(str)
 
@@ -465,7 +527,7 @@ class EffortSelector(QWidget):
         label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
         layout.addWidget(label)
 
-        self._slider = QSlider(Qt.Horizontal)
+        self._slider = EffortSlider()
         self._slider.setStyleSheet(f"""
             QSlider {{ border: none; background: transparent; }}
             QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
@@ -498,7 +560,6 @@ class EffortSelector(QWidget):
             self._slider.setValue(index)
             self._slider.blockSignals(False)
             self._value.setText(EFFORT_LABELS[index])
-
 
 class ModelSettingsDialog(QDialog):
     def __init__(self, settings, installed_models, parent=None):
