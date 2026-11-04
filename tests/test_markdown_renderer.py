@@ -20,7 +20,7 @@ class MarkdownRendererTests(unittest.TestCase):
         rendered = render_markdown(
             "## Comparison\n"
             "| Feature | Nova | Cloud |\n"
-            "|:--|:--:|--:|\n"
+            "|:---|:---:|---:|\n"
             "| Markdown | Yes | Yes |\n"
             "Next paragraph."
         )
@@ -34,7 +34,7 @@ class MarkdownRendererTests(unittest.TestCase):
         rendered = render_markdown(
             "## خلاصه تفاوت‌ها\n"
             "| ویژگی | نوا | چت‌جی‌پی‌تی |\n"
-            "|:--|:--:|--:|\n"
+            "|:---|:---:|---:|\n"
             "| پشتیبانی فارسی | بله | بله |\n"
             "پایان جدول."
         )
