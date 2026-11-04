@@ -45,7 +45,7 @@ class OllamaBrain:
                 names.append(name.strip())
         return sorted(set(names), key=str.casefold)[0] if names else ""
 
-    def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
+    def generate(self, prompt, system_prompt=None, json_mode=False, options=None, think=None):
         system = system_prompt or SYSTEM_PROMPT
         if not self.model:
             self.model = self._discover_model()
@@ -79,6 +79,8 @@ class OllamaBrain:
             ],
             "options": base_options,
         }
+        if think is not None:
+            kwargs["think"] = think
 
         if json_mode:
             kwargs["format"] = "json"
@@ -182,7 +184,7 @@ class OllamaBrain:
         return content.strip()
 
     def generate_stream(
-        self, prompt, on_token, system_prompt=None, json_mode=False, options=None
+        self, prompt, on_token, system_prompt=None, json_mode=False, options=None, think=None
     ):
         """Stream generated text chunks to on_token and return the full text."""
         system = system_prompt or SYSTEM_PROMPT
@@ -216,6 +218,8 @@ class OllamaBrain:
             "options": base_options,
             "stream": True,
         }
+        if think is not None:
+            kwargs["think"] = think
         if json_mode:
             kwargs["format"] = "json"
 

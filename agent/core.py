@@ -6,6 +6,7 @@ import re
 
 from model.ollama import OllamaBrain
 from model.provider import backend_kind, build_brain, describe_brain
+from model.effort import EffortAwareBrain
 from memory.manager import MemoryManager
 from memory.extractor import MemoryExtractor
 from memory.short_term import ShortTermMemory
@@ -32,7 +33,7 @@ class NovaCore:
         self.status_callback = status_callback
         # Backend is chosen from configuration (local Ollama or a remote
         # OpenAI-compatible API); everything downstream uses the same interface.
-        self.brain = build_brain()
+        self.brain = EffortAwareBrain(build_brain(), os.getenv('NOVA_EFFORT', 'medium'))
         self.diagnostics = RuntimeDiagnostics()
         self.long_memory = MemoryManager()
         self.short_memory = ShortTermMemory()
@@ -218,6 +219,9 @@ class NovaCore:
         except Exception:
             # Memory retrieval must never prevent Nova from answering or acting.
             return ""
+
+    def set_effort(self, effort):
+        self.brain.set_effort(effort)
 
     def set_access(self, **capabilities):
         """Update permissions for named capabilities exposed by configuration."""

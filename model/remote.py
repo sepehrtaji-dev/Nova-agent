@@ -160,6 +160,8 @@ class OpenAICompatibleBrain:
             # dropping it on remote requests (notably generated report files).
             if "max_tokens" not in options and "num_predict" in options:
                 payload["max_tokens"] = options["num_predict"]
+            if "reasoning_effort" in options:
+                payload["reasoning_effort"] = options["reasoning_effort"]
 
         body = json.dumps(payload).encode("utf-8")
         url = f"{self.base_url}/chat/completions"
@@ -286,6 +288,8 @@ class OpenAICompatibleBrain:
             for key in ("temperature", "top_p", "max_tokens"):
                 if key in options:
                     payload[key] = options[key]
+            if "reasoning_effort" in options:
+                payload["reasoning_effort"] = options["reasoning_effort"]
 
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
