@@ -10,29 +10,16 @@ from config.model_settings import (
     apply_to_environment,
     load_settings,
     masked_key,
-    remote_ready,
     save_settings,
     summarise as summarise_backend,
 )
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (
-    QBrush,
-    QColor,
-    QFont,
-    QIcon,
-    QLinearGradient,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QPixmap,
-    QRadialGradient,
-)
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QAction
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
-    QGraphicsDropShadowEffect,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -46,47 +33,43 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
+    QSlider,
     QTextBrowser,
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
+    QSplitter,
+    QToolButton,
 )
 
 from agent.core import NovaCore
 from utils.math_parser import format_response_math
-from ui.figma_desktop import FigmaDesktopShell
 from storage.chat_store import ChatStore
 
+BG_MAIN = "#0d1117"
+BG_PANEL = "#161b22"
+BG_INPUT = "#21262d"
+BORDER = "#30363d"
+TEXT = "#c9d1d9"
+TEXT_MUTED = "#8b949e"
+ACCENT = "#58a6ff"
 
-# --------------------------------------------------------------------------- #
-#  Glassmorphism design tokens                                                #
-# --------------------------------------------------------------------------- #
-APP_BG = "#070814"            # deep space navy (backdrop base)
-SIDEBAR_BG = "rgba(18, 22, 36, 0.65)"
-PANEL_BG = "rgba(18, 22, 36, 0.65)"
-BORDER = "rgba(255, 255, 255, 0.14)"
-TEXT = "#f2f4fb"
-MUTED = "rgba(226, 232, 240, 0.55)"
-ACCENT = "#8b5cf6"            # electric violet
-ACCENT_2 = "#06b6d4"          # neon cyan
-ACCENT_3 = "#d946ef"          # magenta
-ACCENT_HOVER = "#a78bfa"
-GREEN = "#34d399"
-GLASS_FILL = "rgba(255, 255, 255, 0.05)"
-GLASS_FILL_STRONG = "rgba(255, 255, 255, 0.08)"
-GLASS_BORDER = "rgba(255, 255, 255, 0.14)"
-GLASS_BORDER_GLOW = "rgba(168, 85, 247, 0.4)"
-GLASS_GRADIENT = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(139, 92, 246, 0.85), stop:1 rgba(6, 182, 212, 0.85))"
+EFFORT_LEVELS = ("off", "low", "medium", "high", "max", "novacode")
+EFFORT_LABELS = ("Off", "Low", "Medium", "High", "Max", "NovaCode")
 
-# Default permissions come from the declarative tool manifest.
 DEFAULT_ACCESS = load_default_access()
 CAPABILITY_DEFINITIONS = load_capability_definitions()
 
 
-def split_markdown_blocks(text):
-    import re
+def format_bytes(size):
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size / (1024 * 1024 * 1024):.1f} GB"
 
+
+def split_markdown_blocks(text):
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
     lines = source.split("\n")
     blocks = []
@@ -99,148 +82,49 @@ def split_markdown_blocks(text):
             prose.clear()
 
     while i < len(lines):
-        line = lines[i]
-        match = re.match(r"^\s*(`{3}|~{3})([^\n]*)$", line)
+        match = re.match(r"^\s*(`{3}|~{3})([^\n]*)$", lines[i])
         if not match:
-            prose.append(line)
+            prose.append(lines[i])
             i += 1
             continue
-
         flush_prose()
         fence = match.group(1)
         language = match.group(2).strip()
         i += 1
         code_lines = []
-
         while i < len(lines):
             if re.match(rf"^\s*{re.escape(fence)}\s*$", lines[i]):
                 i += 1
                 break
             code_lines.append(lines[i])
             i += 1
-
         blocks.append(("code", "\n".join(code_lines), language))
 
     flush_prose()
     return blocks
 
 
-def _render_markdown_text(text):
+def render_markdown_text(text):
     from ui.markdown_renderer import render_markdown
-
-    source = format_response_math(str(text or ""))
-    return render_markdown(source)
-
-class CodeBlock(QFrame):
-    def __init__(self, code, language="", parent=None):
-        super().__init__(parent)
-        self.setObjectName("codeBlock")
-        apply_glass_shadow(self, "#0ea5e9", 26, 8, 70)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        if language:
-            language_label = QLabel(language)
-            language_label.setObjectName("codeLanguage")
-            language_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            outer.addWidget(language_label)
-
-        self.editor = QPlainTextEdit()
-        self.editor.setObjectName("codeEditor")
-        self.editor.setReadOnly(True)
-        self.editor.setPlainText(code)
-        self.editor.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.editor.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-
-        font = QFont("Cascadia Mono")
-        if font.family() != "Cascadia Mono":
-            font = QFont("Consolas")
-        font.setPointSize(10)
-        self.editor.setFont(font)
-
-        line_count = max(1, code.count("\n") + 1)
-        line_height = max(18, font.pointSize() + 9)
-        editor_height = min(480, max(54, line_count * line_height + 22))
-        self.editor.setFixedHeight(editor_height)
-        outer.addWidget(self.editor)
+    return render_markdown(format_response_math(str(text or "")))
 
 
-class MessageTextBrowser(QTextBrowser):
-    """Rich-text message view whose height follows its actual wrapped content."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setOpenExternalLinks(True)
-        self.setFrameShape(QFrame.NoFrame)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
-        self.document().setDocumentMargin(0)
-
-    def update_content_height(self):
-        width = max(1, self.viewport().width())
-        self.document().setTextWidth(width)
-        # Include a small rounding allowance so the last line is never clipped.
-        height = int(self.document().size().height() + 10)
-        self.setFixedHeight(max(24, height))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.update_content_height()
-
-
-def add_markdown_content(layout, text):
-    for kind, value, language in split_markdown_blocks(text):
-        if kind == "code":
-            layout.addWidget(CodeBlock(value, language))
-            continue
-        if not value.strip():
-            continue
-        body = MessageTextBrowser()
-        body.document().setDefaultStyleSheet("""
-            body { font-family: "Segoe UI"; font-size: 13px; color: #f5f7fa; }
-            h1, h2, h3 { color: #f5f7fa; margin: 8px 0 5px 0; }
-            h1 { font-size: 18px; }
-            h2 { font-size: 16px; }
-            h3 { font-size: 14px; }
-            strong { color: #ffffff; }
-            code { background: #171b22; color: #d7d2ff; padding: 2px 4px; }
-            a { color: #a99fff; }
-            p { margin: 4px 0 8px 0; }
-            ul, ol { margin: 4px 0 8px 0; }
-            blockquote { color: #c7c9d4; border-left: 3px solid #8b5cf6; margin-left: 6px; padding-left: 10px; }
-            table { border-collapse: collapse; margin: 8px 0 12px 0; }
-            th, td { border: 1px solid #41445b; padding: 7px 10px; }
-            th { background: #20243a; font-weight: 600; }
-            pre { background: #171b22; padding: 10px; }
-            hr { color: #41445b; }
-        """)
-        body.setHtml(_render_markdown_text(value))
-        body.update_content_height()
-        layout.addWidget(body)
-
-def make_avatar(letter="N", size=34):
+def make_avatar(letter="N", size=32):
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
-    painter.setBrush(QColor("#1b1e27"))
+    painter.setBrush(QColor(BG_INPUT))
     painter.setPen(Qt.NoPen)
     painter.drawEllipse(0, 0, size, size)
-    painter.setPen(QColor("#c8c2ff"))
+    painter.setPen(QColor(TEXT))
     painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
     painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
     painter.end()
     return pixmap
 
 
-def make_icon(kind, color="#aeb5c1", size=20, width=1.8):
-    """Crisp vector-drawn icons (no emoji / font glyph differences between PCs)."""
+def make_icon(kind, color=TEXT_MUTED, size=20, width=1.8):
     scale = 2
     s = size * scale
     c = s / 2
@@ -272,123 +156,104 @@ def make_icon(kind, color="#aeb5c1", size=20, width=1.8):
         painter.drawEllipse(QPointF(c, c), r, r)
         painter.drawEllipse(QPointF(c, c), r * 0.45, r)
         line(0.5 - 0.36, 0.5, 0.5 + 0.36, 0.5)
+    elif kind == "settings":
+        r = s * 0.2
+        painter.drawEllipse(QPointF(c, c), r, r)
+        painter.drawEllipse(QPointF(c, c), r * 2, r * 2)
     painter.end()
     pixmap.setDevicePixelRatio(scale)
     return QIcon(pixmap)
 
 
-class AuroraBackdrop(QWidget):
-    """Deep-space backdrop with animated procedural frosted neon orbs.
-
-    Paints a dark navy/violet base gradient and three slow-drifting glowing
-    orbs (cyan / violet / magenta) drawn with soft radial gradients, giving
-    every translucent glass panel above it a real sense of refractive depth.
-    """
-
-    def __init__(self, parent=None):
+class CodeBlock(QFrame):
+    def __init__(self, code, language="", parent=None):
         super().__init__(parent)
-        self.setObjectName("auroraRoot")
-        self._t = 0.0
-        self._timer = QTimer(self)
-        self._timer.setInterval(50)  # ~20 fps is plenty for soft ambient drift
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
+        self.setObjectName("codeBlock")
+        self.setStyleSheet(f"QFrame#codeBlock {{ background: {BG_MAIN}; border: 1px solid {BORDER}; border-radius: 6px; }}")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-    def _tick(self):
-        self._t = (self._t + 0.05) % 1000.0
-        self.update()
+        if language:
+            label = QLabel(language)
+            label.setStyleSheet(f"background: {BG_INPUT}; color: {TEXT_MUTED}; border: none; border-bottom: 1px solid {BORDER}; border-top-left-radius: 6px; border-top-right-radius: 6px; padding: 6px 12px; font-size: 11px; font-weight: 600;")
+            outer.addWidget(label)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        editor = QPlainTextEdit()
+        editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; color: {TEXT}; border: none; padding: 12px; selection-background-color: {BG_INPUT}; }}")
+        editor.setReadOnly(True)
+        editor.setPlainText(code)
+        editor.setLineWrapMode(QPlainTextEdit.NoWrap)
+        editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-        w = max(1.0, float(self.width()))
-        h = max(1.0, float(self.height()))
-        t = self._t
+        font = QFont("Cascadia Mono")
+        if font.family() != "Cascadia Mono":
+            font = QFont("Consolas")
+        font.setPointSize(10)
+        editor.setFont(font)
 
-        # Base: deep space navy -> deep violet-navy.
-        base = QLinearGradient(0.0, 0.0, w * 0.35, h)
-        base.setColorAt(0.0, QColor("#070814"))
-        base.setColorAt(0.55, QColor("#0a0b1c"))
-        base.setColorAt(1.0, QColor("#0d0f22"))
-        painter.fillRect(self.rect(), QBrush(base))
-
-        # Soft multi-stop nebula wash for extra depth.
-        nebula = QLinearGradient(0.0, 0.0, w, h)
-        nebula.setColorAt(0.0, QColor(139, 92, 246, 14))
-        nebula.setColorAt(0.5, QColor(6, 182, 212, 8))
-        nebula.setColorAt(1.0, QColor(217, 70, 239, 14))
-        painter.fillRect(self.rect(), QBrush(nebula))
-
-        def _color_with_alpha(color_val, alpha):
-            c = QColor(color_val)
-            c.setAlpha(max(0, min(255, int(alpha))))
-            return c
-
-        def orb(cx, cy, radius, color, alpha):
-            gradient = QRadialGradient(cx, cy, radius)
-            c = _color_with_alpha(color, alpha)
-            gradient.setColorAt(0.0, c)
-            fade = _color_with_alpha(color, 0)
-            gradient.setColorAt(0.55, _color_with_alpha(color, max(0, alpha // 4)))
-            gradient.setColorAt(1.0, fade)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(gradient))
-            painter.drawEllipse(QPointF(cx, cy), radius, radius)
-
-        import math
-
-        # Slow Lissajous-style drift so the glow never repeats exactly.
-        orb(
-            w * (0.22 + 0.08 * math.sin(t * 0.11)),
-            h * (0.28 + 0.07 * math.cos(t * 0.09)),
-            max(w, h) * 0.34,
-            "#06b6d4",
-            52,
-        )
-        orb(
-            w * (0.78 + 0.07 * math.cos(t * 0.08 + 2.0)),
-            h * (0.22 + 0.08 * math.sin(t * 0.07 + 1.0)),
-            max(w, h) * 0.30,
-            "#8b5cf6",
-            58,
-        )
-        orb(
-            w * (0.55 + 0.09 * math.sin(t * 0.06 + 4.0)),
-            h * (0.86 + 0.06 * math.cos(t * 0.10 + 3.0)),
-            max(w, h) * 0.28,
-            "#d946ef",
-            40,
-        )
-        # Tiny specular star-dust for a frosted-glass sparkle.
-        painter.setPen(Qt.NoPen)
-        for i in range(26):
-            seed = (i * 977) % 1000 / 1000.0
-            seed2 = (i * 613) % 1000 / 1000.0
-            x = w * seed
-            y = h * ((seed2 + 0.13 * math.sin(t * 0.2 + i)) % 1.0)
-            twinkle = 0.5 + 0.5 * math.sin(t * 0.5 + i * 1.7)
-            alpha = int(10 + 26 * twinkle)
-            dust = QRadialGradient(x, y, 2.4)
-            c = QColor(255, 255, 255, alpha)
-            dust.setColorAt(0.0, c)
-            fade = QColor(255, 255, 255, 0)
-            dust.setColorAt(1.0, fade)
-            painter.setBrush(QBrush(dust))
-            painter.drawEllipse(QPointF(x, y), 2.4, 2.4)
-        painter.end()
+        line_count = max(1, code.count("\n") + 1)
+        line_height = max(18, font.pointSize() + 9)
+        editor.setFixedHeight(min(480, max(54, line_count * line_height + 22)))
+        outer.addWidget(editor)
 
 
-def apply_glass_shadow(widget, color="#8b5cf6", blur=26, y_offset=8, alpha=90):
-    """Attach a soft neon/ambient drop shadow to a floating glass panel."""
-    effect = QGraphicsDropShadowEffect(widget)
-    effect.setBlurRadius(blur)
-    effect.setOffset(0, y_offset)
-    c = QColor(color)
-    c.setAlpha(alpha)
-    effect.setColor(c)
-    widget.setGraphicsEffect(effect)
-    return effect
+class MarkdownLabel(QTextBrowser):
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.setOpenExternalLinks(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setStyleSheet("QTextBrowser { background: transparent; border: none; color: #c9d1d9; }")
+        self.document().setDocumentMargin(0)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
+        
+        body_style = f"""
+        body {{ font-family: 'Segoe UI', sans-serif; font-size: 14px; color: {TEXT}; line-height: 1.5; }}
+        h1, h2, h3 {{ color: {TEXT}; margin: 12px 0 6px 0; }}
+        h1 {{ font-size: 20px; }} h2 {{ font-size: 18px; }} h3 {{ font-size: 16px; }}
+        strong {{ color: #ffffff; }}
+        code {{ background: {BG_INPUT}; color: {TEXT}; padding: 2px 5px; border-radius: 4px; font-family: monospace; }}
+        a {{ color: #58a6ff; text-decoration: none; }}
+        p {{ margin: 6px 0 12px 0; }}
+        ul, ol {{ margin: 6px 0 12px 0; padding-left: 20px; }}
+        blockquote {{ color: {TEXT_MUTED}; border-left: 3px solid {BORDER}; margin-left: 6px; padding-left: 12px; }}
+        table {{ border-collapse: collapse; margin: 10px 0 16px 0; }}
+        th, td {{ border: 1px solid {BORDER}; padding: 8px 12px; }}
+        th {{ background: {BG_INPUT}; font-weight: 600; }}
+        pre {{ background: {BG_INPUT}; padding: 12px; border-radius: 6px; }}
+        hr {{ border: none; border-top: 1px solid {BORDER}; margin: 16px 0; }}
+        """
+        self.document().setDefaultStyleSheet(body_style)
+        self.setHtml(text)
+        
+        self.document().contentsChanged.connect(self.update_height)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def update_height(self):
+        width = max(1, self.viewport().width())
+        self.document().setTextWidth(width)
+        height = int(self.document().size().height() + 10)
+        self.setFixedHeight(max(24, height))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_height()
+
+
+def add_markdown_content(layout, text):
+    for kind, value, language in split_markdown_blocks(text):
+        if kind == "code":
+            layout.addWidget(CodeBlock(value, language))
+            continue
+        if not value.strip():
+            continue
+        
+        html = render_markdown_text(value)
+        label = MarkdownLabel(html)
+        layout.addWidget(label)
 
 
 class AgentWorker(QObject):
@@ -411,48 +276,28 @@ class AgentWorker(QObject):
 
 
 class ComposerEdit(QPlainTextEdit):
-    """Multi-line input: Enter sends, Shift+Enter inserts a new line."""
-
     submitted = Signal()
-    focus_changed = Signal(bool)
-    MAX_HEIGHT = 150
+    MAX_HEIGHT = 200
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.min_height = 44
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
-        self.setTabChangesFocus(True)
         self.setFrameShape(QFrame.NoFrame)
+        self.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: none; padding: 4px; font-size: 14px; color: {TEXT}; selection-background-color: {BG_INPUT}; }}")
         self.textChanged.connect(self.fit_height)
 
-    def set_min_height(self, value):
-        self.min_height = value
-        self.fit_height()
-
     def fit_height(self):
-        # QPlainTextEdit reports its document size in LINES (wrapped lines included),
-        # not pixels, so convert with the font's line height.
         lines = max(1, int(round(self.document().size().height())))
         margins = int(self.document().documentMargin() * 2)
         wanted = lines * self.fontMetrics().lineSpacing() + margins + 8
-        self.setFixedHeight(max(self.min_height, min(self.MAX_HEIGHT, wanted)))
+        self.setFixedHeight(max(44, min(self.MAX_HEIGHT, wanted)))
         self.setVerticalScrollBarPolicy(
             Qt.ScrollBarAsNeeded if wanted > self.MAX_HEIGHT else Qt.ScrollBarAlwaysOff
         )
 
-    def focusInEvent(self, event):
-        super().focusInEvent(event)
-        self.focus_changed.emit(True)
-
-    def focusOutEvent(self, event):
-        super().focusOutEvent(event)
-        self.focus_changed.emit(False)
-
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (
-            event.modifiers() & Qt.ShiftModifier
-        ):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (event.modifiers() & Qt.ShiftModifier):
             self.submitted.emit()
             return
         super().keyPressEvent(event)
@@ -462,305 +307,200 @@ class ComposerEdit(QPlainTextEdit):
         self.fit_height()
 
 
-class StreamingMessageBubble(QFrame):
-    """Temporary assistant bubble that reveals completed text one word at a time."""
-
+class ThinkingPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("novaBubble")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 14)
-        layout.setSpacing(12)
+        self.setObjectName("thinkingPanel")
+        # Using QFrame#thinkingPanel prevents the border from applying to internal labels
+        self.setStyleSheet(f"QFrame#thinkingPanel {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 8px; }}")
+        self._started = datetime.now()
+        self._finished = False
+        self._has_content = False
+        self._expanded = True
 
-        avatar = QLabel()
-        avatar.setFixedSize(34, 34)
-        avatar.setPixmap(make_avatar("N", 34))
-        avatar.setAlignment(Qt.AlignTop)
-        layout.addWidget(avatar, 0, Qt.AlignTop)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 10, 14, 10)
+        root.setSpacing(6)
 
-        content = QVBoxLayout()
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(8)
-        name = QLabel("Nova")
-        name.setObjectName("messageName")
-        content.addWidget(name)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
 
-        self.body = QLabel("")
-        self.body.setWordWrap(True)
-        self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.body.setStyleSheet("color: #f5f7fa; font-size: 13px;")
-        content.addWidget(self.body)
-        layout.addLayout(content, 1)
+        self._indicator = QLabel("●")
+        self._indicator.setStyleSheet(f"color: {ACCENT}; font-size: 8px; border: none; background: transparent;")
+        header.addWidget(self._indicator)
 
-    def set_visible_text(self, text):
-        self.body.setText(str(text))
-        self.body.adjustSize()
+        self._title = QLabel("Thinking")
+        self._title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
+        header.addWidget(self._title)
+
+        self._clock = QLabel("0s")
+        self._clock.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
+        header.addWidget(self._clock)
+        header.addStretch(1)
+
+        self._toggle = QPushButton("Hide")
+        self._toggle.setStyleSheet(f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none; font-size: 11px; }} QPushButton:hover {{ color: {TEXT}; }}")
+        self._toggle.setFlat(True)
+        self._toggle.setCursor(Qt.PointingHandCursor)
+        self._toggle.clicked.connect(self._toggle_body)
+        header.addWidget(self._toggle)
+
+        root.addLayout(header)
+
+        self._body = QPlainTextEdit()
+        self._body.setStyleSheet(f"QPlainTextEdit {{ background: transparent; color: {TEXT_MUTED}; border: none; font-family: 'Cascadia Mono', 'Consolas', monospace; font-size: 12px; }}")
+        self._body.setReadOnly(True)
+        self._body.setFrameShape(QFrame.NoFrame)
+        self._body.setPlaceholderText("Waiting for the model to reason...")
+        self._body.setMaximumHeight(200)
+        self._body.setMinimumHeight(60)
+        root.addWidget(self._body)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(500)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self):
+        if self._finished:
+            return
+        seconds = int((datetime.now() - self._started).total_seconds())
+        self._clock.setText(f"{seconds}s")
+
+    def _toggle_body(self):
+        self._expanded = not self._expanded
+        self._body.setVisible(self._expanded)
+        self._toggle.setText("Hide" if self._expanded else "Show")
+
+    def append_delta(self, delta):
+        if not delta:
+            return
+        cursor = self._body.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._body.setTextCursor(cursor)
+        self._body.insertPlainText(delta)
+        bar = self._body.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        self._has_content = True
+
+    def finish(self):
+        if self._finished:
+            return
+        self._finished = True
+        self._timer.stop()
+        self._tick()
+        self._indicator.setText("○")
+        self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
+        if not self._has_content:
+            self._body.setPlainText("The selected model did not return reasoning for this turn.")
+        self._expanded = False
+        self._body.setVisible(False)
+        self._toggle.setText("Show")
 
 
-class MessageBubble(QFrame):
-    def __init__(self, role, text, parent=None, attachments=None):
+class MessageWidget(QFrame):
+    def __init__(self, role, text, attachments=None, parent=None):
         super().__init__(parent)
-        self.setObjectName("userBubble" if role == "user" else "novaBubble")
-        apply_glass_shadow(
-            self,
-            "#8b5cf6" if role == "user" else "#06b6d4",
-            30,
-            8,
-            70,
-        )
-
+        self.setObjectName("messageWidget")
+        self.setStyleSheet("QFrame#messageWidget { background: transparent; border: none; }")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 14)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 24)
+        layout.setSpacing(16)
 
         avatar = QLabel()
-        avatar.setFixedSize(34, 34)
-        avatar.setPixmap(make_avatar("Y" if role == "user" else "N", 34))
+        avatar.setFixedSize(32, 32)
+        avatar.setPixmap(make_avatar("Y" if role == "user" else "N", 32))
         avatar.setAlignment(Qt.AlignTop)
+        avatar.setStyleSheet("border: none; background: transparent;")
         layout.addWidget(avatar, 0, Qt.AlignTop)
 
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(8)
+        content.setSpacing(6)
 
         name = QLabel("You" if role == "user" else "Nova")
-        name.setObjectName("messageName")
+        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 600; border: none; background: transparent;")
         content.addWidget(name)
+
         add_markdown_content(content, text if text else ("Attached files" if attachments else " "))
+
         if role == "user" and attachments:
             badges = QHBoxLayout()
-            badges.setContentsMargins(0, 2, 0, 0)
-            badges.setSpacing(6)
+            badges.setContentsMargins(0, 4, 0, 0)
+            badges.setSpacing(8)
             for path in attachments:
                 filename = os.path.basename(path)
                 try:
-                    size = os.path.getsize(path)
-                    size_label = f"{size / 1024:.1f} KB" if size < 1024 * 1024 else f"{size / (1024 * 1024):.1f} MB"
+                    size_label = format_bytes(os.path.getsize(path))
                 except OSError:
                     size_label = "Unavailable"
-                badge = QLabel(f"📎  {filename}  ·  {size_label}")
-                badge.setObjectName("attachmentBadge")
+                badge = QLabel(f"{filename}  ·  {size_label}")
+                badge.setStyleSheet(f"color: {TEXT}; background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 8px; font-size: 11px;")
                 badge.setToolTip(path)
                 badges.addWidget(badge)
             badges.addStretch(1)
             content.addLayout(badges)
+
         layout.addLayout(content, 1)
 
-class ActivityItem(QFrame):
-    """Compact, structured event card for the live activity timeline."""
 
-    def __init__(self, message, parent=None):
-        super().__init__(parent)
-        raw = str(message or "").strip()
-        lowered = raw.casefold()
-
-        if any(token in lowered for token in ("error", "failed", "failure", "exception", "blocked")):
-            category, icon, accent = "ERROR", "!", "#fb7185"
-        elif any(token in lowered for token in ("complete", "completed", "verified", "done", "success")):
-            category, icon, accent = "SUCCESS", "✓", "#34d399"
-        elif any(token in lowered for token in ("search", "web", "browser")):
-            category, icon, accent = "WEB", "↗", "#38bdf8"
-        elif any(token in lowered for token in ("plan", "replan", "step", "tool", "execut")):
-            category, icon, accent = "AGENT", "⌘", "#a78bfa"
-        elif any(token in lowered for token in ("model", "provider", "api", "ollama")):
-            category, icon, accent = "MODEL", "◈", "#22d3ee"
-        else:
-            category, icon, accent = "INFO", "·", "#94a3b8"
-
-        self.setObjectName("activityItem")
-        self.setProperty("eventType", category.lower())
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 9, 10, 9)
-        layout.setSpacing(10)
-
-        marker = QLabel(icon)
-        marker.setAlignment(Qt.AlignCenter)
-        marker.setFixedSize(25, 25)
-        marker.setStyleSheet(
-            f"background: {accent}22; color: {accent}; border: 1px solid {accent}66; "
-            "border-radius: 8px; font-size: 13px; font-weight: 700;"
-        )
-        layout.addWidget(marker, 0, Qt.AlignTop)
-
-        content = QVBoxLayout()
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(4)
-
-        meta = QHBoxLayout()
-        category_label = QLabel(category)
-        category_label.setStyleSheet(
-            f"color: {accent}; font-size: 9px; font-weight: 800; letter-spacing: 1px;"
-        )
-        meta.addWidget(category_label)
-        meta.addStretch()
-        time_label = QLabel(datetime.now().strftime("%H:%M:%S"))
-        time_label.setObjectName("activityTime")
-        meta.addWidget(time_label)
-        content.addLayout(meta)
-
-        message_label = QLabel(raw)
-        message_label.setWordWrap(True)
-        message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        message_label.setObjectName("activityText")
-        content.addWidget(message_label)
-        layout.addLayout(content, 1)
-        self.setToolTip(raw)
-
-
-class TurnStatus(QFrame):
-    """ChatGPT-style panel for model-authored, user-facing thought summaries."""
+class EffortSelector(QWidget):
+    changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("turnStatus")
-        self.started_at = datetime.now()
-        self.finished = False
-        self.thought_text = ""
-        self.body_visible = True
-
+        self.setStyleSheet("QWidget { background: transparent; border: none; }")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 9, 12, 9)
-        layout.setSpacing(9)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        self.dot = QLabel("✳")
-        self.dot.setObjectName("turnStatusDot")
-        layout.addWidget(self.dot, 0, Qt.AlignTop)
+        label = QLabel("Effort")
+        label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
+        layout.addWidget(label)
 
-        text_layout = QVBoxLayout()
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(5)
+        self._slider = QSlider(Qt.Horizontal)
+        self._slider.setStyleSheet(f"""
+            QSlider {{ border: none; background: transparent; }}
+            QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {TEXT_MUTED}; width: 12px; margin: -4px 0; border-radius: 6px; }}
+            QSlider::handle:horizontal:hover {{ background: {TEXT}; }}
+            QSlider::sub-page:horizontal {{ background: {TEXT_MUTED}; border-radius: 2px; }}
+        """)
+        self._slider.setRange(0, len(EFFORT_LEVELS) - 1)
+        self._slider.setValue(2)
+        self._slider.setFixedWidth(100)
+        self._slider.valueChanged.connect(self._changed)
+        layout.addWidget(self._slider)
 
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        self.title = QLabel("Thought for 0 seconds")
-        self.title.setObjectName("turnStatusTitle")
-        header.addWidget(self.title)
-        header.addStretch(1)
+        self._value = QLabel(EFFORT_LABELS[2])
+        self._value.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
+        self._value.setMinimumWidth(60)
+        layout.addWidget(self._value)
 
-        self.toggle_button = QPushButton("⌄")
-        self.toggle_button.setObjectName("thoughtToggle")
-        self.toggle_button.setFixedSize(24, 22)
-        self.toggle_button.setFlat(True)
-        self.toggle_button.setCursor(Qt.PointingHandCursor)
-        self.toggle_button.clicked.connect(self._toggle_body)
-        header.addWidget(self.toggle_button)
-        text_layout.addLayout(header)
+    def _changed(self, index):
+        self._value.setText(EFFORT_LABELS[index])
+        self.changed.emit(EFFORT_LEVELS[index])
 
-        self.body_widget = QWidget()
-        body_layout = QVBoxLayout(self.body_widget)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(5)
+    def value(self):
+        return EFFORT_LEVELS[self._slider.value()]
 
-        self.thought_label = QLabel("Waiting for the model…")
-        self.thought_label.setObjectName("turnStatusMessage")
-        self.thought_label.setWordWrap(True)
-        self.thought_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        body_layout.addWidget(self.thought_label)
-
-        self.updates_layout = QVBoxLayout()
-        self.updates_layout.setContentsMargins(0, 0, 0, 0)
-        self.updates_layout.setSpacing(3)
-        body_layout.addLayout(self.updates_layout)
-        text_layout.addWidget(self.body_widget)
-        layout.addLayout(text_layout, 1)
-
-        self.elapsed_timer = QTimer(self)
-        self.elapsed_timer.setInterval(250)
-        self.elapsed_timer.timeout.connect(self._refresh_elapsed)
-        self.elapsed_timer.start()
-
-    def _toggle_body(self):
-        self.body_visible = not self.body_visible
-        self.body_widget.setVisible(self.body_visible)
-        self.toggle_button.setText("⌄" if self.body_visible else "›")
-
-    def _refresh_elapsed(self):
-        seconds = max(0, int((datetime.now() - self.started_at).total_seconds()))
-        unit = "second" if seconds == 1 else "seconds"
-        self.title.setText(f"Thought for {seconds} {unit}")
-
-    def _finish_thought(self):
-        if self.finished:
-            return
-        self.finished = True
-        self.elapsed_timer.stop()
-        self._refresh_elapsed()
-
-    def finish(self):
-        """Stop the elapsed-time display when the turn ends."""
-        if not self.thought_text:
-            self.thought_label.setText(
-                "This model did not provide a visible thought summary."
-            )
-        self._finish_thought()
-
-    def update_status(self, message):
-        """Render only streamed model-authored notes and factual tool updates."""
-        message = str(message or "").strip()
-
-        if message == "MODEL_THOUGHT_START":
-            self.thought_text = ""
-            self.thought_label.setText("")
-            self.started_at = datetime.now()
-            self.finished = False
-            self.elapsed_timer.start()
-            self._refresh_elapsed()
-            return
-
-        if message.startswith("MODEL_THOUGHT_DELTA:"):
-            delta = message[len("MODEL_THOUGHT_DELTA:"):]
-            self.thought_text += delta
-            self.thought_label.setText(self.thought_text)
-            return
-
-        if message == "MODEL_THOUGHT_END":
-            self._finish_thought()
-            return
-
-        if message.startswith("THINKING_UPDATE:"):
-            line = message[len("THINKING_UPDATE:"):].strip()
-            if line:
-                label = QLabel("•  " + line[:500])
-                label.setObjectName("turnStatusMessage")
-                label.setWordWrap(True)
-                self.updates_layout.addWidget(label)
-
-
-class CapabilityButton(QPushButton):
-    changed = Signal(bool)
-
-    def __init__(self, title, subtitle, parent=None):
-        super().__init__(parent)
-        self.title = title
-        self.subtitle = subtitle
-        self.setCheckable(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(54)
-        self.toggled.connect(self._changed)
-        self._refresh()
-
-    def _changed(self, value):
-        self._refresh()
-        self.changed.emit(value)
-
-    def _refresh(self):
-        state = "ON" if self.isChecked() else "OFF"
-        self.setText(f"{self.title}  ·  {state}\n{self.subtitle}")
+    def set_value(self, name):
+        if name in EFFORT_LEVELS:
+            index = EFFORT_LEVELS.index(name)
+            self._slider.blockSignals(True)
+            self._slider.setValue(index)
+            self._slider.blockSignals(False)
+            self._value.setText(EFFORT_LABELS[index])
 
 
 class ModelSettingsDialog(QDialog):
-    """Choose the local model or configure a remote API provider.
-
-    The API key is write-only here: an existing key is shown masked, and leaving
-    the field untouched keeps the stored value rather than clearing it.
-    """
-
     def __init__(self, settings, installed_models, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Model settings")
         self.setModal(True)
         self.setMinimumWidth(520)
+        self.setStyleSheet(f"QDialog {{ background-color: {BG_MAIN}; color: {TEXT}; }}")
 
         self._settings = dict(settings)
         self._installed = list(installed_models or [])
@@ -771,18 +511,14 @@ class ModelSettingsDialog(QDialog):
         layout.setSpacing(12)
 
         heading = QLabel("Choose how Nova reasons")
-        heading.setStyleSheet("font-size: 16px; font-weight: 700;")
+        heading.setStyleSheet("font-size: 16px; font-weight: 700; border: none; background: transparent;")
         layout.addWidget(heading)
 
-        note = QLabel(
-            "Local keeps everything on this computer. Remote sends your messages, "
-            "file contents, and tool results to the provider you configure."
-        )
+        note = QLabel("Local keeps everything on this computer. Remote sends your messages, file contents, and tool results to the provider you configure.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #9aa3b2;")
+        note.setStyleSheet(f"color: {TEXT_MUTED}; border: none; background: transparent;")
         layout.addWidget(note)
 
-        # ---- local ----------------------------------------------------------
         self.local_radio = QRadioButton("Local model (Ollama)")
         layout.addWidget(self.local_radio)
 
@@ -793,10 +529,9 @@ class ModelSettingsDialog(QDialog):
         if self._installed:
             hint = QLabel("Installed: " + ", ".join(self._installed[:6]))
             hint.setWordWrap(True)
-            hint.setStyleSheet("color: #7f8899; font-size: 11px;")
+            hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
             layout.addWidget(hint)
 
-        # ---- remote ---------------------------------------------------------
         self.remote_radio = QRadioButton("Remote API (OpenAI-compatible)")
         layout.addWidget(self.remote_radio)
 
@@ -811,20 +546,17 @@ class ModelSettingsDialog(QDialog):
         self.api_key = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
         if self._existing_key:
-            self.api_key.setPlaceholderText(
-                f"stored: {masked_key(self._existing_key)} \u2014 leave blank to keep"
-            )
+            self.api_key.setPlaceholderText(f"stored: {masked_key(self._existing_key)} — leave blank to keep")
         else:
             self.api_key.setPlaceholderText("API key")
         layout.addWidget(self._labelled("API key", self.api_key))
 
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("color: #9aa3b2; font-size: 11px;")
+        self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
         layout.addWidget(self.status)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -845,35 +577,27 @@ class ModelSettingsDialog(QDialog):
         box = QWidget()
         inner = QVBoxLayout(box)
         inner.setContentsMargins(0, 0, 0, 0)
-        inner.setSpacing(3)
+        inner.setSpacing(4)
         label = QLabel(text)
-        label.setStyleSheet("color: #7f8899; font-size: 11px;")
+        label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
         inner.addWidget(label)
         inner.addWidget(widget)
         return box
-
-    def _effective_key(self):
-        typed = self.api_key.text().strip()
-        return typed or self._existing_key
 
     def _refresh(self):
         remote = self.remote_radio.isChecked()
         for widget in (self.api_base, self.api_model, self.api_key):
             widget.setEnabled(remote)
         self.local_model.setEnabled(not remote)
-
-        preview = self.values()
-        self.status.setText(summarise_backend(preview))
+        self.status.setText(summarise_backend(self.values()))
 
     def values(self):
-        """Current form contents as a settings mapping."""
         typed_key = self.api_key.text().strip()
         return {
             "provider": "remote" if self.remote_radio.isChecked() else "local",
             "local_model": self.local_model.text().strip(),
             "api_base_url": self.api_base.text().strip(),
             "api_model": self.api_model.text().strip(),
-            # Blank means "keep the stored key", not "erase it".
             "api_key": typed_key or self._existing_key,
         }
 
@@ -893,424 +617,42 @@ class NovaWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Load saved backend settings and apply them BEFORE building the core,
-        # so a stored remote provider is used from the first request.
         self._settings = load_settings()
         self._backend_error = ""
+        self._effort = str(self._settings.get("effort") or "medium")
+        if self._effort not in EFFORT_LEVELS:
+            self._effort = "medium"
         apply_to_environment(self._settings)
 
         self.core = self._create_core()
         self.core.set_access(**DEFAULT_ACCESS)
+        self._apply_effort(self._effort)
+        
         self.chat_store = ChatStore()
         saved_chats = self.chat_store.list_chats()
         self.current_chat_id = saved_chats[0]["id"] if saved_chats else self.chat_store.create_chat()
         self._restore_core_memory(self.current_chat_id)
+        
         self.thread = None
-        self._autoscroll = True
         self.worker = None
         self.busy = False
-        self.current_turn_status = None
+        self.thinking_panel = None
         self.attachments = []
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(980, 600)
+        self.setMinimumSize(900, 600)
         self.resize(1100, 760)
-
+        
         self._build_ui()
-        self._wire_composer_controls()
-        self._apply_style()
-        self._sync_capabilities()
-        self._refresh_model_labels()
-        self._welcome()
+        self._apply_theme()
         self._refresh_chat_history()
         self._render_current_chat()
-        if self._backend_error:
-            self._add_activity(
-                "Saved remote provider could not be used, so Nova started on the "
-                f"local model. Open API settings to fix it. Reason: {self._backend_error}"
-            )
-        self._sync_responsive_layout()
-
-    def _build_ui(self):
-        """Build the Figma-aligned three-page desktop shell.
-
-        FigmaDesktopShell owns layout/navigation; NovaWindow keeps ownership
-        of agent execution, settings, tool permissions and message lifecycle.
-        """
-        self._desktop_shell = FigmaDesktopShell(self)
-        self._desktop_shell.build()
-
-    def _build_sidebar(self):
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        self.sidebar = sidebar
-        apply_glass_shadow(sidebar, "#8b5cf6", 34, 6, 70)
-
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(14, 16, 14, 14)
-        layout.setSpacing(12)
-
-        brand = QHBoxLayout()
-        logo = QLabel()
-        logo.setPixmap(make_avatar("N", 36))
-        brand.addWidget(logo)
-
-        title_box = QVBoxLayout()
-        title_box.setSpacing(0)
-        title = QLabel("Nova")
-        title.setObjectName("brandTitle")
-        subtitle = QLabel("Local AI Agent")
-        subtitle.setObjectName("brandSubtitle")
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        brand.addLayout(title_box)
-        brand.addStretch()
-        layout.addLayout(brand)
-
-        new_chat = QPushButton("+  New chat")
-        new_chat.setObjectName("newChat")
-        new_chat.setCursor(Qt.PointingHandCursor)
-        new_chat.clicked.connect(self._new_chat)
-        layout.addWidget(new_chat)
-
-        label = QLabel("CHATS")
-        label.setObjectName("sectionLabel")
-        layout.addWidget(label)
-
-        self.chat_list = QListWidget()
-        self.chat_list.setObjectName("chatList")
-        self.chat_list.setSpacing(3)
-        self.chat_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.chat_list.addItem(QListWidgetItem("New conversation"))
-        self.chat_list.setMinimumHeight(120)
-        self.chat_list.item(0).setSelected(True)
-        layout.addWidget(self.chat_list, 1)
-
-        layout.addSpacing(8)
-
-        footer = QFrame()
-        footer.setObjectName("sidebarFooter")
-        footer_layout = QVBoxLayout(footer)
-        footer_layout.setContentsMargins(12, 12, 12, 12)
-        footer_layout.setSpacing(5)
-
-        model_label = QLabel("LOCAL MODEL")
-        model_label.setObjectName("tinyLabel")
-        model_name = str(
-            getattr(
-                getattr(self.core, "brain", None),
-                "model",
-                "Local model",
-            )
-        ).strip()
-        model_value = QLabel(model_name)
-        model_value.setObjectName("modelValue")
-        self.sidebar_model_label = model_value
-        footer_layout.addWidget(model_label)
-        footer_layout.addWidget(model_value)
-
-        privacy = QLabel("●  Local processing")
-        privacy.setObjectName("privacy")
-        footer_layout.addWidget(privacy)
-
-        layout.addWidget(footer)
-        return sidebar
-
-    def _build_header(self):
-        header = QFrame()
-        header.setObjectName("header")
-        self.header = header
-
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(22, 0, 18, 0)
-        layout.setSpacing(10)
-
-        title = QLabel("Nova")
-        title.setObjectName("headerTitle")
-        layout.addWidget(title)
-
-        pill = QLabel("LOCAL")
-        pill.setObjectName("localPill")
-        layout.addWidget(pill, 0, Qt.AlignVCenter)
-
-        layout.addStretch()
-
-        self.status_label = QLabel("Ready")
-        self.status_label.setObjectName("statusLabel")
-        layout.addWidget(self.status_label)
-
-        activity = QPushButton("Activity")
-        activity.setObjectName("headerButton")
-        activity.setCursor(Qt.PointingHandCursor)
-        activity.clicked.connect(self._focus_activity)
-        layout.addWidget(activity)
-
-        return header
-
-    def _build_activity_panel(self):
-        panel = QFrame()
-        panel.setObjectName("activityPanel")
-        self.activity_panel = panel
-        apply_glass_shadow(panel, "#06b6d4", 34, 6, 60)
-
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 18, 16, 16)
-        layout.setSpacing(12)
-
-        heading = QHBoxLayout()
-        title = QLabel("Activity")
-        title.setObjectName("panelTitle")
-        heading.addWidget(title)
-        heading.addStretch()
-
-        self.live_badge = QLabel("IDLE")
-        self.live_badge.setObjectName("idleBadge")
-        heading.addWidget(self.live_badge)
-        layout.addLayout(heading)
-
-        info = QLabel(
-            "High-level activity only. Nova's private reasoning is never shown."
-        )
-        info.setObjectName("panelInfo")
-        info.setWordWrap(True)
-        layout.addWidget(info)
-
-        self.activity_scroll = QScrollArea()
-        self.activity_scroll.setWidgetResizable(True)
-        self.activity_scroll.setFrameShape(QFrame.NoFrame)
-        self.activity_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        self.activity_scroll.setObjectName("activityScroll")
-        self.activity_scroll.viewport().setAutoFillBackground(False)
-        self.activity_container = QWidget()
-        self.activity_container.setObjectName("activityContainer")
-        self.activity_layout = QVBoxLayout(self.activity_container)
-        self.activity_layout.setContentsMargins(0, 0, 0, 0)
-        self.activity_layout.setSpacing(5)
-        self.activity_layout.addStretch()
-
-        self.activity_scroll.setWidget(self.activity_container)
-        layout.addWidget(self.activity_scroll, 1)
-
-        capabilities = QLabel("CAPABILITIES")
-        capabilities.setObjectName("sectionLabel")
-        layout.addWidget(capabilities)
-
-        self.capability_buttons = {}
-        capability_names = dict.fromkeys(
-            (*DEFAULT_ACCESS.keys(), *CAPABILITY_DEFINITIONS.keys())
-        )
-        for capability in capability_names:
-            definition = CAPABILITY_DEFINITIONS.get(capability, {})
-            label = str(definition.get("label") or capability.replace("_", " ").upper())
-            subtitle = str(definition.get("subtitle") or capability.replace("_", " "))
-            button = CapabilityButton(label, subtitle)
-            button.setToolTip(str(definition.get("description") or f"Toggle {label} capability."))
-            button.changed.connect(
-                lambda enabled, name=capability: self._set_access(name, enabled)
-            )
-            button.setAccessibleName(button.title)
-            button.setAccessibleDescription(button.subtitle)
-            self.capability_buttons[capability] = button
-            layout.addWidget(button, 0)
-
-        return panel
-
-    def _build_composer(self):
-        wrapper = QFrame()
-        wrapper.setObjectName("composerArea")
-        self.composer_area = wrapper
-
-        layout = QVBoxLayout(wrapper)
-        self.composer_layout = layout
-        layout.setContentsMargins(34, 12, 34, 22)
-        layout.setSpacing(0)
-
-        # One rounded box holds the text field and the control row (like Ollama's app).
-        box = QFrame()
-        box.setObjectName("composerBox")
-        box.setProperty("focused", False)
-        self.composer_box = box
-        apply_glass_shadow(box, "#8b5cf6", 42, 12, 110)
-        box_layout = QVBoxLayout(box)
-        box_layout.setContentsMargins(18, 12, 12, 12)
-        box_layout.setSpacing(8)
-
-        # Horizontally scrollable glass file chips, shown only when files are queued.
-        self.attachment_preview = QScrollArea()
-        self.attachment_preview.setObjectName("attachmentPreview")
-        self.attachment_preview.setWidgetResizable(False)
-        self.attachment_preview.setFrameShape(QFrame.NoFrame)
-        self.attachment_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.attachment_preview.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.attachment_preview.setFixedHeight(50)
-        self.attachment_preview.setVisible(False)
-        self.attachment_preview_content = QWidget()
-        self.attachment_preview_layout = QHBoxLayout(self.attachment_preview_content)
-        self.attachment_preview_layout.setContentsMargins(2, 3, 8, 3)
-        self.attachment_preview_layout.setSpacing(7)
-        self.attachment_preview_layout.addStretch(1)
-        self.attachment_preview.setWidget(self.attachment_preview_content)
-        box_layout.addWidget(self.attachment_preview)
-
-        self.input = ComposerEdit()
-        self.input.setObjectName("composer")
-        self.input.setPlaceholderText("Send a message")
-        self.input.submitted.connect(self._send)
-        self.input.focus_changed.connect(self._on_composer_focus)
-        box_layout.addWidget(self.input)
-
-        controls = QHBoxLayout()
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
-
-        size = 48
-
-        add_button = QPushButton()
-        add_button.setObjectName("roundButton")
-        add_button.setIcon(make_icon("plus", "#aeb5c1"))
-        add_button.setIconSize(QSize(20, 20))
-        add_button.setFixedSize(size, size)
-        add_button.setCursor(Qt.PointingHandCursor)
-        add_button.setToolTip("Attach one or more files")
-        add_button.clicked.connect(self._choose_attachments)
-        self.add_attachment_button = add_button
-        controls.addWidget(add_button)
-
-        self.globe_button = QPushButton()
-        self.globe_button.setObjectName("roundButton")
-        self.globe_button.setCheckable(True)
-        self.globe_button.setCursor(Qt.PointingHandCursor)
-        self.globe_button.setIconSize(QSize(20, 20))
-        self.globe_button.setFixedSize(size, size)
-        controls.addWidget(self.globe_button)
-
-        controls.addStretch(1)
-
-        self.current_model = str(
-            getattr(getattr(self.core, "brain", None), "model", "") or "Local model"
-        ).strip()
-        self.model_selector = QPushButton(self.current_model)
-        self.model_selector.setObjectName("modelSelector")
-        self.model_selector.setCursor(Qt.PointingHandCursor)
-        self.model_selector.setIcon(make_icon("chevron_down", "#aeb5c1", 16))
-        self.model_selector.setIconSize(QSize(16, 16))
-        self.model_selector.setLayoutDirection(Qt.RightToLeft)  # chevron on the right
-        self.model_selector.setFixedHeight(size)
-        self.model_selector.setMinimumWidth(130)
-        self.model_selector.setToolTip("Choose which installed Ollama model Nova uses.")
-        self.model_selector.clicked.connect(self._show_model_menu)
-        controls.addWidget(self.model_selector)
-
-        self.send_button = QPushButton()
-        self.send_button.setObjectName("sendButton")
-        self.send_button.setIcon(make_icon("arrow_up", "#ffffff", 20, 2.2))
-        self.send_button.setIconSize(QSize(20, 20))
-        self.send_button.setFixedSize(size, size)
-        self.send_button.setCursor(Qt.PointingHandCursor)
-        self.send_button.setToolTip("Send (Enter)")
-        self.send_button.clicked.connect(self._send)
-        controls.addWidget(self.send_button)
-
-        box_layout.addLayout(controls)
-        layout.addWidget(box)
-        return wrapper
-
-    def _wire_composer_controls(self):
-        """Connect the globe control to the configured web capability when present."""
-        web_button = self.capability_buttons.get("web")
-        if web_button is None:
-            self.globe_button.setEnabled(False)
-        else:
-            self.globe_button.toggled.connect(web_button.setChecked)
-            web_button.toggled.connect(self.globe_button.setChecked)
-        self.globe_button.toggled.connect(self._refresh_globe)
-        self._refresh_globe()
-
-    def _refresh_globe(self, *_):
-        on = self.globe_button.isChecked()
-        self.globe_button.setIcon(make_icon("globe", "#7fb2ff" if on else "#747d8b"))
-        self.globe_button.setToolTip(
-            "Web search is ON (click to turn off)" if on else "Web search is OFF (click to turn on)"
-        )
-
-    def _on_composer_focus(self, focused):
-        self.composer_box.setProperty("focused", bool(focused))
-        self.composer_box.style().unpolish(self.composer_box)
-        self.composer_box.style().polish(self.composer_box)
-
-    def _installed_models(self):
-        """Names of models installed in Ollama; falls back to the current one."""
-        names = []
-        try:
-            import ollama
-
-            data = ollama.list()
-            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
-            for item in items or []:
-                if isinstance(item, dict):
-                    name = item.get("model") or item.get("name")
-                else:
-                    name = getattr(item, "model", None) or getattr(item, "name", None)
-                if name:
-                    names.append(str(name))
-        except Exception:
-            pass
-        if self.current_model and self.current_model not in names:
-            names.insert(0, self.current_model)
-        return sorted(set(names), key=str.lower)
-
-    def _build_model_menu(self):
-        menu = QMenu(self)
-
-        remote = self._settings.get("provider") == "remote"
-        if remote:
-            header = menu.addAction(
-                f"Remote: {self._settings.get('api_model') or 'unconfigured'}")
-            header.setEnabled(False)
-            menu.addSeparator()
-
-        for name in self._installed_models():
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setChecked(not remote and name == self.current_model)
-            action.triggered.connect(
-                lambda _checked=False, n=name: self._select_model(n))
-
-        menu.addSeparator()
-        settings_action = menu.addAction("API and model settings\u2026")
-        settings_action.triggered.connect(self._open_model_settings)
-        return menu
-
-    def _open_model_settings(self):
-        if self.busy:
-            return
-        dialog = ModelSettingsDialog(self._settings, self._installed_models(), self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-
-        values = dialog.values()
-        ok, message = save_settings(values)
-        self._settings = values
-        # Apply before rebuilding so NovaCore picks up the new backend.
-        apply_to_environment(values)
-        if self._rebuild_core():
-            self._refresh_model_labels()
-        self._add_activity(message if ok else f"Settings not saved: {message}")
-        self._add_activity(summarise_backend(values))
 
     def _create_core(self):
-        """Build a NovaCore, recovering from an unusable saved backend.
-
-        A misconfigured remote provider must never make the app unopenable: the
-        user would have no way to reach the settings dialog and fix it. Fall back
-        to local, record the reason, and surface it in the UI.
-        """
         try:
             return NovaCore()
         except RuntimeError as exc:
             self._backend_error = str(exc)
-            # Force local so the retry cannot hit the same failure.
             os.environ["NOVA_PROVIDER"] = "local"
             for name in ("NOVA_API_KEY", "NOVA_API_MODEL", "NOVA_API_BASE_URL"):
                 os.environ.pop(name, None)
@@ -1318,638 +660,192 @@ class NovaWindow(QMainWindow):
             return NovaCore()
 
     def _rebuild_core(self):
-        """Recreate the core so a changed backend takes effect immediately."""
-        access = (self.core.get_access() if getattr(self, "core", None)
-                  else dict(DEFAULT_ACCESS))
+        access = self.core.get_access() if getattr(self, "core", None) else dict(DEFAULT_ACCESS)
         try:
             new_core = NovaCore()
         except RuntimeError as exc:
-            # Remote selected but not configured. Keep the existing core and say
-            # so, rather than leaving the user with no working agent.
-            self._add_activity(f"Could not switch backend: {exc}")
             return False
         new_core.set_access(**{**DEFAULT_ACCESS, **access})
         self.core = new_core
+        self._apply_effort(self._effort)
         return True
+
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(1)
+        main_layout.addWidget(splitter)
+
+        # Sidebar
+        sidebar = QFrame()
+        sidebar.setFixedWidth(260)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(16, 20, 16, 16)
+        sidebar_layout.setSpacing(16)
+
+        title = QLabel("Nova")
+        title.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {TEXT}; border: none; background: transparent;")
+        sidebar_layout.addWidget(title)
+
+        new_chat_btn = QPushButton("+ New Chat")
+        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 10px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BORDER}; }}")
+        new_chat_btn.setCursor(Qt.PointingHandCursor)
+        new_chat_btn.clicked.connect(self._new_chat)
+        sidebar_layout.addWidget(new_chat_btn)
+
+        label_chats = QLabel("CHATS")
+        label_chats.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; font-weight: 700; margin-top: 8px; border: none; background: transparent;")
+        sidebar_layout.addWidget(label_chats)
+
+        self.chat_list = QListWidget()
+        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 8px; border-radius: 6px; margin-bottom: 2px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: {BG_PANEL}; color: {TEXT}; border: 1px solid {BORDER}; }}")
+        self.chat_list.itemClicked.connect(self._on_chat_selected)
+        sidebar_layout.addWidget(self.chat_list, 1)
+
+        settings_btn = QPushButton("⚙  Settings")
+        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; text-align: left; padding: 8px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; }}")
+        settings_btn.setCursor(Qt.PointingHandCursor)
+        settings_btn.clicked.connect(self._open_model_settings)
+        sidebar_layout.addWidget(settings_btn)
+
+        splitter.addWidget(sidebar)
+
+        # Main Content
+        main_content = QWidget()
+        main_layout = QVBoxLayout(main_content)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Header
+        header = QFrame()
+        header.setFixedHeight(64)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(24, 0, 24, 0)
+        
+        self.model_selector = QPushButton("Loading...")
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 12px; color: {TEXT}; font-size: 13px; }} QPushButton:hover {{ background: {BG_INPUT}; }}")
+        self.model_selector.clicked.connect(self._show_model_menu)
+        header_layout.addWidget(self.model_selector)
+
+        self.effort_selector = EffortSelector()
+        self.effort_selector.set_value(self._effort)
+        self.effort_selector.changed.connect(self._on_effort_changed)
+        header_layout.addWidget(self.effort_selector)
+
+        header_layout.addStretch()
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
+        header_layout.addWidget(self.status_label)
+
+        main_layout.addWidget(header)
+
+        # Chat Area
+        self.chat_scroll = QScrollArea()
+        self.chat_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.chat_scroll.setWidgetResizable(True)
+        self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        self.chat_container = QWidget()
+        self.chat_container.setStyleSheet(f"background: {BG_MAIN};")
+        self.chat_container_layout = QVBoxLayout(self.chat_container)
+        self.chat_container_layout.setContentsMargins(40, 24, 40, 24)
+        self.chat_container_layout.setSpacing(0)
+        self.chat_container_layout.addStretch()
+        
+        self.chat_scroll.setWidget(self.chat_container)
+        main_layout.addWidget(self.chat_scroll, 1)
+
+        # Composer
+        composer_area = QFrame()
+        composer_area.setObjectName("composerArea")
+        composer_area.setStyleSheet(f"QFrame#composerArea {{ background: {BG_MAIN}; border-top: 1px solid {BORDER}; }}")
+        composer_layout = QVBoxLayout(composer_area)
+        composer_layout.setContentsMargins(40, 16, 40, 24)
+
+        self.composer_box = QFrame()
+        self.composer_box.setObjectName("composerBox")
+        self.composer_box.setStyleSheet(f"QFrame#composerBox {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 12px; }}")
+        box_layout = QVBoxLayout(self.composer_box)
+        box_layout.setContentsMargins(12, 12, 12, 12)
+        box_layout.setSpacing(8)
+
+        self.input = ComposerEdit()
+        self.input.setPlaceholderText("Send a message...")
+        self.input.submitted.connect(self._send)
+        box_layout.addWidget(self.input)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+
+        add_btn = QPushButton()
+        add_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; }} QPushButton:hover {{ background: {BG_INPUT}; border-radius: 6px; }}")
+        add_btn.setIcon(make_icon("plus", TEXT_MUTED, 18))
+        add_btn.setFixedSize(28, 28)
+        add_btn.clicked.connect(self._choose_attachments)
+        controls.addWidget(add_btn)
+
+        controls.addStretch()
+
+        self.send_button = QPushButton()
+        self.send_button.setStyleSheet(f"QPushButton {{ background: {ACCENT}; border: none; border-radius: 6px; }} QPushButton:hover {{ background: #79c0ff; }} QPushButton:disabled {{ background: {BORDER}; }}")
+        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 16, 2.5))
+        self.send_button.setFixedSize(28, 28)
+        self.send_button.clicked.connect(self._send)
+        controls.addWidget(self.send_button)
+
+        box_layout.addLayout(controls)
+        composer_layout.addWidget(self.composer_box)
+        main_layout.addWidget(composer_area)
+
+        splitter.addWidget(main_content)
+        splitter.setSizes([260, 840])
+
+    def _apply_theme(self):
+        self.setStyleSheet(f"""
+            QMainWindow {{ background: {BG_MAIN}; }}
+            QSplitter::handle {{ background: {BORDER}; }}
+            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+            QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 40px; }}
+            QScrollBar::handle:vertical:hover {{ background: {TEXT_MUTED}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QMenu {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px; }}
+            QMenu::item {{ padding: 8px 24px 8px 12px; border-radius: 4px; color: {TEXT}; font-size: 13px; }}
+            QMenu::item:selected {{ background: {BG_INPUT}; }}
+        """)
 
     def _refresh_model_labels(self):
         brain = getattr(self.core, "brain", None)
         model = str(getattr(brain, "model", "") or "model")
         remote = self._settings.get("provider") == "remote"
-        label = f"{model} \u00b7 remote" if remote else model
-        self.current_model = model
+        label = f"{model} · remote" if remote else model
         self.model_selector.setText(label)
         self.model_selector.setToolTip(summarise_backend(self._settings))
-        if hasattr(self, "sidebar_model_label"):
-            self.sidebar_model_label.setText(label)
 
-    def _show_model_menu(self):
-        if self.busy:
+    def _apply_effort(self, name):
+        if name not in EFFORT_LEVELS:
             return
-        menu = self._build_model_menu()
-        button = self.model_selector
-        menu.adjustSize()
-        # Open upwards, aligned to the button's right edge (the composer sits at the bottom).
-        point = button.mapToGlobal(QPoint(button.width() - menu.sizeHint().width(), -menu.sizeHint().height() - 6))
-        menu.exec(point)
-
-    def _select_model(self, name):
-        if self.busy or not name or name == self.current_model:
-            return
-
-        # Picking an installed model means local mode. Persist that so a previous
-        # remote configuration does not silently come back on the next restart.
-        if self._settings.get("provider") == "remote":
-            self._settings["provider"] = "local"
-        self._settings["local_model"] = name
-        apply_to_environment(self._settings)
-        save_settings(self._settings)
-
-        self.current_model = name
-        if not self._rebuild_core():
-            return
-        self._refresh_model_labels()
-        self._add_activity(f"Model switched to {name} (local).")
-
-    def _welcome(self):
-        """Restore the Figma welcome hero for an empty conversation."""
-        shell = getattr(self, "_desktop_shell", None)
-        if shell:
-            shell.show_welcome()
-        self._add_activity("Nova is ready.")
-
-    def _apply_style(self):
-        self.setStyleSheet(f"""
-        * {{
-            font-family: "Segoe UI";
-            color: {TEXT};
-        }}
-
-        #root {{
-            background: transparent;
-        }}
-
-        #activityScroll, #activityScroll > QWidget > QWidget, #activityContainer,
-        #chatScroll, #chatScroll > QWidget > QWidget, #chatContainer {{
-            background: transparent;
-            border: none;
-        }}
-
-        #sidebar {{
-            background: rgba(14, 17, 30, 0.62);
-            border-right: 1px solid rgba(255, 255, 255, 0.10);
-        }}
-
-        #brandTitle {{
-            font-size: 17px;
-            font-weight: 650;
-            color: #ffffff;
-        }}
-
-        #brandSubtitle {{
-            color: {MUTED};
-            font-size: 11px;
-        }}
-
-        #newChat {{
-            background: {GLASS_GRADIENT};
-            border: 1px solid rgba(255, 255, 255, 0.22);
-            border-radius: 12px;
-            padding: 10px 12px;
-            text-align: left;
-            font-size: 13px;
-            font-weight: 600;
-            color: #ffffff;
-        }}
-
-        #newChat:hover {{
-            border-color: rgba(255, 255, 255, 0.40);
-        }}
-
-        #sectionLabel, #tinyLabel {{
-            color: rgba(226, 232, 240, 0.45);
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1.2px;
-        }}
-
-        #chatList {{
-            background: transparent;
-            border: none;
-            outline: none;
-            padding: 0;
-        }}
-
-        #chatList::item {{
-            color: rgba(226, 232, 240, 0.75);
-            background: rgba(255, 255, 255, 0.04);
-            padding: 9px 10px;
-            border-radius: 9px;
-            margin: 1px 0;
-        }}
-
-        #chatList::item:hover {{
-            background: rgba(255, 255, 255, 0.08);
-            color: #ffffff;
-        }}
-
-        #chatList::item:selected {{
-            background: rgba(139, 92, 246, 0.30);
-            border: 1px solid rgba(168, 85, 247, 0.4);
-            color: #ffffff;
-        }}
-
-        #sidebarFooter {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 12px;
-        }}
-
-        #modelValue {{
-            font-size: 12px;
-            font-weight: 600;
-            color: #e2e8f0;
-        }}
-
-        #privacy {{
-            color: {GREEN};
-            font-size: 10px;
-            margin-top: 3px;
-        }}
-
-        #header {{
-            background: rgba(13, 15, 34, 0.55);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-        }}
-
-        #headerTitle {{
-            font-size: 15px;
-            font-weight: 650;
-            color: #ffffff;
-        }}
-
-        #localPill {{
-            color: #c4b5fd;
-            background: rgba(139, 92, 246, 0.16);
-            border: 1px solid rgba(168, 85, 247, 0.4);
-            border-radius: 7px;
-            padding: 3px 8px;
-            font-size: 9px;
-            font-weight: 700;
-        }}
-
-        #statusLabel {{
-            color: {MUTED};
-            font-size: 12px;
-            margin-right: 6px;
-        }}
-
-        #headerButton {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 9px;
-            padding: 7px 12px;
-            color: rgba(226, 232, 240, 0.85);
-        }}
-
-        #headerButton:hover {{
-            background: rgba(139, 92, 246, 0.20);
-            border-color: rgba(168, 85, 247, 0.4);
-            color: #ffffff;
-        }}
-
-        #activityPanel {{
-            background: rgba(14, 17, 30, 0.62);
-            border-left: 1px solid rgba(255, 255, 255, 0.10);
-        }}
-
-        #panelTitle {{
-            font-size: 14px;
-            font-weight: 650;
-            color: #ffffff;
-        }}
-
-        #panelInfo {{
-            color: {MUTED};
-            font-size: 10px;
-            line-height: 1.3;
-        }}
-
-        #idleBadge, #liveBadge {{
-            background: rgba(255, 255, 255, 0.05);
-            color: rgba(226, 232, 240, 0.55);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 7px;
-            padding: 3px 7px;
-            font-size: 9px;
-            font-weight: 700;
-        }}
-
-        #turnStatus {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(168, 85, 247, 0.4);
-            border-radius: 12px;
-        }}
-
-        #turnStatusDot {{
-            color: {ACCENT_2};
-            font-size: 9px;
-        }}
-
-        #turnStatusTitle {{
-            color: #a78bfa;
-            font-size: 10px;
-            font-weight: 700;
-        }}
-
-        #turnStatusMessage {{
-            color: rgba(226, 232, 240, 0.80);
-            font-size: 11px;
-        }}
-
-        #activityItem {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 10px;
-        }}
-
-        #activityDot {{
-            color: {ACCENT_2};
-            font-size: 9px;
-        }}
-
-        #activityTime {{
-            color: rgba(226, 232, 240, 0.40);
-            font-size: 9px;
-        }}
-
-        #activityText {{
-            color: rgba(226, 232, 240, 0.80);
-            font-size: 10px;
-        }}
-
-        #composerArea {{
-            background: transparent;
-            border-top: none;
-        }}
-
-        #composerBox {{
-            background: rgba(18, 22, 36, 0.65);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 24px;
-        }}
-
-        #composerBox[focused="true"] {{
-            background: rgba(24, 28, 48, 0.72);
-            border: 1px solid rgba(168, 85, 247, 0.4);
-        }}
-
-        #attachmentPreview {{
-            background: transparent;
-            border: none;
-        }}
-
-        #attachmentChip {{
-            background: rgba(139, 92, 246, 0.16);
-            border: 1px solid rgba(168, 85, 247, 0.35);
-            border-radius: 12px;
-        }}
-
-        #attachmentChipName {{
-            color: #f2f4fb;
-            font-size: 10px;
-            font-weight: 600;
-        }}
-
-        #attachmentChipSize {{
-            color: rgba(226, 232, 240, 0.60);
-            font-size: 9px;
-        }}
-
-        #attachmentRemove {{
-            color: rgba(226, 232, 240, 0.75);
-            background: rgba(255, 255, 255, 0.08);
-            border: none;
-            border-radius: 9px;
-            font-size: 13px;
-            font-weight: 700;
-        }}
-
-        #attachmentRemove:hover {{
-            color: #ffffff;
-            background: rgba(239, 68, 68, 0.55);
-        }}
-
-        #attachmentBadge {{
-            color: #e9ddff;
-            background: rgba(139, 92, 246, 0.18);
-            border: 1px solid rgba(168, 85, 247, 0.35);
-            border-radius: 9px;
-            padding: 5px 9px;
-            font-size: 10px;
-        }}
-
-        #composer {{
-            background: transparent;
-            border: none;
-            padding: 2px 2px;
-            font-size: 14px;
-            color: #f2f4fb;
-            selection-background-color: rgba(139, 92, 246, 0.55);
-        }}
-
-        #roundButton {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 19px;
-        }}
-
-        #roundButton:hover {{
-            background: rgba(255, 255, 255, 0.10);
-            border-color: rgba(168, 85, 247, 0.4);
-        }}
-
-        #roundButton:checked {{
-            background: rgba(6, 182, 212, 0.18);
-            border-color: rgba(6, 182, 212, 0.45);
-        }}
-
-        #roundButton:disabled {{
-            background: rgba(255, 255, 255, 0.03);
-        }}
-
-        #modelSelector {{
-            background: rgba(255, 255, 255, 0.05);
-            color: {TEXT};
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 19px;
-            padding: 0 16px;
-            font-size: 12px;
-            font-weight: 600;
-        }}
-
-        #modelSelector:hover {{
-            background: rgba(255, 255, 255, 0.09);
-            border-color: rgba(168, 85, 247, 0.4);
-        }}
-
-        #sendButton {{
-            background: {GLASS_GRADIENT};
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            border-radius: 19px;
-        }}
-
-        #sendButton:hover {{
-            border-color: rgba(255, 255, 255, 0.45);
-        }}
-
-        #sendButton:disabled {{
-            background: rgba(139, 92, 246, 0.15);
-            border-color: rgba(255, 255, 255, 0.08);
-        }}
-
-        QMenu {{
-            background: rgba(18, 22, 36, 0.92);
-            border: 1px solid rgba(168, 85, 247, 0.4);
-            border-radius: 12px;
-            padding: 6px;
-        }}
-
-        QMenu::item {{
-            padding: 8px 26px 8px 14px;
-            border-radius: 8px;
-            color: {TEXT};
-            font-size: 12px;
-        }}
-
-        QMenu::item:selected {{
-            background: rgba(139, 92, 246, 0.30);
-        }}
-
-        QMenu::indicator {{
-            width: 0px;
-        }}
-
-        QMenu::item:checked {{
-            color: {ACCENT_2};
-            font-weight: 700;
-        }}
-
-        #chatArea, #chatScroll, #chatContainer, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {{
-            background: transparent;
-            border: none;
-        }}
-
-        #messageName {{
-            color: rgba(226, 232, 240, 0.70);
-            font-size: 11px;
-            font-weight: 650;
-        }}
-
-        #userBubble {{
-            background: rgba(139, 92, 246, 0.16);
-            border: 1px solid rgba(168, 85, 247, 0.4);
-            border-radius: 16px;
-            padding: 12px 16px;
-        }}
-
-        #novaBubble {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 16px;
-            padding: 12px 16px;
-        }}
-
-        #codeBlock {{
-            background: rgba(7, 8, 20, 0.72);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 12px;
-        }}
-
-        #codeLanguage {{
-            background: rgba(139, 92, 246, 0.16);
-            color: #a5f3fc;
-            border-bottom: 1px solid rgba(168, 85, 247, 0.4);
-            border-top-left-radius: 12px;
-            border-top-right-radius: 12px;
-            padding: 6px 10px;
-            font-size: 10px;
-            font-weight: 650;
-        }}
-
-        #codeEditor {{
-            background: transparent;
-            color: #e6e9ef;
-            border: none;
-            padding: 11px;
-            selection-background-color: rgba(139, 92, 246, 0.55);
-            selection-color: #ffffff;
-        }}
-
-        QScrollBar:vertical {{
-            background: transparent;
-            width: 8px;
-            margin: 2px;
-        }}
-
-        QScrollBar::handle:vertical {{
-            background: rgba(168, 85, 247, 0.35);
-            border-radius: 4px;
-            min-height: 35px;
-        }}
-
-        QScrollBar::handle:vertical:hover {{
-            background: rgba(6, 182, 212, 0.55);
-        }}
-
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0;
-        }}
-
-        QScrollBar:horizontal {{
-            background: transparent;
-            height: 8px;
-            margin: 2px;
-        }}
-
-        QScrollBar::handle:horizontal {{
-            background: rgba(168, 85, 247, 0.35);
-            border-radius: 4px;
-            min-width: 35px;
-        }}
-
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-            width: 0;
-        }}
-
-        QSplitter::handle {{
-            background: rgba(255, 255, 255, 0.10);
-        }}
-        """)
-
-    def _sync_responsive_layout(self):
-        """Let the Figma shell's Qt layouts handle responsive content sizing."""
-        shell = getattr(self, "_desktop_shell", None)
-        if shell:
-            shell.sync_responsive()
-
-    @staticmethod
-    def _set_layout_margins(layout, left, top, right, bottom):
-        layout.setContentsMargins(left, top, right, bottom)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, "main_splitter"):
-            self._sync_responsive_layout()
-
-    def _sync_capabilities(self):
-        access = self.core.get_access()
-        for capability, button in self.capability_buttons.items():
-            button.blockSignals(True)
-            button.setChecked(access.get(capability, DEFAULT_ACCESS.get(capability, False)))
-            button.blockSignals(False)
-            button._refresh()
-
-        web_button = self.capability_buttons.get("web")
-        self.globe_button.blockSignals(True)
-        self.globe_button.setChecked(web_button.isChecked() if web_button else False)
-        self.globe_button.blockSignals(False)
-        self._refresh_globe()
-        self._refresh_capability_styles()
-        shell = getattr(self, "_desktop_shell", None)
-        if shell:
-            shell.sync_capabilities()
-
-    def _refresh_capability_styles(self):
-        for button in self.capability_buttons.values():
-            if button.isChecked():
-                button.setStyleSheet(
-                    """
-                    QPushButton {
-                        text-align: left;
-                        background: rgba(139, 92, 246, 0.22);
-                        border: 1px solid rgba(168, 85, 247, 0.4);
-                        border-radius: 12px;
-                        padding: 7px 12px;
-                        color: #ffffff;
-                        font-size: 10px;
-                        font-weight: 650;
-                    }
-                    QPushButton:hover {
-                        background: rgba(139, 92, 246, 0.32);
-                        border-color: rgba(6, 182, 212, 0.55);
-                    }
-                    """
-                )
-            else:
-                button.setStyleSheet(
-                    """
-                    QPushButton {
-                        text-align: left;
-                        background: rgba(255, 255, 255, 0.05);
-                        border: 1px solid rgba(255, 255, 255, 0.14);
-                        border-radius: 12px;
-                        padding: 7px 12px;
-                        color: rgba(226, 232, 240, 0.55);
-                        font-size: 10px;
-                        font-weight: 650;
-                    }
-                    QPushButton:hover {
-                        background: rgba(255, 255, 255, 0.09);
-                        color: rgba(226, 232, 240, 0.85);
-                    }
-                    """
-                )
-
-    def _set_access(self, name, value):
-        self.core.set_access(**{name: value})
-        self._refresh_capability_styles()
-        self._add_activity(
-            f"{name.upper()} access {'enabled' if value else 'disabled'}."
-        )
-
-    def _new_chat(self):
-        if self.busy:
-            return
-
-        access = self.core.get_access() if self.core else dict(DEFAULT_ACCESS)
-        apply_to_environment(self._settings)
-        self.core = self._create_core()
-        self.core.set_access(**access)
-        self.current_chat_id = self.chat_store.create_chat()
-        self.core.short_memory.messages = []
-        self._refresh_model_labels()
-        self._clear_chat_view()
-        self._clear_activity_view()
-        self.current_turn_status = None
-        self._sync_capabilities()
-        self._welcome()
-        self._refresh_chat_history(select_current=True)
-        self.status_label.setText("Ready")
-        self.input.setFocus()
-
-    def _clear_chat_view(self):
-        shell = getattr(self, "_desktop_shell", None)
-        while self.chat_container_layout.count():
-            item = self.chat_container_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                # The desktop shell keeps a Python reference to the welcome
-                # widget. Clear it before Qt schedules the C++ object for
-                # deletion, otherwise later sends may call hide() on a deleted
-                # Shiboken wrapper.
-                if shell and getattr(shell, "welcome_hero", None) is widget:
-                    shell.welcome_hero = None
-                widget.deleteLater()
-        self.chat_container_layout.addStretch()
-
-    def _clear_activity_view(self):
-        while self.activity_layout.count():
-            item = self.activity_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        self.activity_layout.addStretch()
+        os.environ["NOVA_EFFORT"] = name
+        setter = getattr(self.core, "set_effort", None)
+        if callable(setter):
+            try:
+                setter(name)
+            except Exception:
+                pass
+        for attr in ("effort", "thinking_effort", "reasoning_effort"):
+            try:
+                setattr(self.core, attr, name)
+            except Exception:
+                pass
+
+    def _on_effort_changed(self, name):
+        self._effort = name
+        self._apply_effort(name)
 
     def _restore_core_memory(self, chat_id):
         messages = self.chat_store.get_messages(chat_id)
@@ -1960,433 +856,244 @@ class NovaWindow(QMainWindow):
         ][-self.core.short_memory.limit:]
         return messages
 
-    def _render_current_chat(self):
-        messages = self._restore_core_memory(self.current_chat_id)
-        self._clear_chat_view()
-        if not messages:
-            self._welcome()
-            return
-        for item in messages:
-            self._add_message(
-                item["role"],
-                item["content"],
-                attachments=item.get("attachments") or [],
-            )
-        self._scroll_chat()
-
-    def _refresh_chat_history(self, select_current=False):
-        shell = getattr(self, "_desktop_shell", None)
-        listing = getattr(shell, "chat_history_list", None) if shell else None
-        if listing is None:
-            return
-        listing.blockSignals(True)
-        listing.clear()
+    def _refresh_chat_history(self):
+        self.chat_list.blockSignals(True)
+        self.chat_list.clear()
         for chat in self.chat_store.list_chats():
             item = QListWidgetItem(chat["title"])
             item.setData(Qt.UserRole, chat["id"])
-            item.setToolTip(f'{chat["title"]}\\n{chat["message_count"]} messages')
-            listing.addItem(item)
+            self.chat_list.addItem(item)
             if chat["id"] == self.current_chat_id:
-                listing.setCurrentItem(item)
-        if select_current and listing.currentItem():
-            listing.scrollToItem(listing.currentItem())
-        listing.blockSignals(False)
+                self.chat_list.setCurrentItem(item)
+        self.chat_list.blockSignals(False)
+        self._refresh_model_labels()
 
     def _on_chat_selected(self, item):
-        if self.busy or item is None:
+        if self.busy:
             return
         chat_id = item.data(Qt.UserRole)
         if not chat_id or chat_id == self.current_chat_id:
+            return
+        
+        access = self.core.get_access()
+        apply_to_environment(self._settings)
+        self.core = self._create_core()
+        self.core.set_access(**access)
+        self._apply_effort(self._effort)
+        self.current_chat_id = str(chat_id)
+        self._refresh_model_labels()
+        self._render_current_chat()
+
+    def _new_chat(self):
+        if self.busy:
             return
         access = self.core.get_access()
         apply_to_environment(self._settings)
         self.core = self._create_core()
         self.core.set_access(**access)
-        self.current_chat_id = str(chat_id)
+        self._apply_effort(self._effort)
+        self.current_chat_id = self.chat_store.create_chat()
+        self.core.short_memory.messages = []
         self._refresh_model_labels()
-        self._clear_chat_view()
-        self._clear_activity_view()
-        self.current_turn_status = None
-        # A newly selected conversation is always idle. Re-enable the composer
-        # explicitly so stale widget state from a previous turn cannot leave the
-        # restored chat looking ready while its Send control remains disabled.
-        self.busy = False
-        self.worker = None
-        self.thread = None
-        self.input.setEnabled(True)
-        self.send_button.setEnabled(True)
-        self._sync_capabilities()
+        self._refresh_chat_history()
         self._render_current_chat()
-        self.status_label.setText("Ready")
-        self.live_badge.setText("IDLE")
-        self.input.setFocus()
+
+    def _render_current_chat(self):
+        messages = self._restore_core_memory(self.current_chat_id)
+        while self.chat_container_layout.count():
+            item = self.chat_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+        for item in messages:
+            widget = MessageWidget(
+                item["role"], 
+                item["content"], 
+                attachments=item.get("attachments") or []
+            )
+            self.chat_container_layout.addWidget(widget)
+            
+        self.chat_container_layout.addStretch()
+        self._scroll_chat_to_bottom()
 
     def _add_message(self, role, text, attachments=None):
-        shell = getattr(self, "_desktop_shell", None)
-        if shell and shell.welcome_hero:
-            shell.welcome_hero.hide()
-        stretch = self.chat_container_layout.takeAt(
-            self.chat_container_layout.count() - 1
-        )
-
-        bubble = MessageBubble(role, text, attachments=attachments)
-        self.chat_container_layout.addWidget(bubble)
-
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        widget = MessageWidget(role, text, attachments=attachments)
+        self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
+        self._scroll_chat_to_bottom()
 
-        self._scroll_chat()
-
-    def _add_turn_status(self, message):
-        stretch = self.chat_container_layout.takeAt(
-            self.chat_container_layout.count() - 1
-        )
-
-        status = TurnStatus()
-        status.update_status(message)
-        self.chat_container_layout.addWidget(status)
-
+    def _insert_thinking_panel(self):
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        panel = ThinkingPanel()
+        self.chat_container_layout.addWidget(panel)
         if stretch:
             self.chat_container_layout.addItem(stretch)
+        self._scroll_chat_to_bottom()
+        return panel
 
-        self._scroll_chat()
-        return status
+    def _scroll_chat_to_bottom(self):
+        QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum()))
 
-    def _add_activity(self, message):
-        stretch = self.activity_layout.takeAt(
-            self.activity_layout.count() - 1
-        )
+    def _show_model_menu(self):
+        if self.busy:
+            return
+        menu = QMenu(self)
+        remote = self._settings.get("provider") == "remote"
+        
+        installed = []
+        try:
+            import ollama
+            data = ollama.list()
+            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
+            for item in items or []:
+                name = item.get("model") if isinstance(item, dict) else getattr(item, "model", None)
+                if name: installed.append(str(name))
+        except Exception:
+            pass
+            
+        current = str(getattr(getattr(self.core, "brain", None), "model", "")).strip()
+        if current and current not in installed:
+            installed.insert(0, current)
 
-        item = ActivityItem(message)
-        self.activity_layout.addWidget(item)
+        for name in sorted(set(installed), key=str.lower):
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(not remote and name == current)
+            action.triggered.connect(lambda _, n=name: self._select_model(n))
 
-        if stretch:
-            self.activity_layout.addItem(stretch)
+        menu.addSeparator()
+        menu.addAction("API and model settings...").triggered.connect(self._open_model_settings)
+        menu.exec(self.model_selector.mapToGlobal(QPoint(0, self.model_selector.height())))
 
-        self._scroll_activity()
-        shell = getattr(self, "_desktop_shell", None)
-        if shell:
-            shell.record_activity(message)
+    def _select_model(self, name):
+        if self.busy or not name:
+            return
+        if self._settings.get("provider") == "remote":
+            self._settings["provider"] = "local"
+        self._settings["local_model"] = name
+        apply_to_environment(self._settings)
+        save_settings(self._settings)
+        if self._rebuild_core():
+            self._refresh_model_labels()
 
-    def _scroll_chat(self):
-        self._autoscroll = True
-        QTimer.singleShot(0, self._chat_to_bottom)
-        QTimer.singleShot(80, self._chat_to_bottom)
-
-    def _chat_to_bottom(self):
-        if self._autoscroll:
-            bar = self.chat_scroll.verticalScrollBar()
-            bar.setValue(bar.maximum())
-
-    def _on_chat_range_changed(self, _minimum, _maximum):
-        # Content height changes after layout (wrapped text); keep following the end.
-        self._chat_to_bottom()
-
-    def _on_chat_scrolled(self, value):
-        bar = self.chat_scroll.verticalScrollBar()
-        # If the user scrolls up to read, stop auto-following until the next message.
-        self._autoscroll = value >= bar.maximum() - 24
-
-    def _scroll_activity(self):
-        QTimer.singleShot(0, self._activity_to_bottom)
-
-    def _activity_to_bottom(self):
-        bar = self.activity_scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
-
-    def _focus_activity(self):
-        """Show or hide the Activity / Capabilities panel."""
-        self.activity_panel.setVisible(not self.activity_panel.isVisible())
-        self._sync_responsive_layout()
-        if self.activity_panel.isVisible():
-            self._scroll_activity()
-
-    @staticmethod
-    def _format_file_size(size):
-        if size < 1024 * 1024:
-            return f"{size / 1024:.1f} KB"
-        if size < 1024 * 1024 * 1024:
-            return f"{size / (1024 * 1024):.1f} MB"
-        return f"{size / (1024 * 1024 * 1024):.1f} GB"
+    def _open_model_settings(self):
+        if self.busy:
+            return
+        dialog = ModelSettingsDialog(self._settings, [], self)
+        if dialog.exec() == QDialog.Accepted:
+            values = dialog.values()
+            save_settings(values)
+            self._settings.update(values)
+            apply_to_environment(values)
+            if self._rebuild_core():
+                self._refresh_model_labels()
 
     def _choose_attachments(self):
         if self.busy:
             return
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Attach files",
-            "",
-            "Supported files (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg *.txt *.md *.rst *.py *.js *.ts *.jsx *.tsx *.html *.css *.json *.xml *.yaml *.yml *.toml *.ini *.cfg *.sh *.bat *.ps1 *.c *.h *.cpp *.java *.go *.rs *.sql *.pdf *.doc *.docx *.odt *.rtf *.csv *.xlsx *.xls);;Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg);;Text and code files (*.txt *.md *.rst *.py *.js *.ts *.jsx *.tsx *.html *.css *.json *.xml *.yaml *.yml *.toml *.ini *.cfg *.sh *.bat *.ps1 *.c *.h *.cpp *.java *.go *.rs *.sql *.csv);;Documents (*.pdf *.doc *.docx *.odt *.rtf *.xlsx *.xls);;All files (*)",
-        )
+        paths, _ = QFileDialog.getOpenFileNames(self, "Attach files", "", "All files (*)")
         for path in paths:
             path = os.path.abspath(path)
             if path not in self.attachments:
                 self.attachments.append(path)
-        self._refresh_attachment_preview()
-
-    def _remove_attachment(self, path):
-        if path in self.attachments:
-            self.attachments.remove(path)
-            self._refresh_attachment_preview()
-
-    def _refresh_attachment_preview(self):
-        while self.attachment_preview_layout.count():
-            item = self.attachment_preview_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        for path in self.attachments:
-            chip = QFrame()
-            chip.setObjectName("attachmentChip")
-            row = QHBoxLayout(chip)
-            row.setContentsMargins(9, 4, 5, 4)
-            row.setSpacing(7)
-            labels = QVBoxLayout()
-            labels.setContentsMargins(0, 0, 0, 0)
-            labels.setSpacing(0)
-            filename = QLabel(os.path.basename(path))
-            filename.setObjectName("attachmentChipName")
-            filename.setMaximumWidth(190)
-            filename.setToolTip(path)
-            size_label = QLabel(self._format_file_size(os.path.getsize(path)) if os.path.exists(path) else "Unavailable")
-            size_label.setObjectName("attachmentChipSize")
-            labels.addWidget(filename)
-            labels.addWidget(size_label)
-            row.addLayout(labels)
-            remove = QPushButton("×")
-            remove.setObjectName("attachmentRemove")
-            remove.setCursor(Qt.PointingHandCursor)
-            remove.setFixedSize(20, 20)
-            remove.setToolTip("Remove attachment")
-            remove.clicked.connect(lambda _checked=False, p=path: self._remove_attachment(p))
-            row.addWidget(remove)
-            self.attachment_preview_layout.addWidget(chip)
-        self.attachment_preview_layout.addStretch(1)
-        self.attachment_preview.setVisible(bool(self.attachments))
-        self.attachment_preview_content.adjustSize()
-        self.attachment_preview_content.setMinimumWidth(
-            max(self.attachment_preview.viewport().width(), self.attachment_preview_content.sizeHint().width())
-        )
 
     def _attachment_context(self, paths):
-        """Build textual context for Nova while keeping binary files as path metadata."""
         parts = []
-        text_extensions = {
-            ".txt", ".md", ".rst", ".py", ".js", ".ts", ".jsx", ".tsx",
-            ".html", ".css", ".json", ".xml", ".yaml", ".yml", ".toml",
-            ".ini", ".cfg", ".sh", ".bat", ".ps1", ".c", ".h", ".cpp",
-            ".java", ".go", ".rs", ".sql", ".csv", ".log", ".env",
-        }
         for path in paths:
             name = os.path.basename(path)
             try:
                 size = os.path.getsize(path)
-                size_text = self._format_file_size(size)
-            except OSError as exc:
-                parts.append(f"[Attached File: {name} (unavailable: {exc}) | path: {path}]")
+                size_text = format_bytes(size)
+            except OSError:
+                parts.append(f"[Attached File: {name} (unavailable) | path: {path}]")
                 continue
-            extension = os.path.splitext(name)[1].lower().lstrip(".") or "text"
-            mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-            if os.path.splitext(name)[1].lower() in text_extensions or mime_type.startswith("text/"):
-                if size > 1024 * 1024:
-                    parts.append(f"[Attached File: {name} ({size_text}) | path: {path}; content omitted because it exceeds the 1 MiB inline limit]")
-                    continue
-                try:
-                    with open(path, "r", encoding="utf-8-sig") as stream:
-                        content = stream.read(1024 * 1024 + 1)
-                    if len(content) > 1024 * 1024:
-                        content = content[:1024 * 1024] + "\n[Truncated at 1 MiB]"
-                except (UnicodeError, OSError):
-                    parts.append(f"[Attached File: {name} ({size_text}; {mime_type}) | path: {path}; unable to decode as UTF-8]")
-                    continue
-                parts.append(f"[Attached File: {name} ({size_text})]\n```{extension}\n{content}\n```")
-            else:
-                category = "image" if mime_type.startswith("image/") else mime_type
-                parts.append(f"[Attached File: {name} ({size_text}; {category}; binary content not embedded) | path: {path}]")
+            parts.append(f"[Attached File: {name} ({size_text}) | path: {path}]")
         return "\n\n".join(parts)
 
     def _send(self):
         if self.busy:
             return
-
         user_text = self.input.toPlainText().strip()
         attachments = list(self.attachments)
         if not user_text and not attachments:
             return
 
         attachment_context = self._attachment_context(attachments) if attachments else ""
-        message = user_text
-        if attachment_context:
-            message = f"{user_text}\n\n{attachment_context}" if user_text else attachment_context
+        message = f"{user_text}\n\n{attachment_context}" if attachment_context else user_text
 
         self.input.clear()
         self.attachments.clear()
-        self._refresh_attachment_preview()
         self._add_message("user", user_text, attachments=attachments)
-        self.chat_store.add_message(
-            self.current_chat_id, "user", user_text,
-            attachments=attachments, context=message
-        )
-        self._refresh_chat_history(select_current=True)
-        self._add_activity("New request received" + (f" · {len(attachments)} attachment(s)" if attachments else ""))
-        self.current_turn_status = self._add_turn_status("Thinking…")
-        self.status_label.setText("Working…")
-        self.live_badge.setText("LIVE")
-        self.live_badge.setStyleSheet(
-            f"""
-            background: rgba(52, 211, 153, 0.14);
-            color: {GREEN};
-            border: 1px solid rgba(52, 211, 153, 0.45);
-            border-radius: 7px;
-            padding: 3px 7px;
-            font-size: 9px;
-            font-weight: 700;
-            """
-        )
+        self.chat_store.add_message(self.current_chat_id, "user", user_text, attachments=attachments, context=message)
+        self._refresh_chat_history()
 
         self.busy = True
         self.input.setEnabled(False)
         self.send_button.setEnabled(False)
+        self.status_label.setText("Thinking...")
+
+        self._apply_effort(self._effort)
+        self.thinking_panel = None
+        if self._effort != "off":
+            self.thinking_panel = self._insert_thinking_panel()
+
         self.worker = AgentWorker(self.core, message)
         self.worker.status.connect(self._on_status)
         self.worker.finished.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
-
-        # Daemon thread: a long model call can never keep the app alive after the
-        # window is closed (a QThread would crash with "destroyed while running").
         self.thread = threading.Thread(target=self.worker.run, daemon=True)
         self.thread.start()
 
     def _on_status(self, message):
         message = str(message)
-        is_thinking_event = message.startswith((
-            "MODEL_THOUGHT_START",
-            "MODEL_THOUGHT_DELTA:",
-            "MODEL_THOUGHT_END",
-            "THINKING_UPDATE:",
-        ))
-        if not is_thinking_event:
-            self.status_label.setText(message)
-            self._add_activity(message)
-        if getattr(self, "current_turn_status", None):
-            self.current_turn_status.update_status(message)
+        if message.startswith("MODEL_THOUGHT_DELTA:"):
+            if self.thinking_panel:
+                self.thinking_panel.append_delta(message[20:])
+            return
+        if message == "MODEL_THOUGHT_END":
+            if self.thinking_panel:
+                self.thinking_panel.finish()
+            return
+        if message.startswith("THINKING_UPDATE:"):
+            return
+
+        self.status_label.setText(message)
 
     def _on_finished(self, response):
-        response = str(response)
-        words = response.split()
-        if not words:
-            self._add_message("nova", response)
-            self._persist_finished_response(response)
-            return
-
-        stretch = self.chat_container_layout.takeAt(
-            self.chat_container_layout.count() - 1
-        )
-        bubble = StreamingMessageBubble()
-        self.chat_container_layout.addWidget(bubble)
-        if stretch:
-            self.chat_container_layout.addItem(stretch)
-        self._scroll_chat()
-
-        self._stream_words = words
-        self._stream_index = 0
-        self._stream_response = response
-        self._stream_bubble = bubble
-        self._stream_timer = QTimer(self)
-        self._stream_timer.setInterval(22)
-        self._stream_timer.timeout.connect(self._reveal_response_word)
-        self._stream_timer.start()
-
-    def _reveal_response_word(self):
-        words = getattr(self, "_stream_words", [])
-        index = getattr(self, "_stream_index", 0)
-        bubble = getattr(self, "_stream_bubble", None)
-        if bubble is None or index >= len(words):
-            timer = getattr(self, "_stream_timer", None)
-            if timer:
-                timer.stop()
-                timer.deleteLater()
-            response = getattr(self, "_stream_response", "")
-            if bubble is not None:
-                position = self.chat_container_layout.indexOf(bubble)
-                if position >= 0:
-                    self.chat_container_layout.takeAt(position)
-                bubble.deleteLater()
-            self._add_message("nova", response)
-            self._persist_finished_response(response)
-            self._stream_bubble = None
-            self._stream_timer = None
-            return
-
-        self._stream_index = index + 1
-        bubble.set_visible_text(" ".join(words[:self._stream_index]))
-        self._scroll_chat()
-
-    def _persist_finished_response(self, response):
-        self.chat_store.add_message(self.current_chat_id, "assistant", response)
-        self._refresh_chat_history(select_current=True)
-        self._finish_request("Done")
+        if self.thinking_panel:
+            self.thinking_panel.finish()
+            self.thinking_panel = None
+        self._add_message("nova", str(response))
+        self.chat_store.add_message(self.current_chat_id, "assistant", str(response))
+        self._refresh_chat_history()
+        self._finish_request()
 
     def _on_failed(self, error):
-        self._add_message(
-            "nova",
-            "I hit an internal error while processing that request.\n\n"
-            f"Error: {error}"
-        )
-        self._add_activity(f"Error: {error}")
-        self.chat_store.add_message(
-            self.current_chat_id, "assistant",
-            "I hit an internal error while processing that request.\n\n" f"Error: {error}"
-        )
-        self._refresh_chat_history(select_current=True)
-        self._finish_request("Error")
+        if self.thinking_panel:
+            self.thinking_panel.finish()
+            self.thinking_panel = None
+        text = f"I hit an internal error.\n\nError: {error}"
+        self._add_message("nova", text)
+        self.chat_store.add_message(self.current_chat_id, "assistant", text)
+        self._refresh_chat_history()
+        self._finish_request()
 
-    def _finish_request(self, status):
-        # Turn status is temporary progress UI, not a permanent chat message.
-        if getattr(self, "current_turn_status", None):
-            self.current_turn_status.finish()
-            item = self.chat_container_layout.indexOf(self.current_turn_status)
-            if item >= 0:
-                self.chat_container_layout.takeAt(item)
-            self.current_turn_status.deleteLater()
-            self.current_turn_status = None
+    def _finish_request(self):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
-        self._refresh_capability_styles()
-        self._sync_capabilities()
-        self.status_label.setText(status)
-        self.live_badge.setText("IDLE")
-        self.live_badge.setStyleSheet(
-            """
-            background: rgba(255, 255, 255, 0.05);
-            color: rgba(226, 232, 240, 0.55);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 7px;
-            padding: 3px 7px;
-            font-size: 9px;
-            font-weight: 700;
-            """
-        )
+        self.status_label.setText("Ready")
         self.input.setFocus()
-        self.worker = None
-        self.thread = None
-
-    def closeEvent(self, event):
-        super().closeEvent(event)
 
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Nova")
-    app.setOrganizationName("Nova")
     app.setFont(QFont("Segoe UI", 10))
-
     window = NovaWindow()
     window.show()
-
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
