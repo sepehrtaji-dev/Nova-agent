@@ -542,12 +542,29 @@ class EffortSelector(QWidget):
         layout.addWidget(self._slider)
 
         self._value = QLabel(EFFORT_LABELS[2])
-        self._value.setStyleSheet(f"color: {TEXT}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
-        self._value.setMinimumWidth(60)
+        self._value.setMinimumWidth(68)
+        self._value.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._value)
+        self._set_aura(2)
+
+    def _set_aura(self, index):
+        colors = ("#8b949e", "#79c0ff", "#58a6ff", "#a78bfa", "#c084fc", "#f0abfc")
+        color = colors[index]
+        self._value.setText(EFFORT_LABELS[index])
+        self._value.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-weight: 700; "
+            "border: none; background: transparent;"
+        )
+        self._slider.setStyleSheet(f"""
+            QSlider {{ border: none; background: transparent; }}
+            QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {color}; width: 12px; margin: -4px 0; border-radius: 6px; }}
+            QSlider::handle:horizontal:hover {{ background: #ffffff; }}
+            QSlider::sub-page:horizontal {{ background: {color}; border-radius: 2px; }}
+        """)
 
     def _changed(self, index):
-        self._value.setText(EFFORT_LABELS[index])
+        self._set_aura(index)
         self.changed.emit(EFFORT_LEVELS[index])
 
     def value(self):
@@ -559,7 +576,7 @@ class EffortSelector(QWidget):
             self._slider.blockSignals(True)
             self._slider.setValue(index)
             self._slider.blockSignals(False)
-            self._value.setText(EFFORT_LABELS[index])
+            self._set_aura(index)
 
 class ModelSettingsDialog(QDialog):
     def __init__(self, settings, installed_models, parent=None):
@@ -806,9 +823,20 @@ class NovaWindow(QMainWindow):
 
         header_layout.addStretch()
 
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
+        header_layout.addWidget(self.status_indicator)
+
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
+        self.status_label.setMinimumWidth(72)
+        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         header_layout.addWidget(self.status_label)
+
+        self._status_phase = 0
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(420)
+        self._status_timer.timeout.connect(self._animate_status)
 
         main_layout.addWidget(header)
 
@@ -890,9 +918,13 @@ class NovaWindow(QMainWindow):
         brain = getattr(self.core, "brain", None)
         model = str(getattr(brain, "model", "") or "model")
         remote = self._settings.get("provider") == "remote"
-        label = f"{model} · remote" if remote else model
-        self.model_selector.setText(label)
-        self.model_selector.setToolTip(summarise_backend(self._settings))
+        provider = "API" if remote else "LOCAL"
+        self.model_selector.setText(f"◈  {model}  ·  {provider}")
+        provider_name = "Remote API" if remote else "Local Ollama"
+        self.model_selector.setToolTip(
+            f"Provider: {provider_name}\\nModel: {model}\\n"
+            f"Effort: {self._effort.title()}\\n\\n{summarise_backend(self._settings)}"
+        )
 
     def _apply_effort(self, name):
         if name not in EFFORT_LEVELS:
@@ -915,6 +947,18 @@ class NovaWindow(QMainWindow):
         self._settings["effort"] = name
         self._apply_effort(name)
         save_settings(self._settings)
+        self._refresh_model_labels()
+
+    def _animate_status(self):
+        if not self.busy:
+            self._status_timer.stop()
+            return
+        self._status_phase = (self._status_phase + 1) % 4
+        colors = ("#58a6ff", "#79c0ff", "#a78bfa", "#79c0ff")
+        color = colors[self._status_phase]
+        self.status_indicator.setStyleSheet(
+            f"color: {color}; font-size: 9px; border: none; background: transparent;"
+        )
 
     def _restore_core_memory(self, chat_id):
         messages = self.chat_store.get_messages(chat_id)
@@ -1101,7 +1145,9 @@ class NovaWindow(QMainWindow):
         self.busy = True
         self.input.setEnabled(False)
         self.send_button.setEnabled(False)
-        self.status_label.setText("Thinking...")
+        self.status_label.setText("Thinking")
+        self._status_timer.start()
+        self._animate_status()
 
         self._apply_effort(self._effort)
         self.thinking_panel = None
@@ -1128,7 +1174,8 @@ class NovaWindow(QMainWindow):
         if message.startswith("THINKING_UPDATE:"):
             return
 
-        self.status_label.setText(message)
+        self.status_label.setText(message[:28])
+        self.status_label.setToolTip(message)
 
     def _on_finished(self, response):
         if self.thinking_panel:
@@ -1153,7 +1200,10 @@ class NovaWindow(QMainWindow):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self._status_timer.stop()
+        self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
         self.status_label.setText("Ready")
+        self.status_label.setToolTip("Nova is ready")
         self.input.setFocus()
 
 
