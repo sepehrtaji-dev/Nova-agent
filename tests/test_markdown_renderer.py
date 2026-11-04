@@ -16,6 +16,42 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("<strong>Ready</strong>", rendered)
         self.assertNotIn("| Model |", rendered)
 
+    def test_compact_english_table_after_heading_without_blank_lines(self):
+        rendered = render_markdown(
+            "## Comparison\n"
+            "| Feature | Nova | Cloud |\n"
+            "|:--|:--:|--:|\n"
+            "| Markdown | Yes | Yes |\n"
+            "Next paragraph."
+        )
+        self.assertIn("<h2>Comparison</h2>", rendered)
+        self.assertIn("<table>", rendered)
+        self.assertIn("<td>Markdown</td>", rendered)
+        self.assertIn("Next paragraph.", rendered)
+        self.assertNotIn("| Feature |", rendered)
+
+    def test_compact_persian_table_after_heading_without_blank_lines(self):
+        rendered = render_markdown(
+            "## خلاصه تفاوت‌ها\n"
+            "| ویژگی | نوا | چت‌جی‌پی‌تی |\n"
+            "|:--|:--:|--:|\n"
+            "| پشتیبانی فارسی | بله | بله |\n"
+            "پایان جدول."
+        )
+        self.assertIn('<div dir="rtl" align="right">', rendered)
+        self.assertIn("<table>", rendered)
+        self.assertIn("<td>ویژگی</td>", rendered)
+        self.assertIn("<td>پشتیبانی فارسی</td>", rendered)
+        self.assertIn("پایان جدول.", rendered)
+        self.assertNotIn("| ویژگی |", rendered)
+
+    def test_table_pipes_inside_fenced_code_are_not_rewritten(self):
+        rendered = render_markdown(
+            "~~~text\n| A | B |\n|---|---|\n~~~\n"
+        )
+        self.assertNotIn("<table>", rendered)
+        self.assertIn("| A | B |", rendered)
+
     def test_nested_lists_and_blockquotes(self):
         rendered = render_markdown(
             "> Summary\n\n- first\n  - nested\n\n1. second\n"
@@ -26,7 +62,8 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertIn("nested", rendered)
 
     def test_fenced_code_and_inline_code(self):
-        rendered = render_markdown("Run `python app.py`:\n\n    print(1)\n")
+        tick = chr(96)
+        rendered = render_markdown("Run " + tick + "python app.py" + tick + ":\n\n    print(1)\n")
         self.assertIn("<code>python app.py</code>", rendered)
         self.assertIn("<pre>", rendered)
         self.assertIn("print(1)", rendered)
