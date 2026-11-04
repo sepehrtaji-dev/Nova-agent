@@ -742,6 +742,20 @@ Return JSON only with this schema:
             )
             return plan
 
+        # A verified write_file result is already concrete workspace evidence.
+        # Do not make the model re-plan after the file has been written: that
+        # extra generation is an unnecessary blocking round-trip and can leave
+        # the UI appearing stuck even though the requested file exists. Retire
+        # only the exact matching step and preserve every other pending step.
+        if success and tool_name == "write_file":
+            if current_step is not None:
+                current_step["status"] = "completed"
+                current_step["result"] = result
+            print(
+                "[PLANNER] File write verified; skipping post-write model replan."
+            )
+            return plan
+
         prompt = f"""
 You are Nova's task planner.
 

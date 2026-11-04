@@ -658,6 +658,63 @@ class PlannerSearchLoopTests(unittest.TestCase):
         )
         self.assertEqual(normalized[0]["status"], "completed")
 
+    def test_successful_write_file_records_completion_without_model_replanning(self):
+        class CountingBrain:
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, prompt, json_mode=False):
+                self.calls += 1
+                raise AssertionError("A verified file write must not trigger replanning.")
+
+        brain = CountingBrain()
+        planner = Planner(brain=brain, tools=self.planner.tools)
+        plan = {
+            "goal": "Research a topic and save a report",
+            "steps": [
+                {
+                    "id": 1,
+                    "description": "Save the research report",
+                    "status": "pending",
+                    "result": None,
+                    "tool": "write_file",
+                    "input": {
+                        "path": "research.md",
+                        "location": "projects",
+                        "content": "# Verified report",
+                    },
+                },
+                {
+                    "id": 2,
+                    "description": "Read back the saved report",
+                    "status": "pending",
+                    "result": None,
+                    "tool": "read_file",
+                    "input": {"path": "research.md", "location": "projects"},
+                },
+            ],
+        }
+
+        updated = planner.replan(
+            plan=plan,
+            goal="Research a topic and save a report",
+            tool_name="write_file",
+            tool_input={
+                "path": "research.md",
+                "location": "projects",
+                "content": "# Verified report",
+            },
+            result="FILE_CREATED\\nLocation: projects/research.md\\nBytes: 18",
+            success=True,
+            allowed_tools=["write_file", "read_file"],
+        )
+
+        self.assertIs(updated, plan)
+        self.assertEqual(brain.calls, 0)
+        self.assertEqual(updated["steps"][0]["status"], "completed")
+        self.assertIn("FILE_CREATED", updated["steps"][0]["result"])
+        self.assertEqual(updated["steps"][1]["status"], "pending")
+
     def test_successful_web_search_records_evidence_without_model_replanning(self):
         class CountingBrain:
             def __init__(self):

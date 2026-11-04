@@ -445,7 +445,7 @@ class CoreTests(unittest.TestCase):
         ]
         self.assertFalse(core._has_successful_tool(history))
 
-    def test_verified_write_triggers_adaptive_replan_and_completes(self):
+    def test_verified_write_completes_without_blocking_post_write_replan(self):
         core = NovaCore.__new__(NovaCore)
         core.status_callback = None
         core.brain = FakeBrain()
@@ -468,7 +468,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("created successfully", response.lower())
         self.assertEqual(len(core.tools.calls), 1)
         self.assertEqual(core.router.generate_calls, 1)
-        self.assertEqual(core.planner.replan_calls, 1)
+        self.assertEqual(core.planner.replan_calls, 0)
 
         tool_name, raw_input = core.tools.calls[0]
         self.assertEqual(tool_name, "write_file")
