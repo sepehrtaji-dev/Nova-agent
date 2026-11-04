@@ -6,7 +6,7 @@ import re
 import bleach
 import markdown
 
-_RTL_TEXT = re.compile(r"[\\u0590-\\u08FF\\uFB1D-\\uFDFF\\uFE70-\\uFEFF]")
+_RTL_TEXT = re.compile(r"[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]")
 
 _ALLOWED_TAGS = set(bleach.sanitizer.ALLOWED_TAGS) | {
     "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
