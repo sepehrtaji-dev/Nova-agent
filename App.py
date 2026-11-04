@@ -238,6 +238,12 @@ class MarkdownLabel(QTextBrowser):
         height = int(self.document().size().height() + 10)
         self.setFixedHeight(max(24, height))
 
+    def wheelEvent(self, event):
+        # This browser is sized to its full document height and has no
+        # internal scrollbar. Let the enclosing chat QScrollArea handle
+        # mouse-wheel input instead of swallowing it here.
+        event.ignore()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_height()
