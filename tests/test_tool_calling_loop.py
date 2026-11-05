@@ -42,7 +42,7 @@ class ToolCallingLoopTests(unittest.TestCase):
         registry.register(
             "read_note",
             "Read a note from the test workspace.",
-            lambda payload: "NOTE CONTENT: " + payload["path"],
+            lambda payload: "NOTE CONTENT: " + json.loads(payload)["path"],
             capability="filesystem",
             input_schema={
                 "type": "object",
@@ -54,7 +54,7 @@ class ToolCallingLoopTests(unittest.TestCase):
         registry.register(
             "write_note",
             "Write a note in the test workspace.",
-            lambda payload: "WROTE " + payload["path"] + ": " + payload["content"],
+            lambda payload: "WROTE " + json.loads(payload)["path"] + ": " + json.loads(payload)["content"],
             capability="filesystem",
             input_schema={
                 "type": "object",
