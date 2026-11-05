@@ -54,11 +54,23 @@ class OllamaBrain:
         base_options = {"temperature": 0.1}
         if isinstance(options, dict):
             base_options.update(options)
+        wire_messages = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            wire_item = dict(item)
+            if wire_item.get("role") == "tool":
+                tool_name = wire_item.get("name") or wire_item.get("tool_name")
+                wire_item.pop("tool_call_id", None)
+                wire_item.pop("name", None)
+                if tool_name:
+                    wire_item["tool_name"] = tool_name
+            wire_messages.append(wire_item)
         kwargs = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": str(system_prompt or SYSTEM_PROMPT)},
-                *list(messages or []),
+                *wire_messages,
             ],
             "tools": list(tools or []),
             "options": base_options,
