@@ -93,6 +93,17 @@ class ToolCallingLoopTests(unittest.TestCase):
                     },
                 }],
             },
+            {
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_read_again",
+                    "type": "function",
+                    "function": {
+                        "name": "read_note",
+                        "arguments": {"path": "todo.txt"},
+                    },
+                }],
+            },
             {"content": "The note was updated and verified.", "tool_calls": []},
         ])
         verified = []
@@ -104,14 +115,38 @@ class ToolCallingLoopTests(unittest.TestCase):
         answer = loop.run("Inspect and update todo.txt", system_prompt="Nova test")
 
         self.assertEqual(answer, "The note was updated and verified.")
-        self.assertEqual(verified, ["read_note", "write_note"])
-        self.assertEqual(len(brain.calls), 3)
+        self.assertEqual(verified, ["read_note", "write_note", "read_note"])
+        self.assertEqual(len(brain.calls), 4)
         second_messages = brain.calls[1]["messages"]
         self.assertEqual(second_messages[-1]["role"], "tool")
         self.assertIn("NOTE CONTENT", second_messages[-1]["content"])
         third_messages = brain.calls[2]["messages"]
         self.assertEqual(third_messages[-1]["role"], "tool")
         self.assertIn("WROTE todo.txt", third_messages[-1]["content"])
+        fourth_messages = brain.calls[3]["messages"]
+        self.assertEqual(fourth_messages[-1]["role"], "tool")
+        self.assertIn("NOTE CONTENT", fourth_messages[-1]["content"])
+
+    def test_malformed_arguments_are_returned_for_model_recovery(self):
+        registry = self.make_registry()
+        executed = []
+        registry.tools["read_note"]["function"] = lambda payload: executed.append(payload) or "read"
+        brain = ScriptedToolBrain([
+            {
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_malformed",
+                    "type": "function",
+                    "function": {"name": "read_note", "arguments": "{"},
+                }],
+            },
+            {"content": "The tool arguments were malformed, so nothing was read.", "tool_calls": []},
+        ])
+        loop = ToolCallingLoop(brain, registry, FakeVerifier(), ["read_note"])
+        answer = loop.run("Read a note", system_prompt="Nova test")
+        self.assertEqual(executed, [])
+        self.assertIn("not valid JSON", brain.calls[1]["messages"][-1]["content"])
+        self.assertIn("nothing was read", answer)
 
     def test_disabled_tool_is_not_executed(self):
         registry = self.make_registry()
