@@ -59,6 +59,29 @@ class OllamaBrain:
             if not isinstance(item, dict):
                 continue
             wire_item = dict(item)
+            if wire_item.get("role") == "assistant" and isinstance(wire_item.get("tool_calls"), list):
+                ollama_calls = []
+                for call in wire_item["tool_calls"]:
+                    if not isinstance(call, dict):
+                        continue
+                    function = call.get("function")
+                    if not isinstance(function, dict):
+                        continue
+                    arguments = function.get("arguments", {})
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError:
+                            arguments = {}
+                    if not isinstance(arguments, dict):
+                        arguments = {}
+                    ollama_calls.append({
+                        "function": {
+                            "name": function.get("name", ""),
+                            "arguments": arguments,
+                        }
+                    })
+                wire_item["tool_calls"] = ollama_calls
             if wire_item.get("role") == "tool":
                 tool_name = wire_item.get("name") or wire_item.get("tool_name")
                 wire_item.pop("tool_call_id", None)
