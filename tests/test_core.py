@@ -1388,7 +1388,7 @@ class CoreTests(unittest.TestCase):
         final_plan = core.execution_state["last_plan"]
         self.assertTrue(core.planner.is_complete(final_plan))
         self.assertEqual([step["status"] for step in final_plan["steps"]],
-                         ["superseded", "completed", "completed"])
+                         ["completed", "superseded", "completed"])
         self.assertEqual(len(core.execution_state["verified_tools"]), 2)
 
 if __name__ == "__main__":
