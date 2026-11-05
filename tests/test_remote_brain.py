@@ -202,6 +202,10 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertEqual(sent_messages[-1]["role"], "tool")
         self.assertEqual(sent_messages[-1]["tool_name"], "read_file")
         self.assertNotIn("tool_call_id", sent_messages[-1])
+        assistant_call = sent_messages[-2]["tool_calls"][0]
+        self.assertEqual(assistant_call["function"]["arguments"], {"path": "index.html"})
+        self.assertNotIn("id", assistant_call)
+        self.assertNotIn("type", assistant_call)
 
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
