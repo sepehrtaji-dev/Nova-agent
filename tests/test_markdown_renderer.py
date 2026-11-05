@@ -40,7 +40,7 @@ class MarkdownRendererTests(unittest.TestCase):
         )
         self.assertIn('<div dir="rtl" align="right">', rendered)
         self.assertIn("<table>", rendered)
-        self.assertIn("<td>ویژگی</td>", rendered)
+        self.assertIn("<th>ویژگی</th>", rendered)
         self.assertIn("<td>پشتیبانی فارسی</td>", rendered)
         self.assertIn("پایان جدول.", rendered)
         self.assertNotIn("| ویژگی |", rendered)

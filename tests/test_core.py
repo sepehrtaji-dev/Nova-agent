@@ -170,8 +170,18 @@ class FakePlanner:
         )
 
     def replan(self, **kwargs):
-        self.replan_calls += 1
         plan = kwargs.get("plan") or self.plan
+        # Mirror Planner's fast path: a confirmed write completes its step
+        # without invoking the model-backed replan operation.
+        if kwargs.get("success") and kwargs.get("tool_name") == "write_file":
+            for step in plan.get("steps", []):
+                if step.get("status") != "completed":
+                    step["status"] = "completed"
+                    step["result"] = kwargs.get("result")
+                    break
+            return plan
+
+        self.replan_calls += 1
         if kwargs.get("success") and isinstance(plan, dict):
             for step in plan.get("steps", []):
                 if step.get("status") != "completed":
@@ -1314,12 +1324,6 @@ class CoreTests(unittest.TestCase):
                          "input": {"path": "workspace_status.txt"}},
                         {"description": "Retry report creation with corrected settings", "tool": "write_file",
                          "input": {"path": "report.txt", "content": "final report", "mode": "retry"}}]},
-                    {"goal": goal, "steps": [
-                        {"description": "Diagnose the write failure", "tool": "read_file",
-                         "input": {"path": "workspace_status.txt"}, "status": "completed"},
-                        {"description": "Retry report creation with corrected settings", "tool": "write_file",
-                         "input": {"path": "report.txt", "content": "final report", "mode": "retry"},
-                         "status": "completed"}]},
                     {"complete": True, "reason": "The failure was diagnosed and the report was created.", "steps": []},
                 ]
 
@@ -1407,7 +1411,7 @@ class CoreTests(unittest.TestCase):
         final_plan = core.execution_state["last_plan"]
         self.assertTrue(core.planner.is_complete(final_plan))
         self.assertEqual([step["status"] for step in final_plan["steps"]],
-                         ["completed", "completed"])
+                         ["completed", "superseded", "completed"])
         self.assertEqual(len(core.execution_state["verified_tools"]), 2)
 
 if __name__ == "__main__":

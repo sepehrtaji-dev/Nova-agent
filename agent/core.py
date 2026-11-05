@@ -2006,7 +2006,34 @@ Nova must choose another useful action.
             except Exception:
                 pass
 
-            current_step = self.planner.get_next_step(plan)
+            executed_input = self._parse_tool_input(tool_input)
+            plan_steps = plan.get("steps", []) if isinstance(plan, dict) else []
+            has_structured_steps = any(
+                isinstance(candidate, dict)
+                and isinstance(candidate.get("tool"), str)
+                and isinstance(candidate.get("input"), dict)
+                for candidate in plan_steps
+            )
+            if isinstance(executed_input, dict) and has_structured_steps:
+                # The router can choose an action that is not the first pending
+                # plan item. Associate the verifier result with the exact action
+                # that actually ran; never complete a different pending step
+                # merely because it appears first in the plan.
+                current_step = next(
+                    (
+                        candidate for candidate in plan_steps
+                        if isinstance(candidate, dict)
+                        and candidate.get("status") in {"pending", "in_progress"}
+                        and candidate.get("tool") == tool_name
+                        and candidate.get("input") == executed_input
+                    ),
+                    None,
+                )
+            else:
+                # Compatibility for custom/legacy plans without structured
+                # tool metadata.
+                current_step = self.planner.get_next_step(plan)
+
             current_step_id = (
                 current_step.get("id")
                 if isinstance(current_step, dict)
@@ -2024,6 +2051,21 @@ Nova must choose another useful action.
                     if isinstance(current_step, dict)
                     else None
                 )
+
+                # Commit the verifier-confirmed outcome to the execution ledger
+                # before asking the planner to revise it. Otherwise replan sees
+                # the just-executed step as pending and can schedule it again.
+                if (
+                    isinstance(current_step_snapshot, dict)
+                    and isinstance(current_step_snapshot.get("id"), int)
+                ):
+                    self.planner.update_step(
+                        plan,
+                        current_step_snapshot["id"],
+                        result,
+                        status="completed",
+                    )
+
                 plan = self.planner.replan(
                     plan=plan,
                     goal=message,

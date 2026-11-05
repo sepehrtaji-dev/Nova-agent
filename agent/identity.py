@@ -20,7 +20,7 @@ import os
 # --- Static product facts ---------------------------------------------------
 # Overridable by environment so a fork can rebrand without editing source.
 NOVA_NAME = os.getenv("NOVA_NAME", "Nova")
-NOVA_VERSION = os.getenv("NOVA_VERSION", "2.0")
+NOVA_VERSION = os.getenv("NOVA_VERSION", "2.1")
 NOVA_DEVELOPER = os.getenv("NOVA_DEVELOPER", "Taji-Soft team")
 NOVA_REPOSITORY = os.getenv(
     "NOVA_REPOSITORY", "https://github.com/sepehrtaji-dev/Nova-agent"

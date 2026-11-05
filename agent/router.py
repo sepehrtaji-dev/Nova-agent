@@ -254,7 +254,23 @@ class ToolRouter:
                     item.arg: ast.literal_eval(item.value)
                     for item in parsed_call.keywords
                 }
-            except (SyntaxError, ValueError, TypeError):
+            except SyntaxError:
+                # Some models emit a bare natural-language query rather than
+                # a Python string literal: lookup(Pizza Shops In United States).
+                # Treat it as one positional text argument only when it cannot
+                # be confused with keyword or multiple-argument syntax.
+                raw_arguments = call_source[
+                    call_source.find("(") + 1:-1
+                ].strip()
+                if (
+                    not raw_arguments
+                    or "," in raw_arguments
+                    or "=" in raw_arguments
+                ):
+                    continue
+                positional = [raw_arguments]
+                keywords = {}
+            except (ValueError, TypeError):
                 continue
 
             if len(positional) == 1 and not keywords:
