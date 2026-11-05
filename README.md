@@ -20,6 +20,7 @@ Nova is an **agent application**, not a newly trained foundation model. You choo
 
 - [What Nova can do](#what-nova-can-do)
 - [Architecture](#architecture)
+- [Native tool loop](docs/native-tool-loop.md)
 - [Model providers](#model-providers)
 - [Task execution flow](#task-execution-flow)
 - [Tools and permissions](#tools-and-permissions)
