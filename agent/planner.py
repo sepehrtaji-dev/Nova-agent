@@ -582,6 +582,29 @@ Return JSON only with this schema:
             data.get("steps", []),
             allowed_tools=allowed_tools,
         )
+
+        # Goal verification may return a stale copy of the whole plan. Never
+        # reopen an action whose exact tool/input pair is already verified.
+        completed_actions = {
+            (
+                step.get("tool"),
+                json.dumps(step.get("input"), ensure_ascii=False, sort_keys=True),
+            )
+            for step in plan.get("steps", [])
+            if isinstance(step, dict)
+            and step.get("status") == "completed"
+            and isinstance(step.get("tool"), str)
+            and isinstance(step.get("input"), dict)
+        }
+        if completed_actions:
+            proposed = [
+                step for step in proposed
+                if (
+                    step.get("tool"),
+                    json.dumps(step.get("input"), ensure_ascii=False, sort_keys=True),
+                ) not in completed_actions
+            ]
+
         if data.get("complete") is True and not proposed:
             return {
                 "complete": True,

@@ -534,6 +534,29 @@ class CoreTests(unittest.TestCase):
                         ],
                     },
                     {
+                        "goal": "Inspect source, write a report, and run tests",
+                        "steps": [
+                            {
+                                "description": "Read source",
+                                "tool": "read_file",
+                                "input": {"path": "module.py"},
+                                "status": "completed",
+                            },
+                            {
+                                "description": "Write report",
+                                "tool": "write_file",
+                                "input": {"path": "report.txt", "content": "findings"},
+                                "status": "completed",
+                            },
+                            {
+                                "description": "Run tests",
+                                "tool": "terminal",
+                                "input": {"command": "python -m unittest"},
+                                "status": "pending",
+                            },
+                        ],
+                    },
+                    {
                         "complete": True,
                         "reason": "The source was inspected, the report was written, and tests passed.",
                         "steps": [],
