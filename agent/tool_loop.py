@@ -237,9 +237,9 @@ class ToolCallingLoop:
                         arguments,
                         {
                             "message": user_message,
+                            **(self.prepare_context if isinstance(self.prepare_context, dict) else {}),
                             "tool_history": messages,
                             "status": self._status,
-                            **(self.prepare_context if isinstance(self.prepare_context, dict) else {}),
                         },
                     )
 
