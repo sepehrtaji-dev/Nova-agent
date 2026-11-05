@@ -27,10 +27,12 @@ class SelfReflection:
             for step in valid_steps
             if step.get("status") == "completed"
         ]
+        # Superseded failed attempts remain visible in the plan for audit, but
+        # a later verified replacement resolves them and they are not pending.
         pending_steps = [
             str(step.get("description", "")).strip() or "(unnamed step)"
             for step in valid_steps
-            if step.get("status") != "completed"
+            if step.get("status") not in {"completed", "superseded"}
         ]
 
         if isinstance(tool_history, list):

@@ -751,6 +751,36 @@ Return JSON only with this schema:
             if current_step is not None:
                 current_step["status"] = "completed"
                 current_step["result"] = result
+
+            # A successful retry can supersede an earlier failed write to the
+            # same destination. Keep the failed attempt in the audit trail, but
+            # do not let it block completion after the replacement is verified.
+            executed_path = (
+                parsed_tool_input.get("path")
+                if isinstance(parsed_tool_input, dict)
+                else None
+            )
+            if isinstance(executed_path, str) and executed_path:
+                for prior_step in steps:
+                    if (
+                        not isinstance(prior_step, dict)
+                        or prior_step is current_step
+                        or prior_step.get("status") != "failed"
+                        or prior_step.get("tool") != "write_file"
+                    ):
+                        continue
+                    prior_input = prior_step.get("input")
+                    if (
+                        isinstance(prior_input, dict)
+                        and prior_input.get("path") == executed_path
+                    ):
+                        prior_step["status"] = "superseded"
+                        prior_step["superseded_by"] = (
+                            current_step.get("id")
+                            if isinstance(current_step, dict)
+                            else None
+                        )
+
             print(
                 "[PLANNER] File write verified; skipping post-write model replan."
             )
@@ -1154,14 +1184,14 @@ Schema:
             # Execution outcomes are runtime evidence, not model-owned state.
             # Preserve both completed and failed outcomes across every replan.
             old_status = old.get("status") if old else None
-            if old_status in {"completed", "failed"}:
+            if old_status in {"completed", "failed", "superseded"}:
                 status = old_status
             else:
                 status = "pending"
 
-            # A model cannot assert completion or failure for a step that has
-            # not actually produced that outcome in the prior execution ledger.
-            result = old.get("result") if old_status in {"completed", "failed"} else None
+            # A model cannot assert completion, failure, or supersession for a
+            # step that has not actually produced that outcome in the runtime ledger.
+            result = old.get("result") if old_status in {"completed", "failed", "superseded"} else None
 
             tool = step.get("tool")
             raw_input = step.get("input")
@@ -1284,6 +1314,7 @@ Schema:
             "pending",
             "completed",
             "failed",
+            "superseded",
             "in_progress"
         }:
             print(
@@ -1353,13 +1384,8 @@ Schema:
             return False
 
         return all(
-            isinstance(
-                step,
-                dict
-            )
-            and step.get(
-                "status"
-            ) == "completed"
+            isinstance(step, dict)
+            and step.get("status") in {"completed", "superseded"}
             for step in steps
         )
 
