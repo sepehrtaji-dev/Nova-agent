@@ -25,6 +25,30 @@ class EffortAwareBrain:
             result["reasoning_effort"] = _LEVEL.get(self.effort, "medium")
         return result
 
+    @property
+    def supports_tool_calls(self):
+        return callable(getattr(self.brain, "generate_tool_turn", None))
+
+    def generate_tool_turn(self, messages, tools, system_prompt=None, options=None):
+        method = getattr(self.brain, "generate_tool_turn", None)
+        if not callable(method):
+            raise NotImplementedError("The configured model backend does not support native tool calls.")
+        from model.remote import OpenAICompatibleBrain
+        if isinstance(self.brain, OpenAICompatibleBrain):
+            return method(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                options=self._remote_options(options),
+            )
+        return method(
+            messages=messages,
+            tools=tools,
+            system_prompt=system_prompt,
+            options=options,
+            think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"),
+        )
+
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
         from model.remote import OpenAICompatibleBrain
         if isinstance(self.brain, OpenAICompatibleBrain):
