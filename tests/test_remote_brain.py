@@ -138,6 +138,71 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertEqual(sent["tool_choice"], "auto")
         self.assertEqual(sent["messages"][-1]["content"], "Read index.html")
 
+    def test_remote_tool_history_serializes_function_arguments(self):
+        RESPONSES["status"] = "tool_call"
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_previous",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": {"path": "index.html"},
+                    },
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_previous",
+                "name": "read_file",
+                "content": "{\"ok\": true}",
+            },
+        ]
+        self.brain.generate_tool_turn(messages=messages, tools=[], system_prompt="Nova")
+        sent_messages = CAPTURED[-1]["body"]["messages"]
+        self.assertEqual(
+            json.loads(sent_messages[1]["tool_calls"][0]["function"]["arguments"]),
+            {"path": "index.html"},
+        )
+        self.assertEqual(sent_messages[2]["tool_call_id"], "call_previous")
+
+    def test_ollama_native_tool_turn_uses_tool_name_for_tool_results(self):
+        from model.ollama import OllamaBrain
+
+        response = {"message": {"content": "done", "tool_calls": []}}
+        with mock.patch("model.ollama.ollama.chat", return_value=response) as chat:
+            brain = OllamaBrain(model="test-model")
+            result = brain.generate_tool_turn(
+                messages=[
+                    {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call_previous",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": {"path": "index.html"},
+                            },
+                        }],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_previous",
+                        "name": "read_file",
+                        "content": "file contents",
+                    },
+                ],
+                tools=[],
+                system_prompt="Nova",
+            )
+        self.assertEqual(result["content"], "done")
+        sent_messages = chat.call_args.kwargs["messages"]
+        self.assertEqual(sent_messages[-1]["role"], "tool")
+        self.assertEqual(sent_messages[-1]["tool_name"], "read_file")
+        self.assertNotIn("tool_call_id", sent_messages[-1])
+
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
         sent = CAPTURED[-1]
