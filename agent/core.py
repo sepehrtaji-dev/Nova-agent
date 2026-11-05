@@ -2024,6 +2024,21 @@ Nova must choose another useful action.
                     if isinstance(current_step, dict)
                     else None
                 )
+
+                # Commit the verifier-confirmed outcome to the execution ledger
+                # before asking the planner to revise it. Otherwise replan sees
+                # the just-executed step as pending and can schedule it again.
+                if (
+                    isinstance(current_step_snapshot, dict)
+                    and isinstance(current_step_snapshot.get("id"), int)
+                ):
+                    self.planner.update_step(
+                        plan,
+                        current_step_snapshot["id"],
+                        result,
+                        status="completed",
+                    )
+
                 plan = self.planner.replan(
                     plan=plan,
                     goal=message,
