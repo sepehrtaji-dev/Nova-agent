@@ -157,13 +157,15 @@ The current implementation stores settings in the Nova settings JSON file, inclu
 
 ## Tools and permissions
 
-The default manifest currently defines **8 tools**:
+The default manifest currently defines **10 tools**:
 
 | Tool | Capability | What it does |
 |---|---|---|
 | web_search | web | Search the public web and return result titles, URLs, and snippets |
 | list_files | pc | List entries in a workspace directory |
 | read_file | pc | Read text files |
+| find_files | pc | Discover files by glob pattern and optional age filters |
+| edit_file | pc | Replace a specific text block in an existing file |
 | write_file | pc | Create or overwrite files with complete content |
 | terminal | pc | Run one supported non-interactive program with arguments |
 | git | git | Perform supported local Git operations |
