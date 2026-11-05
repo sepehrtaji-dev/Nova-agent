@@ -70,7 +70,9 @@ Nova separates the language model from the Python application that controls tool
 | Memory services | Maintain conversation and persisted memory |
 | Diagnostics / introspection | Report observable runtime and model information |
 
-The model proposes what to do. It does **not** grant itself permissions or manufacture successful tool results. Nova's Python code validates and executes tool calls, then provides the actual result back to the agent.
+The model decides whether to answer directly or request one or more tools. For providers that support native function calling, Nova uses a tool-call loop: it sends the live registry schemas, executes each validated call locally, returns the result in the provider's tool-message format, and asks the model what to do next. Nova executes multiple calls from one model turn serially to preserve predictable ordering. The model does **not** grant itself permissions or manufacture successful tool results. Nova's Python code enforces session permissions, validates arguments, executes handlers, and attaches verifier evidence before returning the result to the model.
+
+The planner/router path remains available for backends that do not expose native tool calls and for explicit structured planning workflows.
 
 ### Core components
 
@@ -86,19 +88,19 @@ Tool definitions are data-driven. The manifest at **config/tools.json** is read 
 
 ### Task execution flow
 
-1. **Receive:** Nova receives the request and prepares relevant conversation and memory context.
-2. **Plan:** the configured model proposes steps using the currently available tools.
-3. **Validate:** Nova checks the requested tool against the registry and its capability permission.
-4. **Execute:** the registered Python handler runs and returns its real result.
-5. **Verify:** the verifier checks the result. A model's success claim is not proof that a file was written or a command succeeded.
-6. **Adapt:** the planner can revise remaining work using new evidence or a failure.
-7. **Reflect and respond:** Nova reports what is confirmed, failed, or still uncertain.
+1. **Receive:** Nova receives the request and prepares relevant conversation, memory, and live tool-registry context.
+2. **Choose:** the model decides whether it can answer directly or needs one or more registered tools.
+3. **Validate:** Nova checks each requested tool against the live registry, JSON schema, and session capability permissions.
+4. **Execute:** the registered Python handler runs locally. Calls requested together are executed serially.
+5. **Verify and return:** Nova checks the result where a verifier exists, then returns the real output and verification status to the model as a tool result.
+6. **Continue:** the model chooses the next tool call or provides its final response. The loop is bounded to prevent unending tool cycles.
+7. **Report:** Nova returns the model's answer while preserving the distinction between confirmed, failed, and unverifiable actions.
 
 A simple conversation may not need planning or tools.
 
 ## Model providers
 
-Both providers implement the same small generation interface, allowing the planner, router, and memory extractor to use either backend.
+Both bundled providers implement a shared generation interface plus a native tool-call turn interface. This lets the same model-driven tool loop work with local Ollama models and OpenAI-compatible remote APIs.
 
 ### Local: Ollama
 
@@ -132,7 +134,7 @@ Configure these environment variables:
 - **NOVA_API_MODEL**
 - **NOVA_API_KEY**
 
-The remote client uses Python's standard library rather than requiring a vendor SDK. It supports JSON-mode requests where accepted by the provider, timeouts, retries for transient failures, rate-limit handling, and API-key redaction in error text.
+The remote client uses Python's standard library rather than requiring a vendor SDK. It supports JSON-mode requests where accepted by the provider, timeouts, retries for ordinary text generations, rate-limit handling, and API-key redaction in error text. Native tool-call turns use the provider's structured function-call protocol and are not automatically retried, because replaying an ambiguous timed-out call could duplicate a side effect.
 
 **Privacy difference:** with a remote provider, prompts, tool results, and file contents included in a request are sent to that provider. Nova's tools may still execute locally, but the reasoning model runs remotely. Review the provider's data policy before enabling remote mode.
 
