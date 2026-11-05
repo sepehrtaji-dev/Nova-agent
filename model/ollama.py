@@ -45,6 +45,50 @@ class OllamaBrain:
                 names.append(name.strip())
         return sorted(set(names), key=str.casefold)[0] if names else ""
 
+    def generate_tool_turn(self, messages, tools, system_prompt=None, options=None, think=None):
+        """Run one native tool-calling turn through Ollama's chat API."""
+        if not self.model:
+            self.model = self._discover_model()
+        if not self.model:
+            raise RuntimeError("No local Ollama model is available.")
+        base_options = {"temperature": 0.1}
+        if isinstance(options, dict):
+            base_options.update(options)
+        kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": str(system_prompt or SYSTEM_PROMPT)},
+                *list(messages or []),
+            ],
+            "tools": list(tools or []),
+            "options": base_options,
+            "stream": False,
+        }
+        if think is not None:
+            kwargs["think"] = think
+        response = ollama.chat(**kwargs)
+        if isinstance(response, dict):
+            message = response.get("message") or {}
+            content = message.get("content", "") if isinstance(message, dict) else ""
+            calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+        else:
+            message = getattr(response, "message", None)
+            content = (
+                message.get("content", "")
+                if isinstance(message, dict)
+                else getattr(message, "content", "")
+            )
+            calls = (
+                message.get("tool_calls", [])
+                if isinstance(message, dict)
+                else getattr(message, "tool_calls", [])
+            )
+        if content is None:
+            content = ""
+        elif not isinstance(content, str):
+            content = str(content)
+        return {"content": content, "tool_calls": list(calls or []), "finish_reason": None}
+
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None, think=None):
         system = system_prompt or SYSTEM_PROMPT
         if not self.model:
