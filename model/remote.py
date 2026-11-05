@@ -116,11 +116,34 @@ class OpenAICompatibleBrain:
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
             )
+        wire_messages = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            wire_item = dict(item)
+            calls = wire_item.get("tool_calls")
+            if wire_item.get("role") == "assistant" and isinstance(calls, list):
+                wire_calls = []
+                for call in calls:
+                    if not isinstance(call, dict):
+                        continue
+                    wire_call = dict(call)
+                    function = wire_call.get("function")
+                    if isinstance(function, dict):
+                        wire_function = dict(function)
+                        arguments = wire_function.get("arguments")
+                        if isinstance(arguments, dict):
+                            wire_function["arguments"] = json.dumps(arguments, ensure_ascii=False)
+                        wire_call["function"] = wire_function
+                    wire_calls.append(wire_call)
+                wire_item["tool_calls"] = wire_calls
+            wire_messages.append(wire_item)
+
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": str(system_prompt or _DEFAULT_SYSTEM_PROMPT)},
-                *list(messages or []),
+                *wire_messages,
             ],
             "tools": list(tools or []),
             "tool_choice": "auto",
