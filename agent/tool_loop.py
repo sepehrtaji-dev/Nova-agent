@@ -35,7 +35,7 @@ def _as_tool_call(raw, round_index, call_index):
     return {
         "id": str(call_id),
         "type": "function",
-        "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+        "function": {"name": name, "arguments": arguments},
     }, name, arguments
 
 
