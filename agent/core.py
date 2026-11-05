@@ -1210,12 +1210,23 @@ class NovaCore:
             return answer
 
         from agent.tool_awareness import render_for_prompt
+        self_knowledge = getattr(self, "self_knowledge", None)
+        grounding = ""
+        guarded_identity = False
+        if self_knowledge is not None:
+            try:
+                grounding = self_knowledge.grounding(self)
+                guarded_identity = self_knowledge.needs_grounding(message)
+            except Exception:
+                grounding = ""
+                guarded_identity = False
         context_parts = [
             "RECENT CONVERSATION:\n" + self._conversation_context(max_chars=9000),
             "LIVE TOOL REGISTRY AND SESSION PERMISSIONS:\n" + render_for_prompt(self),
             "RELEVANT KNOWLEDGE:\n" + str(self.knowledge.get_context(message)),
             "RELEVANT SAVED USER MEMORY:\n" + self._long_memory_context(message),
             "RELEVANT PAST TOOL EXPERIENCES:\n" + self._episodic_context(message),
+            "AUTHORITATIVE SELF-KNOWLEDGE:\n" + str(grounding),
         ]
         system_prompt = self._identity_system_prompt(
             extra=(
@@ -1283,6 +1294,11 @@ class NovaCore:
                 f"failed: {type(exc).__name__}: {exc}"
             )
 
+        if guarded_identity and self_knowledge is not None:
+            try:
+                response = self_knowledge.review(message, str(response), self)
+            except Exception:
+                pass
         self._extract_and_store_memory(message)
         self._status("Done")
         self.short_memory.add("assistant", str(response))
