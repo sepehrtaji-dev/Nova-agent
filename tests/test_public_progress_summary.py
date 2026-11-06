@@ -61,6 +61,14 @@ class PublicProgressSummaryTests(unittest.TestCase):
         oversized = self.make_core({"summary": "word " * 60})
         self.assertEqual(oversized._generate_public_progress_summary("hi", "", "system"), "")
 
+        answer_shaped = self.make_core({
+            "summary": "I'm doing well, thanks for asking! How are you?"
+        })
+        self.assertEqual(
+            answer_shaped._generate_public_progress_summary("hi", "", "system"),
+            "",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

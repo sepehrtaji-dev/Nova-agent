@@ -1239,7 +1239,18 @@ class NovaCore:
             summary = summary.strip()[:700]
             # Reject answer-shaped or malformed output instead of leaking it
             # into the Thinking panel when a backend ignores JSON mode.
-            if not summary or "\n" in summary or len(summary.split()) > 55:
+            lowered = summary.casefold()
+            answer_openers = (
+                "hey", "hello", "hi", "i'm doing well", "i am doing well",
+                "thanks for asking", "how are you", "i can help",
+            )
+            if (
+                not summary
+                or "\n" in summary
+                or "?" in summary
+                or len(summary.split()) > 55
+                or lowered.startswith(answer_openers)
+            ):
                 summary = ""
             if summary:
                 self._status("MODEL_THOUGHT_DELTA:" + summary)

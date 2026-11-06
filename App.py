@@ -1237,7 +1237,7 @@ class NovaWindow(QMainWindow):
             return
         if message.startswith("THINKING_UPDATE:"):
             if self.thinking_panel:
-                self.thinking_panel.append_delta(message[len("THINKING_UPDATE:"): ] + "\\n")
+                self.thinking_panel.append_delta(message[len("THINKING_UPDATE:"): ] + "\n")
             return
 
         self.status_label.setText(message[:28])

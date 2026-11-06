@@ -209,7 +209,6 @@ class ToolCallingLoop:
 
         for round_index in range(self.max_rounds):
             self._status(f"Choosing next action ({round_index + 1}/{self.max_rounds})...")
-            self._status("THINKING_UPDATE:Reviewing the request and available tools.")
             response = self._generate_turn(messages, definitions, system_prompt)
             if not isinstance(response, dict):
                 raise ToolLoopError("The model provider returned an invalid tool-call response.")
@@ -223,7 +222,6 @@ class ToolCallingLoop:
             if not raw_calls:
                 answer = content.strip()
                 if answer:
-                    self._status("THINKING_UPDATE:Preparing the final response.")
                     return answer
                 raise ToolLoopError("The model returned neither a final answer nor a tool call.")
 
