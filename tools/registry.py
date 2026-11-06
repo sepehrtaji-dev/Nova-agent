@@ -27,7 +27,7 @@ class ToolRegistry:
             "verifier_method": verifier_method,
         }
 
-    def validate_input(self, name, input_data):
+    def validate_input(self, name, input_data, allow_generated_missing=False):
         """Validate tool arguments against the supported JSON Schema subset."""
         if not self.exists(name):
             return False, f"Unknown tool: {name}"
@@ -78,7 +78,13 @@ class ToolRegistry:
                     return False, f"Object schema for '{field}' is invalid."
                 missing = [
                     key for key in required
-                    if isinstance(key, str) and (key not in value or value[key] is None)
+                    if isinstance(key, str)
+                    and (key not in value or value[key] is None)
+                    and not (
+                        allow_generated_missing
+                        and isinstance(properties.get(key), dict)
+                        and properties[key].get("x-generated") is True
+                    )
                 ]
                 if missing:
                     return False, f"Missing required input field(s) in '{field}': " + ", ".join(missing)
@@ -111,6 +117,10 @@ class ToolRegistry:
         if schema.get("type", "object") != "object":
             return False, "Tool input schema must describe an object."
         return validate(input_data, schema, "input")
+
+    def validate_planner_input(self, name, input_data):
+        """Validate model-supplied fields before generated fields are prepared."""
+        return self.validate_input(name, input_data, allow_generated_missing=True)
 
     def exists(self, name):
 

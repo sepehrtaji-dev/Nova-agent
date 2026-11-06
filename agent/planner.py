@@ -1,5 +1,6 @@
 import difflib
 import json
+import os
 import re
 
 
@@ -84,7 +85,12 @@ class Planner:
         if allowed_tools is not None and tool not in set(allowed_tools):
             return False, f"tool '{tool}' is disabled for this session"
 
-        validator = getattr(self.tools, "validate_input", None)
+        planner_validator = getattr(self.tools, "validate_planner_input", None)
+        validator = (
+            planner_validator
+            if callable(planner_validator)
+            else getattr(self.tools, "validate_input", None)
+        )
         if callable(validator):
             try:
                 valid, reason = validator(tool, raw_input)
@@ -100,7 +106,11 @@ class Planner:
                 required = schema.get("required", [])
                 missing = [
                     key for key in required
-                    if key not in raw_input or raw_input[key] is None
+                    if (key not in raw_input or raw_input[key] is None)
+                    and not (
+                        isinstance(properties.get(key), dict)
+                        and properties[key].get("x-generated") is True
+                    )
                 ]
                 if missing:
                     return False, "missing required input field(s): " + ", ".join(missing)
@@ -674,6 +684,17 @@ Return JSON only with this schema:
         fallback["replan_error"] = str(reason)
         return fallback
 
+    @staticmethod
+    def _write_destination_key(tool_input):
+        if not isinstance(tool_input, dict):
+            return None
+        path = tool_input.get("path")
+        if not isinstance(path, str) or not path.strip():
+            return None
+        location = str(tool_input.get("location") or "projects").strip().casefold()
+        normalized_path = os.path.normcase(os.path.normpath(path.strip()))
+        return location, normalized_path
+
     def replan(
         self,
         plan,
@@ -778,12 +799,8 @@ Return JSON only with this schema:
             # A successful retry can supersede an earlier failed write to the
             # same destination. Keep the failed attempt in the audit trail, but
             # do not let it block completion after the replacement is verified.
-            executed_path = (
-                parsed_tool_input.get("path")
-                if isinstance(parsed_tool_input, dict)
-                else None
-            )
-            if isinstance(executed_path, str) and executed_path:
+            executed_destination = self._write_destination_key(parsed_tool_input)
+            if executed_destination is not None:
                 for prior_step in steps:
                     if (
                         not isinstance(prior_step, dict)
@@ -792,11 +809,10 @@ Return JSON only with this schema:
                         or prior_step.get("tool") != "write_file"
                     ):
                         continue
-                    prior_input = prior_step.get("input")
-                    if (
-                        isinstance(prior_input, dict)
-                        and prior_input.get("path") == executed_path
-                    ):
+                    prior_destination = self._write_destination_key(
+                        prior_step.get("input")
+                    )
+                    if prior_destination == executed_destination:
                         prior_step["status"] = "superseded"
                         prior_step["superseded_by"] = (
                             current_step.get("id")
