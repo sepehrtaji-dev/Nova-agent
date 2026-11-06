@@ -521,7 +521,7 @@ class FileSystemTool:
         return data
 
     def write_file(self, input_data):
-        """Input: {\"path\": \"file.py\", \"location\": \"projects\"|\"desktop\"|\"system\", \"content\": \"complete file contents\"}. Content is required; do not omit it."""
+        """Input: {\"path\": \"file.py\", \"location\": \"projects\"|\"desktop\"|\"system\", \"content\": \"complete file contents\"}. Runtime execution requires content; the planner may omit it because prepare_write_input generates it before runtime validation."""
         try:
             path, location, data = self._parse_input(input_data)
 
