@@ -57,7 +57,10 @@ class StreamedNativeLoopTests(unittest.TestCase):
         self.assertEqual(brain.streamed, [])
 
     def test_tool_loop_streams_a_final_response(self):
-        brain = StreamedNativeBrain([{"chunks": ["Hello", " ", "world."]}])
+        brain = StreamedNativeBrain([{
+            "thought_chunks": ["The model is evaluating the greeting. "],
+            "chunks": ["Hello", " ", "world."],
+        }])
         events = []
         tools = ToolRegistry()
         tools.tools = {
@@ -74,6 +77,7 @@ class StreamedNativeLoopTests(unittest.TestCase):
             allowed_tools={"read_file"},
             status=events.append,
             on_answer_delta=lambda token: events.append("DELTA:" + token),
+            on_thought_delta=events.append,
         )
         result = loop.run("hi", system_prompt="Nova")
         self.assertEqual(result, "Hello world.")
@@ -84,9 +88,9 @@ class StreamedNativeLoopTests(unittest.TestCase):
         # Native model thinking and final answer are separate streams.
         thought_events = [
             item for item in events
-            if item == "I should answer this greeting briefly. "
+            if item == "The model is evaluating the greeting. "
         ]
-        self.assertEqual(thought_events, ["I should answer this greeting briefly. "])
+        self.assertEqual(thought_events, ["The model is evaluating the greeting. "])
         self.assertFalse(any("Reviewing the request" in item for item in events))
         self.assertFalse(any("Preparing the final response" in item for item in events))
 
