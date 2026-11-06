@@ -24,6 +24,7 @@ class OllamaBrain:
         self.model = str(model or os.getenv("NOVA_MODEL", "")).strip()
         if not self.model:
             self.model = self._discover_model()
+        self._thinking_supported_cache = None
 
     @staticmethod
     def _discover_model():
@@ -45,6 +46,37 @@ class OllamaBrain:
             if isinstance(name, str) and name.strip():
                 names.append(name.strip())
         return sorted(set(names), key=str.casefold)[0] if names else ""
+
+    @staticmethod
+    def _field(value, name, default=None):
+        if isinstance(value, dict):
+            return value.get(name, default)
+        return getattr(value, name, default)
+
+    def supports_thinking(self):
+        """Return true only when Ollama advertises a native thinking channel."""
+        if self._thinking_supported_cache is not None:
+            return self._thinking_supported_cache
+        if not self.model:
+            self._thinking_supported_cache = False
+            return False
+        try:
+            info = ollama.show(self.model)
+            metadata = self._field(info, "thinking")
+            values = self._field(metadata, "values", None)
+            if isinstance(values, (list, tuple)):
+                self._thinking_supported_cache = any(
+                    value is True or (isinstance(value, str) and bool(value.strip()))
+                    for value in values
+                )
+            else:
+                capabilities = self._field(info, "capabilities", []) or []
+                self._thinking_supported_cache = any(
+                    str(value).casefold() == "thinking" for value in capabilities
+                )
+        except Exception:
+            self._thinking_supported_cache = False
+        return self._thinking_supported_cache
 
     def generate_tool_turn(self, messages, tools, system_prompt=None, options=None, think=None):
         """Run one native tool-calling turn through Ollama's chat API."""
@@ -125,7 +157,10 @@ class OllamaBrain:
             content = str(content)
         return {"content": content, "tool_calls": list(calls or []), "finish_reason": None}
 
-    def generate_tool_turn_stream(self, messages, tools, system_prompt=None, options=None, think=None, on_token=None):
+    def generate_tool_turn_stream(
+        self, messages, tools, system_prompt=None, options=None, think=None,
+        on_token=None, on_thought_delta=None,
+    ):
         """Stream native tool-call turns while preserving the normal response shape."""
         if not self.model:
             self.model = self._discover_model()
@@ -174,20 +209,30 @@ class OllamaBrain:
             "options": base_options,
             "stream": True,
         }
+        if think is None:
+            think = True if self.supports_thinking() else None
         if think is not None:
             kwargs["think"] = think
 
         content_parts = []
+        thinking_parts = []
         calls = []
         for part in ollama.chat(**kwargs):
             if isinstance(part, dict):
                 message = part.get("message") or {}
                 token = message.get("content", "") if isinstance(message, dict) else ""
+                thought = message.get("thinking", "") if isinstance(message, dict) else ""
                 chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
             else:
                 message = getattr(part, "message", None)
-                token = message.get("content", "") if isinstance(message, dict) else getattr(message, "content", "")
-                chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else getattr(message, "tool_calls", [])
+                token = self._field(message, "content", "") or ""
+                thought = self._field(message, "thinking", "") or ""
+                chunk_calls = self._field(message, "tool_calls", []) or []
+            if thought:
+                thought = thought if isinstance(thought, str) else str(thought)
+                thinking_parts.append(thought)
+                if callable(on_thought_delta):
+                    on_thought_delta(thought)
             if token:
                 token = token if isinstance(token, str) else str(token)
                 content_parts.append(token)
@@ -195,7 +240,12 @@ class OllamaBrain:
                     on_token(token)
             if chunk_calls:
                 calls = list(chunk_calls)
-        return {"content": "".join(content_parts), "tool_calls": calls, "finish_reason": None}
+        return {
+            "content": "".join(content_parts),
+            "thinking": "".join(thinking_parts),
+            "tool_calls": calls,
+            "finish_reason": None,
+        }
 
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None, think=None):
         system = system_prompt or SYSTEM_PROMPT

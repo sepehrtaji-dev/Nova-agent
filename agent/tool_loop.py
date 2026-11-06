@@ -60,6 +60,7 @@ class ToolCallingLoop:
         prepare_context=None,
         on_result=None,
         on_answer_delta=None,
+        on_thought_delta=None,
         max_rounds=12,
     ):
         self.brain = brain
@@ -71,6 +72,7 @@ class ToolCallingLoop:
         self.prepare_context = prepare_context
         self.on_result = on_result
         self.on_answer_delta = on_answer_delta
+        self.on_thought_delta = on_thought_delta
         self.max_rounds = max(1, int(max_rounds or 12))
 
     def _status(self, message):
@@ -88,6 +90,7 @@ class ToolCallingLoop:
                 tools=definitions,
                 system_prompt=system_prompt,
                 on_token=self.on_answer_delta,
+                on_thought_delta=self.on_thought_delta,
             )
         return self.brain.generate_tool_turn(
             messages=messages,

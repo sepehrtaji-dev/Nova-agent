@@ -229,7 +229,10 @@ class OpenAICompatibleBrain:
             "finish_reason": choice.get("finish_reason"),
         }
 
-    def generate_tool_turn_stream(self, messages, tools, system_prompt=None, options=None, on_token=None):
+    def generate_tool_turn_stream(
+        self, messages, tools, system_prompt=None, options=None,
+        on_token=None, on_thought_delta=None,
+    ):
         """Stream an OpenAI-compatible native tool-call turn from SSE deltas."""
         if not self.is_configured():
             raise RemoteBrainError(
@@ -276,6 +279,7 @@ class OpenAICompatibleBrain:
             },
         )
         text_parts = []
+        thought_parts = []
         tool_parts = {}
         try:
             context = ssl.create_default_context()
@@ -297,6 +301,11 @@ class OpenAICompatibleBrain:
                     delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
                     if not isinstance(delta, dict):
                         continue
+                    thought = delta.get("reasoning_content", "")
+                    if isinstance(thought, str) and thought:
+                        thought_parts.append(thought)
+                        if callable(on_thought_delta):
+                            on_thought_delta(thought)
                     token = delta.get("content", "")
                     if token:
                         token = token if isinstance(token, str) else str(token)
@@ -340,7 +349,12 @@ class OpenAICompatibleBrain:
                 arguments = call["function"]["arguments"]
             call["function"]["arguments"] = arguments
             calls.append(call)
-        return {"content": "".join(text_parts), "tool_calls": calls, "finish_reason": None}
+        return {
+            "content": "".join(text_parts),
+            "thinking": "".join(thought_parts),
+            "tool_calls": calls,
+            "finish_reason": None,
+        }
 
     # ------------------------------------------------------------------ status
     @property

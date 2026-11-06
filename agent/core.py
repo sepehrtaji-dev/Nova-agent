@@ -1202,65 +1202,6 @@ class NovaCore:
             return rewritten.strip()
         return "Got it — thanks for telling me."
 
-    def _generate_public_progress_summary(self, message, context, system_prompt):
-        """Generate a validated UI progress summary, never a user-facing answer."""
-        prompt = (
-            'Return one JSON object with exactly one string field named "summary". '
-            "The summary describes the user's intent and the next high-level action. "
-            "It is a progress label, NOT a response to the user. "
-            "For a greeting, identify it as a greeting and say the next step is to reply briefly. "
-            "For an action request, describe the requested task and the next action without "
-            "claiming completion. Do not write a greeting, answer the user, include dialogue, "
-            "or reveal private chain-of-thought. Return JSON only.\n\n"
-            f"USER MESSAGE:\n{message}\n\n"
-            f"CONTEXT:\n{str(context)[:3000]}"
-        )
-        self._status("MODEL_THOUGHT_START")
-        try:
-            generated = self.brain.generate(
-                prompt,
-                system_prompt=(
-                    "You produce short UI progress summaries for an AI assistant. "
-                    "You are not the assistant replying to the user. Never answer "
-                    "the user's message. Output only the requested JSON object."
-                ),
-                json_mode=True,
-            )
-            if isinstance(generated, dict):
-                payload = generated
-            else:
-                raw = str(generated or "").strip()
-                if raw.startswith("```"):
-                    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE)
-                payload = json.loads(raw)
-            summary = payload.get("summary", "") if isinstance(payload, dict) else ""
-            if not isinstance(summary, str):
-                summary = ""
-            summary = summary.strip()[:700]
-            # Reject answer-shaped or malformed output instead of leaking it
-            # into the Thinking panel when a backend ignores JSON mode.
-            lowered = summary.casefold()
-            answer_openers = (
-                "hey", "hello", "hi", "i'm doing well", "i am doing well",
-                "thanks for asking", "how are you", "i can help",
-            )
-            if (
-                not summary
-                or "\n" in summary
-                or "?" in summary
-                or len(summary.split()) > 55
-                or lowered.startswith(answer_openers)
-            ):
-                summary = ""
-            if summary:
-                self._status("MODEL_THOUGHT_DELTA:" + summary)
-            return summary
-        except (TypeError, ValueError, json.JSONDecodeError):
-            logging.debug("Model did not return a valid progress-summary object", exc_info=True)
-            return ""
-        finally:
-            self._status("MODEL_THOUGHT_END")
-
     def _ask_with_native_tool_calls(self, message):
         """Use a model-driven tool/result loop when the backend supports it."""
         allowed = self._allowed_tools()
@@ -1340,17 +1281,9 @@ class NovaCore:
             },
             on_result=record_result,
             on_answer_delta=lambda token: self._status("MODEL_ANSWER_DELTA:" + str(token)),
+            on_thought_delta=lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token)),
             max_rounds=getattr(self, "max_steps", 12),
         )
-        self._status("Model is preparing a progress summary...")
-        try:
-            self._generate_public_progress_summary(
-                message,
-                "\n\n".join(context_parts),
-                system_prompt,
-            )
-        except Exception:
-            logging.exception("Could not generate the public progress summary")
         self._status("Model is choosing the next action...")
         try:
             response = loop.run(
