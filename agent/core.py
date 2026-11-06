@@ -1203,44 +1203,54 @@ class NovaCore:
         return "Got it — thanks for telling me."
 
     def _generate_public_progress_summary(self, message, context, system_prompt):
-        """Stream a concise, user-facing task summary; never expose private reasoning."""
+        """Generate a validated, user-facing progress summary, never an answer."""
         prompt = (
-            "Write a brief progress note for the user in 1-3 sentences. "
-            "Describe only the request's interpretation and the high-level next step. "
-            "For a greeting or simple question, say that directly and keep it short. "
-            "For an action request, state the intended action at a high level. "
-            "Do not reveal private chain-of-thought, hidden deliberation, or "
-            "token-by-token internal reasoning. Do not answer the user yet. "
-            "Return only the progress note, with no heading or quotation marks.\n\n"
-            f"USER MESSAGE:\n{message}\n\n"
-            f"AVAILABLE CONTEXT:\n{context[:5000]}"
+            "Return one JSON object with exactly these string fields: "
+            "\\"summary\\": a concise 1-2 sentence description of the user's "
+            "intent and the next high-level action. "
+            "This is a progress label, NOT the response to the user. "
+            "For a greeting, describe it as a greeting and say the next step is "
+            "to reply briefly. For a request to use tools, describe the requested "
+            "task and the next action without claiming it is complete. "
+            "Do not write a greeting, answer the user, include dialogue, or "
+            "reveal private chain-of-thought. Return JSON only.\\n\\n"
+            f"USER MESSAGE:\\n{message}\\n\\n"
+            f"CONTEXT:\\n{str(context)[:3000]}"
         )
         self._status("MODEL_THOUGHT_START")
-        parts = []
-
-        def on_token(token):
-            if not isinstance(token, str) or not token:
-                return
-            remaining = 1200 - sum(len(part) for part in parts)
-            if remaining <= 0:
-                return
-            piece = token[:remaining]
-            parts.append(piece)
-            self._status("MODEL_THOUGHT_DELTA:" + piece)
-
-        stream = getattr(self.brain, "generate_stream", None)
-        if callable(stream):
-            stream(prompt, on_token, system_prompt=system_prompt)
-        else:
-            generated = self.brain.generate(prompt, system_prompt=system_prompt)
-            on_token(str(generated or ""))
-
-        summary = "".join(parts).strip()
-        if summary:
+        try:
+            generated = self.brain.generate(
+                prompt,
+                system_prompt=(
+                    "You produce short UI progress summaries for an AI assistant. "
+                    "You are not the assistant replying to the user. Never answer "
+                    "the user's message. Output only the requested JSON object."
+                ),
+                json_mode=True,
+            )
+            if isinstance(generated, dict):
+                payload = generated
+            else:
+                raw = str(generated or "").strip()
+                if raw.startswith("```"):
+                    raw = re.sub(r"^\\`\\`\\`(?:json)?\\s*|\\s*\\`\\`\\`$", "", raw, flags=re.IGNORECASE)
+                payload = json.loads(raw)
+            summary = payload.get("summary", "") if isinstance(payload, dict) else ""
+            if not isinstance(summary, str):
+                summary = ""
+            summary = summary.strip()[:700]
+            # Reject conversational answer-shaped output rather than leaking it
+            # into the Thinking panel if a backend ignores JSON mode.
+            if not summary or "\\n" in summary or len(summary.split()) > 55:
+                summary = ""
+            if summary:
+                self._status("MODEL_THOUGHT_DELTA:" + summary)
+            return summary
+        except (TypeError, ValueError, json.JSONDecodeError):
+            logging.debug("Model did not return a valid progress-summary object", exc_info=True)
+            return ""
+        finally:
             self._status("MODEL_THOUGHT_END")
-        else:
-            self._status("MODEL_THOUGHT_END")
-        return summary
 
     def _ask_with_native_tool_calls(self, message):
         """Use a model-driven tool/result loop when the backend supports it."""
