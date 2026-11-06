@@ -47,11 +47,11 @@ class StreamedNativeLoopTests(unittest.TestCase):
             brain=brain,
             tools=ToolRegistry(),
             verifier=None,
-            allowed_tools={"read_file"},
+            allowed_tools=set(),
             status=events.append,
             on_answer_delta=events.append,
         )
-        # A registry with no definitions fails explicitly before provider access.
+        # An empty enabled-tool set fails explicitly before provider access.
         with self.assertRaises(ToolLoopError):
             loop.run("hi", system_prompt="Nova")
         self.assertEqual(brain.streamed, [])
