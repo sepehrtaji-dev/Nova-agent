@@ -1203,19 +1203,17 @@ class NovaCore:
         return "Got it — thanks for telling me."
 
     def _generate_public_progress_summary(self, message, context, system_prompt):
-        """Generate a validated, user-facing progress summary, never an answer."""
+        """Generate a validated UI progress summary, never a user-facing answer."""
         prompt = (
-            "Return one JSON object with exactly these string fields: "
-            "\\"summary\\": a concise 1-2 sentence description of the user's "
-            "intent and the next high-level action. "
-            "This is a progress label, NOT the response to the user. "
-            "For a greeting, describe it as a greeting and say the next step is "
-            "to reply briefly. For a request to use tools, describe the requested "
-            "task and the next action without claiming it is complete. "
-            "Do not write a greeting, answer the user, include dialogue, or "
-            "reveal private chain-of-thought. Return JSON only.\\n\\n"
-            f"USER MESSAGE:\\n{message}\\n\\n"
-            f"CONTEXT:\\n{str(context)[:3000]}"
+            'Return one JSON object with exactly one string field named "summary". '
+            "The summary describes the user's intent and the next high-level action. "
+            "It is a progress label, NOT a response to the user. "
+            "For a greeting, identify it as a greeting and say the next step is to reply briefly. "
+            "For an action request, describe the requested task and the next action without "
+            "claiming completion. Do not write a greeting, answer the user, include dialogue, "
+            "or reveal private chain-of-thought. Return JSON only.\n\n"
+            f"USER MESSAGE:\n{message}\n\n"
+            f"CONTEXT:\n{str(context)[:3000]}"
         )
         self._status("MODEL_THOUGHT_START")
         try:
@@ -1233,15 +1231,15 @@ class NovaCore:
             else:
                 raw = str(generated or "").strip()
                 if raw.startswith("```"):
-                    raw = re.sub(r"^\\`\\`\\`(?:json)?\\s*|\\s*\\`\\`\\`$", "", raw, flags=re.IGNORECASE)
+                    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE)
                 payload = json.loads(raw)
             summary = payload.get("summary", "") if isinstance(payload, dict) else ""
             if not isinstance(summary, str):
                 summary = ""
             summary = summary.strip()[:700]
-            # Reject conversational answer-shaped output rather than leaking it
-            # into the Thinking panel if a backend ignores JSON mode.
-            if not summary or "\\n" in summary or len(summary.split()) > 55:
+            # Reject answer-shaped or malformed output instead of leaking it
+            # into the Thinking panel when a backend ignores JSON mode.
+            if not summary or "\n" in summary or len(summary.split()) > 55:
                 summary = ""
             if summary:
                 self._status("MODEL_THOUGHT_DELTA:" + summary)
