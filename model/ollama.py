@@ -124,6 +124,78 @@ class OllamaBrain:
             content = str(content)
         return {"content": content, "tool_calls": list(calls or []), "finish_reason": None}
 
+    def generate_tool_turn_stream(self, messages, tools, system_prompt=None, options=None, think=None, on_token=None):
+        """Stream native tool-call turns while preserving the normal response shape."""
+        if not self.model:
+            self.model = self._discover_model()
+        if not self.model:
+            raise RuntimeError("No local Ollama model is available.")
+        base_options = {"temperature": 0.1}
+        if isinstance(options, dict):
+            base_options.update(options)
+
+        wire_messages = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            wire_item = dict(item)
+            calls = wire_item.get("tool_calls")
+            if wire_item.get("role") == "assistant" and isinstance(calls, list):
+                converted = []
+                for call in calls:
+                    function = call.get("function", {}) if isinstance(call, dict) else {}
+                    arguments = function.get("arguments", {}) if isinstance(function, dict) else {}
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError:
+                            arguments = {}
+                    converted.append({"function": {
+                        "name": function.get("name", "") if isinstance(function, dict) else "",
+                        "arguments": arguments if isinstance(arguments, dict) else {},
+                    }})
+                wire_item["tool_calls"] = converted
+            if wire_item.get("role") == "tool":
+                tool_name = wire_item.get("name") or wire_item.get("tool_name")
+                wire_item.pop("tool_call_id", None)
+                wire_item.pop("name", None)
+                if tool_name:
+                    wire_item["tool_name"] = tool_name
+            wire_messages.append(wire_item)
+
+        kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": str(system_prompt or SYSTEM_PROMPT)},
+                *wire_messages,
+            ],
+            "tools": list(tools or []),
+            "options": base_options,
+            "stream": True,
+        }
+        if think is not None:
+            kwargs["think"] = think
+
+        content_parts = []
+        calls = []
+        for part in ollama.chat(**kwargs):
+            if isinstance(part, dict):
+                message = part.get("message") or {}
+                token = message.get("content", "") if isinstance(message, dict) else ""
+                chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+            else:
+                message = getattr(part, "message", None)
+                token = message.get("content", "") if isinstance(message, dict) else getattr(message, "content", "")
+                chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else getattr(message, "tool_calls", [])
+            if token:
+                token = token if isinstance(token, str) else str(token)
+                content_parts.append(token)
+                if callable(on_token):
+                    on_token(token)
+            if chunk_calls:
+                calls = list(chunk_calls)
+        return {"content": "".join(content_parts), "tool_calls": calls, "finish_reason": None}
+
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None, think=None):
         system = system_prompt or SYSTEM_PROMPT
         if not self.model:

@@ -229,6 +229,119 @@ class OpenAICompatibleBrain:
             "finish_reason": choice.get("finish_reason"),
         }
 
+    def generate_tool_turn_stream(self, messages, tools, system_prompt=None, options=None, on_token=None):
+        """Stream an OpenAI-compatible native tool-call turn from SSE deltas."""
+        if not self.is_configured():
+            raise RemoteBrainError(
+                "Remote provider is not fully configured. " + self.configuration_help()
+            )
+        wire_messages = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            wire_item = dict(item)
+            calls = wire_item.get("tool_calls")
+            if wire_item.get("role") == "assistant" and isinstance(calls, list):
+                for call in calls:
+                    function = call.get("function") if isinstance(call, dict) else None
+                    if isinstance(function, dict) and isinstance(function.get("arguments"), dict):
+                        function["arguments"] = json.dumps(function["arguments"], ensure_ascii=False)
+            wire_messages.append(wire_item)
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": str(system_prompt or _DEFAULT_SYSTEM_PROMPT)},
+                *wire_messages,
+            ],
+            "tools": list(tools or []),
+            "tool_choice": "auto",
+            "temperature": 0.1,
+            "stream": True,
+        }
+        if isinstance(options, dict):
+            for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
+                if key in options:
+                    payload[key] = options[key]
+
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "text/event-stream",
+                "User-Agent": "NovaAgent/2.1",
+            },
+        )
+        text_parts = []
+        tool_parts = {}
+        try:
+            context = ssl.create_default_context()
+            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = event.get("choices") if isinstance(event, dict) else None
+                    if not isinstance(choices, list) or not choices:
+                        continue
+                    delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
+                    if not isinstance(delta, dict):
+                        continue
+                    token = delta.get("content", "")
+                    if token:
+                        token = token if isinstance(token, str) else str(token)
+                        text_parts.append(token)
+                        if callable(on_token):
+                            on_token(token)
+                    for call in delta.get("tool_calls", []) or []:
+                        if not isinstance(call, dict):
+                            continue
+                        index = call.get("index", 0)
+                        current = tool_parts.setdefault(index, {
+                            "id": "", "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        })
+                        if call.get("id"):
+                            current["id"] = call["id"]
+                        function = call.get("function", {})
+                        if isinstance(function, dict):
+                            current["function"]["name"] += str(function.get("name") or "")
+                            current["function"]["arguments"] += str(function.get("arguments") or "")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:500]
+            except Exception:
+                pass
+            raise RemoteBrainError(
+                f"Remote provider returned HTTP {exc.code}: {_scrub(detail, self.api_key)}",
+                transient=exc.code in (408, 409, 429, 500, 502, 503, 504),
+            ) from exc
+        except urllib.error.URLError as exc:
+            self.last_error = _scrub(str(exc.reason), self.api_key)
+            raise RemoteBrainError(f"Remote provider did not respond: {self.last_error}", transient=True) from exc
+
+        calls = []
+        for index in sorted(tool_parts):
+            call = tool_parts[index]
+            try:
+                arguments = json.loads(call["function"]["arguments"] or "{}")
+            except json.JSONDecodeError:
+                arguments = call["function"]["arguments"]
+            call["function"]["arguments"] = arguments
+            calls.append(call)
+        return {"content": "".join(text_parts), "tool_calls": calls, "finish_reason": None}
+
     # ------------------------------------------------------------------ status
     @property
     def provider_label(self):

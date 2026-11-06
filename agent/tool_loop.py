@@ -59,6 +59,7 @@ class ToolCallingLoop:
         validate_input=None,
         prepare_context=None,
         on_result=None,
+        on_answer_delta=None,
         max_rounds=12,
     ):
         self.brain = brain
@@ -69,6 +70,7 @@ class ToolCallingLoop:
         self.validate_input = validate_input
         self.prepare_context = prepare_context
         self.on_result = on_result
+        self.on_answer_delta = on_answer_delta
         self.max_rounds = max(1, int(max_rounds or 12))
 
     def _status(self, message):
@@ -77,6 +79,21 @@ class ToolCallingLoop:
                 self.status(str(message))
             except Exception:
                 pass
+
+    def _generate_turn(self, messages, definitions, system_prompt):
+        stream_method = getattr(self.brain, "generate_tool_turn_stream", None)
+        if callable(stream_method):
+            return stream_method(
+                messages=messages,
+                tools=definitions,
+                system_prompt=system_prompt,
+                on_token=self.on_answer_delta,
+            )
+        return self.brain.generate_tool_turn(
+            messages=messages,
+            tools=definitions,
+            system_prompt=system_prompt,
+        )
 
     def _definitions(self):
         definitions = []
@@ -192,11 +209,8 @@ class ToolCallingLoop:
 
         for round_index in range(self.max_rounds):
             self._status(f"Choosing next action ({round_index + 1}/{self.max_rounds})...")
-            response = self.brain.generate_tool_turn(
-                messages=messages,
-                tools=definitions,
-                system_prompt=system_prompt,
-            )
+            self._status("THINKING_UPDATE:Reviewing the request and available tools.")
+            response = self._generate_turn(messages, definitions, system_prompt)
             if not isinstance(response, dict):
                 raise ToolLoopError("The model provider returned an invalid tool-call response.")
 
@@ -209,9 +223,12 @@ class ToolCallingLoop:
             if not raw_calls:
                 answer = content.strip()
                 if answer:
+                    self._status("THINKING_UPDATE:Preparing the final response.")
                     return answer
                 raise ToolLoopError("The model returned neither a final answer nor a tool call.")
 
+            if content:
+                self._status("MODEL_ANSWER_RESET")
             normalized_calls = []
             parsed_calls = []
             for call_index, raw in enumerate(raw_calls[:self.MAX_CALLS_PER_TURN]):
@@ -226,6 +243,7 @@ class ToolCallingLoop:
             })
 
             for normalized, name, arguments, parse_error in parsed_calls:
+                self._status(f"THINKING_UPDATE:Selected {name}; validating its arguments and permissions.")
                 if parse_error:
                     result = {"ok": False, "error": parse_error}
                 else:
@@ -246,6 +264,7 @@ class ToolCallingLoop:
                     "name": name,
                     "content": json.dumps(result, ensure_ascii=False, default=str),
                 })
+                self._status(f"THINKING_UPDATE:Received the {name} result; checking whether more work is needed.")
 
         self._status("Tool-call limit reached; asking the model for a concise status.")
         messages.append({
@@ -257,11 +276,7 @@ class ToolCallingLoop:
                 "unverified work succeeded."
             ),
         })
-        final = self.brain.generate_tool_turn(
-            messages=messages,
-            tools=definitions,
-            system_prompt=system_prompt,
-        )
+        final = self._generate_turn(messages, definitions, system_prompt)
         if isinstance(final, dict) and not final.get("tool_calls"):
             text = final.get("content")
             if isinstance(text, str) and text.strip():

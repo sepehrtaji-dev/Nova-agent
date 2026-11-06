@@ -351,10 +351,12 @@ class NovaCore:
                         piece, buffer = buffer[:safe_length], buffer[safe_length:]
                         if piece:
                             answer_parts.append(piece)
+                            self._status("MODEL_ANSWER_DELTA:" + piece)
                         return
                     piece = buffer[:position]
                     if piece:
                         answer_parts.append(piece)
+                        self._status("MODEL_ANSWER_DELTA:" + piece)
                     buffer = buffer[position + len(answer_close):]
                     state = "done"
                     return
@@ -1278,6 +1280,7 @@ class NovaCore:
                 "conversation": self._conversation_context(max_chars=10000),
             },
             on_result=record_result,
+            on_answer_delta=lambda token: self._status("MODEL_ANSWER_DELTA:" + str(token)),
             max_rounds=getattr(self, "max_steps", 12),
         )
         self._status("Model is choosing the next action...")
