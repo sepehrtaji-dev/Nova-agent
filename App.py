@@ -284,6 +284,45 @@ class AgentWorker(QObject):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
+class StreamingMessageWidget(QFrame):
+    """Plain-text assistant draft updated as model deltas arrive."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("streamingMessage")
+        self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 24)
+        layout.setSpacing(16)
+        avatar = QLabel()
+        avatar.setFixedSize(32, 32)
+        avatar.setPixmap(make_avatar("N", 32))
+        avatar.setAlignment(Qt.AlignTop)
+        avatar.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(avatar, 0, Qt.AlignTop)
+        body = QVBoxLayout()
+        name = QLabel("Nova")
+        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 600; border: none; background: transparent;")
+        body.addWidget(name)
+        self.editor = QPlainTextEdit()
+        self.editor.setReadOnly(True)
+        self.editor.setFrameShape(QFrame.NoFrame)
+        self.editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: none; color: {TEXT}; font-size: 14px; padding: 0; }}")
+        self.editor.setMinimumHeight(28)
+        self.editor.setMaximumHeight(360)
+        body.addWidget(self.editor)
+        layout.addLayout(body, 1)
+
+    def append_delta(self, delta):
+        if not delta:
+            return
+        self.editor.moveCursor(self.editor.textCursor().MoveOperation.End)
+        self.editor.insertPlainText(str(delta))
+        self.editor.ensureCursorVisible()
+
+    def clear(self):
+        self.editor.clear()
+
+
 class ComposerEdit(QPlainTextEdit):
     submitted = Signal()
     MAX_HEIGHT = 200
@@ -721,6 +760,7 @@ class NovaWindow(QMainWindow):
         self.worker = None
         self.busy = False
         self.thinking_panel = None
+        self.streaming_message = None
         self.attachments = []
 
         self.setWindowTitle("Nova")
@@ -1046,6 +1086,23 @@ class NovaWindow(QMainWindow):
         self._scroll_chat_to_bottom()
         return panel
 
+    def _ensure_streaming_message(self):
+        if self.streaming_message is not None:
+            return self.streaming_message
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        self.streaming_message = StreamingMessageWidget()
+        self.chat_container_layout.addWidget(self.streaming_message)
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+        self._scroll_chat_to_bottom()
+        return self.streaming_message
+
+    def _discard_streaming_message(self):
+        if self.streaming_message is not None:
+            self.chat_container_layout.removeWidget(self.streaming_message)
+            self.streaming_message.deleteLater()
+            self.streaming_message = None
+
     def _scroll_chat_to_bottom(self):
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum()))
 
@@ -1151,6 +1208,7 @@ class NovaWindow(QMainWindow):
 
         self._apply_effort(self._effort)
         self.thinking_panel = None
+        self._discard_streaming_message()
         if self._effort != "off":
             self.thinking_panel = self._insert_thinking_panel()
 
@@ -1163,6 +1221,12 @@ class NovaWindow(QMainWindow):
 
     def _on_status(self, message):
         message = str(message)
+        if message.startswith("MODEL_ANSWER_DELTA:"):
+            self._ensure_streaming_message().append_delta(message[len("MODEL_ANSWER_DELTA:"):])
+            return
+        if message == "MODEL_ANSWER_RESET":
+            self._discard_streaming_message()
+            return
         if message.startswith("MODEL_THOUGHT_DELTA:"):
             if self.thinking_panel:
                 self.thinking_panel.append_delta(message[20:])
@@ -1172,12 +1236,15 @@ class NovaWindow(QMainWindow):
                 self.thinking_panel.finish()
             return
         if message.startswith("THINKING_UPDATE:"):
+            if self.thinking_panel:
+                self.thinking_panel.append_delta(message[len("THINKING_UPDATE:"): ] + "\n")
             return
 
         self.status_label.setText(message[:28])
         self.status_label.setToolTip(message)
 
     def _on_finished(self, response):
+        self._discard_streaming_message()
         if self.thinking_panel:
             self.thinking_panel.finish()
             self.thinking_panel = None
@@ -1187,6 +1254,7 @@ class NovaWindow(QMainWindow):
         self._finish_request()
 
     def _on_failed(self, error):
+        self._discard_streaming_message()
         if self.thinking_panel:
             self.thinking_panel.finish()
             self.thinking_panel = None

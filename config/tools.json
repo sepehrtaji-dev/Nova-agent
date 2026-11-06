@@ -97,6 +97,100 @@
       }
     },
     {
+      "name": "edit_file",
+      "description": "Edit an existing text file by replacing an exact string. Read the file first, provide a sufficiently specific old string, and use replace_all only when every occurrence should change. The target must already exist and be within the selected allowed location.",
+      "module": "tools.filesystem",
+      "class": "FileSystemTool",
+      "method": "edit_file",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "path",
+          "old"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Existing file path, relative to the selected workspace unless location is system."
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "desktop",
+              "system"
+            ],
+            "description": "Workspace containing the file; defaults to projects."
+          },
+          "old": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact non-empty text to find in the existing file."
+          },
+          "new": {
+            "type": "string",
+            "description": "Replacement text. Defaults to an empty string."
+          },
+          "replace_all": {
+            "type": "boolean",
+            "description": "Replace every occurrence only when explicitly true; otherwise the old text must occur exactly once."
+          }
+        },
+        "additionalProperties": false
+      },
+      "verifier_method": "_verify_edit_file"
+    },
+    {
+      "name": "find_files",
+      "description": "Find files by filename pattern within a workspace directory. Supports recursive search and optional created/modified age filters. Use this to discover relevant files before reading or editing them.",
+      "module": "tools.filesystem",
+      "class": "FileSystemTool",
+      "method": "find_files",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory to search, relative to the selected location. Defaults to the workspace root."
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "desktop",
+              "system"
+            ],
+            "description": "Workspace to search; defaults to projects."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Filename glob pattern, such as *.py. Defaults to *."
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "Search subdirectories recursively. Defaults to true."
+          },
+          "created_within_hours": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Optional maximum age by creation time in hours."
+          },
+          "modified_within_hours": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Optional maximum age by modification time in hours."
+          }
+        },
+        "additionalProperties": false
+      },
+      "verifier_method": "_verify_find_files"
+    },
+    {
       "name": "list_files",
       "description": "List the entries in a workspace directory. Use this to discover what exists before reading or writing. Omit path, or use '.', to list the workspace root.",
       "module": "tools.filesystem",
