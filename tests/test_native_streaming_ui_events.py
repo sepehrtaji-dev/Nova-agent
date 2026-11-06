@@ -1,6 +1,6 @@
 import unittest
 
-from agent.tool_loop import ToolCallingLoop
+from agent.tool_loop import ToolCallingLoop, ToolLoopError
 
 
 class StreamedNativeBrain:
@@ -42,10 +42,10 @@ class StreamedNativeLoopTests(unittest.TestCase):
             status=events.append,
             on_answer_delta=events.append,
         )
-        # The empty tool list is rejected before the provider is called.
-        with self.assertRaises(Exception):
+        # A registry with no definitions fails explicitly before provider access.
+        with self.assertRaises(ToolLoopError):
             loop.run("hi", system_prompt="Nova")
-        self.assertTrue(any("No enabled tools" in item for item in events))
+        self.assertEqual(brain.streamed, [])
 
     def test_tool_loop_streams_a_final_response(self):
         brain = StreamedNativeBrain([{"chunks": ["Hello", " ", "world."]}])
@@ -72,7 +72,8 @@ class StreamedNativeLoopTests(unittest.TestCase):
             [item for item in events if item.startswith("DELTA:")],
             ["DELTA:Hello", "DELTA: ", "DELTA:world."],
         )
-        self.assertTrue(any(item.startswith("THINKING_UPDATE:") for item in events))
+        self.assertFalse(any("Reviewing the request" in item for item in events))
+        self.assertFalse(any("Preparing the final response" in item for item in events))
 
 
 if __name__ == "__main__":

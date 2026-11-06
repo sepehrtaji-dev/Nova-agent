@@ -44,7 +44,7 @@ class PublicProgressSummaryTests(unittest.TestCase):
             ["MODEL_THOUGHT_DELTA:The user sent a greeting. I should reply briefly."],
         )
         self.assertEqual(core.events[-1], "MODEL_THOUGHT_END")
-        self.assertIn("USER MESSAGE:\\nhi", core.brain.prompt)
+        self.assertIn("USER MESSAGE:\nhi", core.brain.prompt)
         self.assertIn("NOT a response to the user", core.brain.prompt)
 
     def test_answer_like_plain_text_is_never_leaked(self):
