@@ -27,6 +27,15 @@ from agent.identity import (
 )
 
 
+def _parse_max_steps(value, default=12, maximum=100):
+    """Parse a safe, bounded tool-step budget from environment configuration."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(parsed, 1), maximum)
+
+
 class NovaCore:
 
     def __init__(self, status_callback=None):
@@ -50,7 +59,7 @@ class NovaCore:
         self.verifier = Verifier(self.tools)
         self.self_knowledge = SelfKnowledge()
 
-        self.max_steps = int(os.getenv("NOVA_MAX_STEPS", "12"))
+        self.max_steps = _parse_max_steps(os.getenv("NOVA_MAX_STEPS", "12"))
         configured_access = getattr(self.tools, "default_access", {}) or {}
         self.access = {
             str(name): bool(enabled)

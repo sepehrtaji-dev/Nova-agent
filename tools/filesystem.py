@@ -19,6 +19,7 @@ import os
 import ntpath
 import json
 import stat
+import tempfile
 
 
 class FileSystemTool:
@@ -54,6 +55,39 @@ class FileSystemTool:
         self.projects_path = os.path.join(self.base_path, "projects")
         self.desktop_path  = os.path.join(os.path.expanduser("~"), "Desktop")
         os.makedirs(self.projects_path, exist_ok=True)
+
+    def _atomic_write_text(self, full_path, content):
+        """Replace a text file atomically, preserving existing permission bits."""
+        parent = os.path.dirname(full_path) or os.curdir
+        os.makedirs(parent, exist_ok=True)
+
+        existing_mode = None
+        try:
+            existing_mode = stat.S_IMODE(os.stat(full_path).st_mode)
+        except FileNotFoundError:
+            pass
+
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=".nova-write-",
+            suffix=".tmp",
+            dir=parent,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+
+            if existing_mode is not None:
+                os.chmod(temporary_path, existing_mode)
+
+            os.replace(temporary_path, full_path)
+        except Exception:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+            raise
 
     # ── Path resolution ───────────────────────────────────────────────────────
 
@@ -314,7 +348,18 @@ class FileSystemTool:
             import fnmatch
             import datetime as _dt
 
-            iterator = os.walk(full_path) if recursive else [(full_path, [], os.listdir(full_path))]
+            traversal_errors = []
+
+            def record_walk_error(error):
+                location = getattr(error, "filename", None) or full_path
+                detail = getattr(error, "strerror", None) or str(error)
+                traversal_errors.append(f"{location}: {detail}")
+
+            iterator = (
+                os.walk(full_path, onerror=record_walk_error)
+                if recursive
+                else [(full_path, [], os.listdir(full_path))]
+            )
             matches = []
 
             for root, directories, filenames in iterator:
@@ -326,9 +371,8 @@ class FileSystemTool:
                     candidate = os.path.join(root, filename)
                     try:
                         stat_result = os.stat(candidate)
-                    except PermissionError:
-                        continue
-                    except OSError:
+                    except OSError as exc:
+                        record_walk_error(exc)
                         continue
 
                     created_time = getattr(stat_result, "st_birthtime", None)
@@ -352,11 +396,22 @@ class FileSystemTool:
                         f"{candidate} | created={created_label} | modified={modified_label}"
                     )
 
+            status = "PARTIAL" if traversal_errors else "SUCCESS"
+            warning_text = ""
+            if traversal_errors:
+                warning_text = (
+                    "\n\nTraversal warnings (first 20):\n"
+                    + "\n".join(traversal_errors[:20])
+                )
+                if len(traversal_errors) > 20:
+                    warning_text += f"\n... and {len(traversal_errors) - 20} more."
+
             return (
-                "STATUS: SUCCESS\n"
+                f"STATUS: {status}\n"
                 f"Location: {full_path}\n"
                 f"Match count: {len(matches)}\n"
                 + ("\n".join(matches) if matches else "No matching files found.")
+                + warning_text
             )
 
         except (TypeError, ValueError) as exc:
@@ -491,14 +546,7 @@ class FileSystemTool:
 
             full_path = self._resolve_path(path, location)
 
-            # Create parent directories
-            parent = os.path.dirname(full_path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(content)
-
+            self._atomic_write_text(full_path, content)
             size = os.path.getsize(full_path)
 
             return (
@@ -601,9 +649,7 @@ class FileSystemTool:
                 updated  = original.replace(old_str, new_str, 1)
                 replaced = 1
 
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(updated)
-
+            self._atomic_write_text(full_path, updated)
             size = os.path.getsize(full_path)
 
             return (
