@@ -1346,7 +1346,7 @@ class NovaCore:
         try:
             self._generate_public_progress_summary(
                 message,
-                "\\n\\n".join(context_parts),
+                "\n\n".join(context_parts),
                 system_prompt,
             )
         except Exception:
