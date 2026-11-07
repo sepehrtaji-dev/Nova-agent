@@ -200,6 +200,12 @@ class NovaCore:
                 "when relevant, unless they conflict with system, safety, "
                 "permission, or task-specific requirements: " + custom_instructions
             )
+        user_profile = os.getenv("NOVA_USER_PROFILE", "").strip()
+        if user_profile:
+            lines.append("OPTIONAL USER-PROVIDED PROFILE (use only when relevant; do not infer missing details): " + user_profile)
+        custom_instructions = os.getenv("NOVA_MODEL_INSTRUCTIONS", "").strip()
+        if custom_instructions:
+            lines.append("USER CUSTOM MODEL INSTRUCTIONS: Follow these preferences when relevant, unless they conflict with system, safety, permission, or task-specific requirements: " + custom_instructions)
         if extra:
             lines.append(extra)
         return " ".join(lines)
