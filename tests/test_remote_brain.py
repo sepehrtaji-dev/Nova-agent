@@ -391,5 +391,80 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertIn("nothing is sent", text)
 
 
+    def test_ollama_native_tool_turn_returns_native_thinking(self):
+        response = {"message": {
+            "content": "The answer is 42.",
+            "thinking": "I should calculate this carefully.",
+            "tool_calls": [],
+        }}
+        with mock.patch("model.ollama.ollama.show", return_value={
+            "thinking": {"values": [True], "default": True},
+        }), mock.patch("model.ollama.ollama.chat", return_value=response) as chat:
+            brain = OllamaBrain(model="test-model")
+            result = brain.generate_tool_turn(
+                messages=[{"role": "user", "content": "Calculate 6 times 7."}],
+                tools=[],
+            )
+        self.assertEqual(result["thinking"], "I should calculate this carefully.")
+        self.assertEqual(result["content"], "The answer is 42.")
+        self.assertIs(chat.call_args.kwargs["think"], True)
+
+    def test_ollama_native_tool_stream_emits_thinking_and_tool_calls(self):
+        chunks = [
+            {"message": {"thinking": "First, inspect ", "content": ""}},
+            {"message": {"thinking": "the request.", "content": ""}},
+            {"message": {"thinking": "", "content": "", "tool_calls": [{
+                "function": {"name": "read_file", "arguments": {"path": "README.md"}}
+            }]}},
+            {"message": {"thinking": "", "content": "I inspected the README."}},
+        ]
+        thoughts = []
+        with mock.patch("model.ollama.ollama.show", return_value={
+            "thinking": {"values": [True], "default": True},
+        }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat:
+            brain = OllamaBrain(model="test-model")
+            result = brain.generate_tool_turn_stream(
+                messages=[{"role": "user", "content": "Read README"}],
+                tools=[],
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual("".join(thoughts), "First, inspect the request.")
+        self.assertEqual(result["thinking"], "First, inspect the request.")
+        self.assertEqual(result["content"], "I inspected the README.")
+        self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertIs(chat.call_args.kwargs["think"], True)
+
+    def test_effort_wrapper_forwards_native_thought_callback(self):
+        from model.effort import EffortAwareBrain
+
+        class StreamingBrain:
+            def __init__(self):
+                self.received = None
+
+            def generate_tool_turn_stream(self, **kwargs):
+                self.received = kwargs
+                kwargs["on_thought_delta"]("native thought")
+                return {"content": "answer", "thinking": "native thought", "tool_calls": []}
+
+        backend = StreamingBrain()
+        wrapper = EffortAwareBrain(backend, "high")
+        thoughts = []
+        result = wrapper.generate_tool_turn_stream(
+            messages=[], tools=[], on_thought_delta=thoughts.append,
+        )
+        self.assertEqual(thoughts, ["native thought"])
+        self.assertEqual(result["thinking"], "native thought")
+        self.assertIs(backend.received["on_thought_delta"], thoughts.append.__self__ if hasattr(thoughts.append, "__self__") else backend.received["on_thought_delta"])
+
+    def test_ollama_effort_uses_only_model_advertised_thinking_levels(self):
+        with mock.patch("model.ollama.ollama.show", return_value={
+            "thinking": {"values": ["low", "medium"], "default": "medium"},
+        }):
+            brain = OllamaBrain(model="test-model")
+            self.assertEqual(brain.think_value_for_effort("low"), "low")
+            self.assertEqual(brain.think_value_for_effort("high"), "medium")
+            self.assertIs(brain.think_value_for_effort("off"), False)
+
+
 if __name__ == "__main__":
     unittest.main()
