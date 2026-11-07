@@ -41,15 +41,24 @@ class EffortAwareBrain:
                 system_prompt=system_prompt,
                 options=self._remote_options(options),
             )
+        think_resolver = getattr(self.brain, "think_value_for_effort", None)
+        think_value = (
+            think_resolver(self.effort)
+            if callable(think_resolver)
+            else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
+        )
         return method(
             messages=messages,
             tools=tools,
             system_prompt=system_prompt,
             options=options,
-            think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"),
+            think=think_value,
         )
 
-    def generate_tool_turn_stream(self, messages, tools, system_prompt=None, options=None, on_token=None):
+    def generate_tool_turn_stream(
+        self, messages, tools, system_prompt=None, options=None,
+        on_token=None, on_thought_delta=None,
+    ):
         method = getattr(self.brain, "generate_tool_turn_stream", None)
         if callable(method):
             from model.remote import OpenAICompatibleBrain
@@ -61,17 +70,26 @@ class EffortAwareBrain:
                     options=self._remote_options(options),
                     on_token=on_token,
                 )
+            think_resolver = getattr(self.brain, "think_value_for_effort", None)
+            think_value = (
+                think_resolver(self.effort)
+                if callable(think_resolver)
+                else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
+            )
             return method(
                 messages=messages,
                 tools=tools,
                 system_prompt=system_prompt,
                 options=options,
-                think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"),
+                think=think_value,
                 on_token=on_token,
+                on_thought_delta=on_thought_delta,
             )
         result = self.generate_tool_turn(messages, tools, system_prompt, options)
         if callable(on_token) and isinstance(result, dict) and result.get("content"):
             on_token(result["content"])
+        if callable(on_thought_delta) and isinstance(result, dict) and result.get("thinking"):
+            on_thought_delta(result["thinking"])
         return result
 
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
