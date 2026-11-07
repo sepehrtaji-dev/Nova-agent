@@ -1236,8 +1236,12 @@ class NovaWindow(QMainWindow):
                 self.thinking_panel.finish()
             return
         if message.startswith("THINKING_UPDATE:"):
-            if self.thinking_panel:
-                self.thinking_panel.append_delta(message[len("THINKING_UPDATE:"): ] + "\n")
+            # Execution/status events are not model reasoning. Keep them in the
+            # status line; the Thinking panel is reserved for Ollama's native
+            # message.thinking stream.
+            detail = message[len("THINKING_UPDATE:"):].strip()
+            self.status_label.setText(detail[:28] or "Working")
+            self.status_label.setToolTip(detail)
             return
 
         self.status_label.setText(message[:28])
