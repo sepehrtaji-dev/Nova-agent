@@ -148,7 +148,7 @@ def apply_to_environment(settings: dict) -> dict:
         value = str(settings.get(key, "") or "").strip()
         if value:
             profile_lines.append(f"{label}: {value}")
-    os.environ["NOVA_USER_PROFILE"] = "\\n".join(profile_lines)
+    os.environ["NOVA_USER_PROFILE"] = "\n".join(profile_lines)
     return applied
 
 
