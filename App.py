@@ -781,7 +781,7 @@ class ModelSettingsDialog(QDialog):
         heading.setStyleSheet("font-size: 23px; font-weight: 750; border: none; background: transparent;")
         layout.addWidget(heading)
 
-        note = QLabel("Local keeps everything on this computer. Remote sends your messages, file contents, and tool results to the provider you configure.")
+        note = QLabel("Local keeps everything on this computer. Remote sends your messages, file contents, tool results, and any profile or custom instructions you enable to the provider you configure.")
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
         layout.addWidget(note)
@@ -844,6 +844,7 @@ class ModelSettingsDialog(QDialog):
                 if str(profile.get("id", "")) == self._active_remote_id:
                     self.remote_list.setCurrentRow(self.remote_list.count() - 1)
         layout.addWidget(self.remote_list)
+        self.remote_list.itemClicked.connect(lambda _item: self.remote_radio.setChecked(True))
         remote_actions = QHBoxLayout()
         add_remote = QPushButton("+ Add New Model")
         remove_remote = QPushButton("Remove Selected")
