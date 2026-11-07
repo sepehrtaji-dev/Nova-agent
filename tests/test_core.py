@@ -959,7 +959,6 @@ class CoreTests(unittest.TestCase):
         }
         core._direct_self_diagnostics_answer = lambda message: None
         core._direct_evidence_answer = lambda message: None
-        core._direct_memory_answer = lambda message: None
         core._identity_system_prompt = lambda extra="": "Nova test identity"
         core._long_memory_context = lambda message: "NO_PRIOR_MEMORY"
         core._conversation_context = lambda max_chars=12000: "EMPTY_CONVERSATION"
