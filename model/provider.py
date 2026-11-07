@@ -17,6 +17,7 @@ import os
 
 from model.ollama import OllamaBrain
 from model.remote import OpenAICompatibleBrain, RemoteBrainError
+from model.anthropic import AnthropicBrain
 
 VALID_PROVIDERS = ("local", "remote", "auto")
 
@@ -50,7 +51,9 @@ def build_brain(model=None):
     provider = requested_provider()
 
     if provider == "remote" or (provider == "auto" and remote_is_configured()):
-        brain = OpenAICompatibleBrain(model=model)
+        api_provider = os.getenv('NOVA_API_PROVIDER', 'openai').strip().lower()
+        brain_class = AnthropicBrain if api_provider == 'anthropic' else OpenAICompatibleBrain
+        brain = brain_class(model=model)
         if not brain.is_configured():
             raise RuntimeError(
                 "NOVA_PROVIDER is set to 'remote' but the remote provider is not "
@@ -63,7 +66,7 @@ def build_brain(model=None):
 
 def describe_brain(brain):
     """One-line, honest description of the active backend for the user."""
-    if isinstance(brain, OpenAICompatibleBrain):
+    if isinstance(brain, (OpenAICompatibleBrain, AnthropicBrain)):
         return brain.describe()
     model = getattr(brain, "model", "") or "unknown"
     return (
@@ -73,4 +76,4 @@ def describe_brain(brain):
 
 
 def backend_kind(brain):
-    return "remote" if isinstance(brain, OpenAICompatibleBrain) else "local"
+    return "remote" if isinstance(brain, (OpenAICompatibleBrain, AnthropicBrain)) else "local"
