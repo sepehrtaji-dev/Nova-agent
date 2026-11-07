@@ -136,6 +136,8 @@ def apply_to_environment(settings: dict) -> dict:
     local_model = str(settings.get("local_model", "")).strip()
     if provider == "local" and local_model:
         applied["NOVA_MODEL"] = local_model
+    for name in ("NOVA_API_KEY", "NOVA_API_MODEL", "NOVA_API_BASE_URL", "NOVA_API_PROVIDER"):
+        os.environ.pop(name, None)
     for name, value in applied.items():
         os.environ[name] = value
     if provider == "local":
