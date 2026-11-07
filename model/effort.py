@@ -34,7 +34,8 @@ class EffortAwareBrain:
         if not callable(method):
             raise NotImplementedError("The configured model backend does not support native tool calls.")
         from model.remote import OpenAICompatibleBrain
-        if isinstance(self.brain, OpenAICompatibleBrain):
+        from model.anthropic import AnthropicBrain
+        if isinstance(self.brain, (OpenAICompatibleBrain, AnthropicBrain)):
             return method(
                 messages=messages,
                 tools=tools,
@@ -62,7 +63,8 @@ class EffortAwareBrain:
         method = getattr(self.brain, "generate_tool_turn_stream", None)
         if callable(method):
             from model.remote import OpenAICompatibleBrain
-            if isinstance(self.brain, OpenAICompatibleBrain):
+            from model.anthropic import AnthropicBrain
+            if isinstance(self.brain, (OpenAICompatibleBrain, AnthropicBrain)):
                 return method(
                     messages=messages,
                     tools=tools,
