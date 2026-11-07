@@ -114,7 +114,7 @@ class AnthropicBrain:
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
         system = str(system_prompt or _DEFAULT_SYSTEM_PROMPT)
         if json_mode:
-            system += "\\nReturn only valid JSON."
+            system += "\nReturn only valid JSON."
         payload = {"model": self.model, "max_tokens": 4096, "system": system,
                    "messages": [{"role": "user", "content": str(prompt)}]}
         if isinstance(options, dict):
