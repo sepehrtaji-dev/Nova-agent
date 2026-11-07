@@ -957,12 +957,13 @@ class ModelSettingsDialog(QDialog):
         active_id = self._active_remote_id
         if 0 <= selected < len(self._remote_profiles):
             active_id = str(self._remote_profiles[selected].get("id", ""))
+        active_profile = self._remote_profiles[selected] if 0 <= selected < len(self._remote_profiles) else {}
         return {
             "provider": "remote" if self.remote_radio.isChecked() else "local",
             "local_model": self.local_model.text().strip(),
-            "api_base_url": self.api_base.text().strip(),
-            "api_model": self.api_model.text().strip(),
-            "api_key": typed_key or self._existing_key,
+            "api_base_url": str(active_profile.get("base_url") or self.api_base.text().strip()),
+            "api_model": str(active_profile.get("model") or self.api_model.text().strip()),
+            "api_key": str(active_profile.get("api_key") or typed_key or self._existing_key),
             "assistant_font_size": str(self.font_slider.value()),
             "remote_models": json.dumps(self._remote_profiles, ensure_ascii=False),
             "active_remote_model_id": active_id,
