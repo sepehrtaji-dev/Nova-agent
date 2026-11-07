@@ -9,5 +9,7 @@ __pycache__/
 .venv/
 venv/
 .env
+build/
+dist/
 memory/*.json
 memory/database/*.json
