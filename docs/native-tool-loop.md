@@ -38,6 +38,30 @@ after a provider has generated a tool call, so blindly replaying an ambiguous
 request can duplicate a side effect. The caller receives a provider error and
 can report the failure instead.
 
+## Native Ollama thinking channel
+
+For Ollama models that expose native thinking, Nova requests the channel through
+the `think` argument on the same `ollama.chat()` call that performs each
+agentic tool-loop turn. It does not issue a separate "think" request and then
+re-run the turn for tools.
+
+- Nova probes the selected model with `ollama.show()` and respects the
+  model-advertised `thinking.values` and default.
+- The Ollama adapter keeps `message.thinking` separate from
+  `message.content`, and streams them through separate callbacks.
+- `EffortAwareBrain` forwards the native thought callback and resolves the
+  selected effort to a value supported by that model. The Off setting sends
+  `think=False`.
+- The desktop Thinking panel displays only native model thinking deltas.
+  Planner, permission, tool-execution, and verification status events remain
+  status/activity updates and are not presented as model reasoning.
+- Models that do not expose a native thinking channel may return no thought
+  deltas. Nova must not manufacture placeholder reasoning to fill the panel.
+
+The native field is optional and model-dependent. An empty thinking field is
+not evidence that a model did not perform internal computation; it means Nova
+was not given a native trace to display.
+
 ## Execution and safety invariants
 
 - Only tools in the current allowed-tool set are exposed to the model.
