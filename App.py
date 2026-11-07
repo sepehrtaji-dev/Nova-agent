@@ -674,6 +674,47 @@ class EffortSelector(QWidget):
             self._set_aura(index)
 
 
+class RemoteModelDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Add remote model')
+        self.setModal(True)
+        self.resize(480, 470)
+        self.setStyleSheet(f'QDialog {{ background: {BG_MAIN}; color: {TEXT}; }} QLabel {{ color: {TEXT}; }} QLineEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 9px; }} QPushButton {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 8px 12px; }}')
+        layout = QVBoxLayout(self)
+        self.name = QLineEdit(); self.name.setPlaceholderText('Display name, e.g. Claude Sonnet')
+        self.openai = QRadioButton('OpenAI-compatible API')
+        self.anthropic = QRadioButton('Anthropic Claude API')
+        self.openai.setChecked(True)
+        self.base = QLineEdit('https://api.openai.com/v1')
+        self.model = QLineEdit(); self.model.setPlaceholderText('Model name / model ID')
+        self.key = QLineEdit(); self.key.setEchoMode(QLineEdit.Password); self.key.setPlaceholderText('API key')
+        self.reveal = QToolButton(); self.reveal.setText('Show'); self.reveal.setCheckable(True)
+        self.reveal.toggled.connect(lambda value: (self.key.setEchoMode(QLineEdit.Normal if value else QLineEdit.Password), self.reveal.setText('Hide' if value else 'Show')))
+        key_row = QHBoxLayout(); key_row.addWidget(self.key, 1); key_row.addWidget(self.reveal)
+        for label, widget in [('Model provider', self.openai), ('', self.anthropic), ('Profile name', self.name), ('Base URL', self.base), ('Model name', self.model)]:
+            if label: layout.addWidget(QLabel(label))
+            layout.addWidget(widget)
+        layout.addWidget(QLabel('API key')); layout.addLayout(key_row)
+        self.anthropic.toggled.connect(self._provider_changed)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._save); buttons.rejected.connect(self.reject)
+        layout.addStretch(1); layout.addWidget(buttons)
+    def _provider_changed(self, checked):
+        if checked:
+            self.base.setText('https://api.anthropic.com')
+            self.model.setPlaceholderText('e.g. claude-sonnet-4-20250514')
+        else:
+            self.base.setText('https://api.openai.com/v1')
+            self.model.setPlaceholderText('e.g. gpt-4o-mini')
+    def _save(self):
+        if not self.name.text().strip() or not self.model.text().strip() or not self.key.text().strip():
+            QMessageBox.warning(self, 'Missing information', 'Name, model, and API key are required.')
+            return
+        self.accept()
+    def values(self):
+        return {'name': self.name.text().strip(), 'provider': 'anthropic' if self.anthropic.isChecked() else 'openai', 'base_url': self.base.text().strip(), 'model': self.model.text().strip(), 'api_key': self.key.text().strip()}
+
 class ModelSettingsDialog(QDialog):
     def __init__(self, settings, installed_models, parent=None):
         super().__init__(parent)
