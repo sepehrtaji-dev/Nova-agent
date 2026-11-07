@@ -454,7 +454,7 @@ class ProviderSelectionTests(unittest.TestCase):
         )
         self.assertEqual(thoughts, ["native thought"])
         self.assertEqual(result["thinking"], "native thought")
-        self.assertIs(backend.received["on_thought_delta"], thoughts.append.__self__ if hasattr(thoughts.append, "__self__") else backend.received["on_thought_delta"])
+        self.assertTrue(callable(backend.received["on_thought_delta"]))
 
     def test_ollama_effort_uses_only_model_advertised_thinking_levels(self):
         with mock.patch("model.ollama.ollama.show", return_value={
