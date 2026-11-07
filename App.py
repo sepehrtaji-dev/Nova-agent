@@ -918,18 +918,11 @@ class NovaWindow(QMainWindow):
         self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT}; font-size: 12px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; }}")
         self.model_selector.clicked.connect(self._show_model_menu)
 
-        self.effort_selector = EffortSelector()
-        self.effort_selector.set_value(self._effort)
-        self.effort_selector.changed.connect(self._on_effort_changed)
-        self.effort_selector.setToolTip("Reasoning effort")
-        self.effort_selector.setFixedHeight(36)
-        self.effort_selector.setStyleSheet(f"QWidget {{ background: transparent; }}")
-
         self.effort_button = QPushButton(f"Effort  ·  {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
         self.effort_button.setCursor(Qt.PointingHandCursor)
         self.effort_button.setMinimumHeight(36)
         self.effort_button.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT_MUTED}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; color: {TEXT}; }}")
-        self.effort_button.clicked.connect(self._show_model_menu)
+        self.effort_button.clicked.connect(lambda: self._show_model_menu(self.effort_button))
 
         # Chat Area
         self.chat_scroll = QScrollArea()
@@ -1194,7 +1187,7 @@ class NovaWindow(QMainWindow):
     def _scroll_chat_to_bottom(self):
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum()))
 
-    def _show_model_menu(self):
+    def _show_model_menu(self, anchor=None):
         if self.busy:
             return
         menu = QMenu(self)
@@ -1245,7 +1238,8 @@ class NovaWindow(QMainWindow):
         menu.addAction(effort_action)
         menu.addSeparator()
         menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
-        menu.exec(self.model_selector.mapToGlobal(QPoint(0, self.model_selector.height())))
+        anchor = anchor or self.model_selector
+        menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
 
     def _select_model(self, name):
         if self.busy or not name:
