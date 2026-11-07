@@ -72,13 +72,16 @@ class OllamaBrain:
 
     def supports_thinking(self):
         """Return true only when Ollama advertises a native thinking channel."""
-        if self._thinking_supported_cache is not None:
-            return self._thinking_supported_cache
         if not self.model:
             self.model = self._discover_model()
         if not self.model:
             self._thinking_supported_cache = False
             return False
+        if (
+            self._thinking_info_model == self.model
+            and self._thinking_supported_cache is not None
+        ):
+            return self._thinking_supported_cache
         info = self._thinking_info()
         metadata = self._field(info, "thinking")
         values = self._field(metadata, "values", None)
