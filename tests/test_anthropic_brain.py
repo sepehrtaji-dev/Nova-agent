@@ -8,7 +8,6 @@ from unittest import mock
 
 from model.anthropic import AnthropicBrain
 from model.provider import backend_kind, build_brain
-from model.anthropic import AnthropicBrain
 
 
 CAPTURED = []
