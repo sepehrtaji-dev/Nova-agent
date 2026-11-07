@@ -915,6 +915,19 @@ class NovaWindow(QMainWindow):
         self.input.submitted.connect(self._send)
         box_layout.addWidget(self.input)
 
+        # Pending attachments must be visible before the user sends the message.
+        # Keep this strip inside the composer so it stays next to the text box.
+        self.attachment_preview = QFrame()
+        self.attachment_preview.setObjectName("attachmentPreview")
+        self.attachment_preview.setStyleSheet(
+            f"QFrame#attachmentPreview {{ background: transparent; border: none; }}"
+        )
+        self.attachment_preview_layout = QVBoxLayout(self.attachment_preview)
+        self.attachment_preview_layout.setContentsMargins(0, 2, 0, 2)
+        self.attachment_preview_layout.setSpacing(4)
+        self.attachment_preview.hide()
+        box_layout.addWidget(self.attachment_preview)
+
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
 
@@ -1164,10 +1177,73 @@ class NovaWindow(QMainWindow):
         if self.busy:
             return
         paths, _ = QFileDialog.getOpenFileNames(self, "Attach files", "", "All files (*)")
+        changed = False
         for path in paths:
             path = os.path.abspath(path)
             if path not in self.attachments:
                 self.attachments.append(path)
+                changed = True
+        if changed:
+            self._refresh_attachment_preview()
+
+    def _refresh_attachment_preview(self):
+        """Render removable file chips for files waiting to be sent."""
+        if not hasattr(self, "attachment_preview_layout"):
+            return
+        while self.attachment_preview_layout.count():
+            item = self.attachment_preview_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        self.attachment_preview.setVisible(bool(self.attachments))
+        for index, path in enumerate(self.attachments):
+            row = QFrame()
+            row.setObjectName("attachmentChip")
+            row.setStyleSheet(
+                f"QFrame#attachmentChip {{ background: {BG_INPUT}; "
+                f"border: 1px solid {BORDER}; border-radius: 7px; }}"
+            )
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(9, 5, 6, 5)
+            layout.setSpacing(8)
+
+            file_icon = QLabel("📎")
+            file_icon.setStyleSheet("border: none; background: transparent;")
+            layout.addWidget(file_icon)
+
+            filename = os.path.basename(path) or path
+            try:
+                size_text = format_bytes(os.path.getsize(path))
+            except OSError:
+                size_text = "Unavailable"
+            details = QLabel(f"{filename}  ·  {size_text}")
+            details.setMinimumWidth(0)
+            details.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            details.setStyleSheet(
+                f"color: {TEXT}; border: none; background: transparent; font-size: 11px;"
+            )
+            details.setToolTip(path)
+            layout.addWidget(details, 1)
+
+            remove = QToolButton()
+            remove.setText("×")
+            remove.setToolTip(f"Remove {filename}")
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.setFixedSize(22, 22)
+            remove.setStyleSheet(
+                f"QToolButton {{ color: {TEXT_MUTED}; background: transparent; "
+                f"border: none; font-size: 17px; border-radius: 4px; }}"
+                f"QToolButton:hover {{ color: {TEXT}; background: {BORDER}; }}"
+            )
+            remove.clicked.connect(lambda checked=False, item_path=path: self._remove_attachment(item_path))
+            layout.addWidget(remove)
+            self.attachment_preview_layout.addWidget(row)
+
+    def _remove_attachment(self, path):
+        if path in self.attachments:
+            self.attachments.remove(path)
+            self._refresh_attachment_preview()
 
     def _attachment_context(self, paths):
         parts = []
@@ -1195,6 +1271,7 @@ class NovaWindow(QMainWindow):
 
         self.input.clear()
         self.attachments.clear()
+        self._refresh_attachment_preview()
         self._add_message("user", user_text, attachments=attachments)
         self.chat_store.add_message(self.current_chat_id, "user", user_text, attachments=attachments, context=message)
         self._refresh_chat_history()
