@@ -464,11 +464,12 @@ class ProviderSelectionTests(unittest.TestCase):
     def test_ollama_effort_uses_only_model_advertised_thinking_levels(self):
         with mock.patch("model.ollama.ollama.show", return_value={
             "thinking": {"values": ["low", "medium"], "default": "medium"},
-        }):
+        }) as show:
             brain = OllamaBrain(model="test-model")
             self.assertEqual(brain.think_value_for_effort("low"), "low")
             self.assertEqual(brain.think_value_for_effort("high"), "medium")
             self.assertIs(brain.think_value_for_effort("off"), False)
+            show.assert_called_once_with("test-model")
 
 
 if __name__ == "__main__":
