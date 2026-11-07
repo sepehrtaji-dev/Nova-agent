@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     "api_model": "",
     "api_key": "",
     "effort": "medium",
+    "assistant_font_size": "16",
 }
 
 
