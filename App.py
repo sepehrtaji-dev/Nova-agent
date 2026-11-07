@@ -18,7 +18,7 @@ from config.model_settings import (
 )
 
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QAction, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QAction, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -149,6 +149,29 @@ def make_avatar(letter="N", size=32):
                 logo,
             )
         else:
+            painter.setPen(QColor(TEXT))
+            painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    elif letter == "Y":
+        try:
+            profile = load_settings()
+            avatar_path = str(profile.get("profile_avatar", "") or "")
+            if not avatar_path:
+                avatar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "default-user-avatar.svg")
+            source = QPixmap(avatar_path)
+            if not source.isNull():
+                painter.save()
+                clip = QPainterPath()
+                clip.addEllipse(0, 0, size, size)
+                painter.setClipPath(clip)
+                scaled = source.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                painter.drawPixmap(0, 0, scaled)
+                painter.restore()
+            else:
+                painter.setPen(QColor(TEXT))
+                painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+                painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+        except Exception:
             painter.setPen(QColor(TEXT))
             painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
             painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
