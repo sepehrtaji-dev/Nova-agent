@@ -102,50 +102,53 @@ def masked_key(key: str) -> str:
 
 
 def apply_to_environment(settings: dict) -> dict:
-    """Copy stored settings into the NOVA_* environment variables.
-
-    Nova's provider layer reads these variables, so applying them here lets the
-    desktop app switch backends without any change to the agent code.
-    Returns the variables that were set.
-    """
+    """Apply the selected local or saved remote profile to Nova's runtime."""
     if not isinstance(settings, dict):
         return {}
-
     provider = str(settings.get("provider", "local")).strip().lower()
     if provider not in {"local", "remote"}:
         provider = "local"
-
     applied = {"NOVA_PROVIDER": provider}
     effort = str(settings.get("effort", "medium")).strip().lower()
     if effort not in {"off", "low", "medium", "high", "max", "novacode"}:
         effort = "medium"
     applied["NOVA_EFFORT"] = effort
-
-    api_model = str(settings.get("api_model", "")).strip()
-    base_url = str(settings.get("api_base_url", "")).strip()
-    api_key = str(settings.get("api_key", "")).strip()
-
+    try:
+        profiles = json.loads(settings.get("remote_models", "[]") or "[]")
+        if not isinstance(profiles, list):
+            profiles = []
+    except (TypeError, json.JSONDecodeError):
+        profiles = []
+    selected_id = str(settings.get("active_remote_model_id", "") or "")
+    profile = next((item for item in profiles if isinstance(item, dict)
+                    and str(item.get("id", "")) == selected_id), None)
     if provider == "remote":
-        if api_model:
-            applied["NOVA_API_MODEL"] = api_model
-        if base_url:
-            applied["NOVA_API_BASE_URL"] = base_url
-        if api_key:
-            applied["NOVA_API_KEY"] = api_key
-
+        api_provider = str((profile or {}).get("provider", "openai")).strip().lower()
+        if api_provider not in {"openai", "anthropic"}:
+            api_provider = "openai"
+        values = {
+            "NOVA_API_PROVIDER": api_provider,
+            "NOVA_API_MODEL": str((profile or {}).get("model") or settings.get("api_model", "")).strip(),
+            "NOVA_API_BASE_URL": str((profile or {}).get("base_url") or settings.get("api_base_url", "")).strip(),
+            "NOVA_API_KEY": str((profile or {}).get("api_key") or settings.get("api_key", "")).strip(),
+        }
+        applied.update({key: value for key, value in values.items() if value})
     local_model = str(settings.get("local_model", "")).strip()
     if provider == "local" and local_model:
         applied["NOVA_MODEL"] = local_model
-
     for name, value in applied.items():
         os.environ[name] = value
-
-    # A stale key from a previous remote session must not linger once the user
-    # switches back to local, or content could leave the machine unexpectedly.
     if provider == "local":
-        for name in ("NOVA_API_KEY", "NOVA_API_MODEL", "NOVA_API_BASE_URL"):
+        for name in ("NOVA_API_KEY", "NOVA_API_MODEL", "NOVA_API_BASE_URL", "NOVA_API_PROVIDER"):
             os.environ.pop(name, None)
-
+    os.environ["NOVA_MODEL_INSTRUCTIONS"] = str(settings.get("model_instructions", "") or "")
+    profile_lines = []
+    for key, label in (("profile_name", "User name"), ("profile_age", "User age"),
+                       ("profile_occupation", "User occupation")):
+        value = str(settings.get(key, "") or "").strip()
+        if value:
+            profile_lines.append(f"{label}: {value}")
+    os.environ["NOVA_USER_PROFILE"] = "\\n".join(profile_lines)
     return applied
 
 
