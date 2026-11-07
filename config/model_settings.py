@@ -25,6 +25,13 @@ DEFAULT_SETTINGS = {
     "api_key": "",
     "effort": "medium",
     "assistant_font_size": "16",
+    "remote_models": "[]",
+    "active_remote_model_id": "",
+    "model_instructions": "",
+    "profile_name": "",
+    "profile_age": "",
+    "profile_occupation": "",
+    "profile_avatar": "",
 }
 
 
