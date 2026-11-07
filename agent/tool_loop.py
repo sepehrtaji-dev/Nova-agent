@@ -237,11 +237,18 @@ class ToolCallingLoop:
                 normalized_calls.append(normalized)
                 parsed_calls.append((normalized, name, arguments, parse_error))
 
-            messages.append({
+            assistant_message = {
                 "role": "assistant",
                 "content": content or None,
                 "tool_calls": normalized_calls,
-            })
+            }
+            # Preserve Ollama's native thinking channel in replayed history.
+            # The model can then continue its reasoning after each tool result
+            # instead of reconstructing the previous turn from scratch.
+            thinking = response.get("thinking")
+            if isinstance(thinking, str) and thinking:
+                assistant_message["thinking"] = thinking
+            messages.append(assistant_message)
 
             for normalized, name, arguments, parse_error in parsed_calls:
                 self._status(f"THINKING_UPDATE:Selected {name}; validating its arguments and permissions.")
