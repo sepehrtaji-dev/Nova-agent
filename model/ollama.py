@@ -78,6 +78,40 @@ class OllamaBrain:
             self._thinking_supported_cache = False
         return self._thinking_supported_cache
 
+    def think_value_for_effort(self, effort="medium"):
+        """Resolve Nova effort to a think value actually supported by this model."""
+        value = str(effort or "medium").strip().lower()
+        if value == "off":
+            return False
+        if not self.model:
+            self.model = self._discover_model()
+        try:
+            info = ollama.show(self.model)
+            metadata = self._field(info, "thinking")
+            values = self._field(metadata, "values", None)
+            if isinstance(values, (list, tuple)):
+                if True in values:
+                    return True
+                named = [item for item in values if isinstance(item, str) and item.strip()]
+                if named:
+                    requested = {
+                        "low": "low", "medium": "medium", "high": "high",
+                        "max": "max", "novacode": "high",
+                    }.get(value, "medium")
+                    if requested in named:
+                        return requested
+                    default = self._field(metadata, "default")
+                    if default in named:
+                        return default
+                    return named[-1]
+                return None
+            capabilities = self._field(info, "capabilities", []) or []
+            if any(str(item).casefold() == "thinking" for item in capabilities):
+                return True
+        except Exception:
+            pass
+        return None
+
     def generate_tool_turn(self, messages, tools, system_prompt=None, options=None, think=None):
         """Run one native tool-calling turn through Ollama's chat API."""
         if not self.model:
@@ -132,30 +166,35 @@ class OllamaBrain:
             "options": base_options,
             "stream": False,
         }
+        if think is None and self.supports_thinking():
+            think = True
         if think is not None:
             kwargs["think"] = think
         response = ollama.chat(**kwargs)
         if isinstance(response, dict):
             message = response.get("message") or {}
             content = message.get("content", "") if isinstance(message, dict) else ""
+            thinking = message.get("thinking", "") if isinstance(message, dict) else ""
             calls = message.get("tool_calls", []) if isinstance(message, dict) else []
         else:
             message = getattr(response, "message", None)
-            content = (
-                message.get("content", "")
-                if isinstance(message, dict)
-                else getattr(message, "content", "")
-            )
-            calls = (
-                message.get("tool_calls", [])
-                if isinstance(message, dict)
-                else getattr(message, "tool_calls", [])
-            )
+            content = self._field(message, "content", "")
+            thinking = self._field(message, "thinking", "")
+            calls = self._field(message, "tool_calls", [])
         if content is None:
             content = ""
         elif not isinstance(content, str):
             content = str(content)
-        return {"content": content, "tool_calls": list(calls or []), "finish_reason": None}
+        if thinking is None:
+            thinking = ""
+        elif not isinstance(thinking, str):
+            thinking = str(thinking)
+        return {
+            "content": content,
+            "thinking": thinking,
+            "tool_calls": list(calls or []),
+            "finish_reason": None,
+        }
 
     def generate_tool_turn_stream(
         self, messages, tools, system_prompt=None, options=None, think=None,
