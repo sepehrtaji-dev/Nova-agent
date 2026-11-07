@@ -340,7 +340,7 @@ class ComposerEdit(QPlainTextEdit):
         lines = max(1, int(round(self.document().size().height())))
         margins = int(self.document().documentMargin() * 2)
         wanted = lines * self.fontMetrics().lineSpacing() + margins + 8
-        self.setFixedHeight(max(44, min(self.MAX_HEIGHT, wanted)))
+        self.setFixedHeight(max(38, min(self.MAX_HEIGHT, wanted)))
         self.setVerticalScrollBarPolicy(
             Qt.ScrollBarAsNeeded if wanted > self.MAX_HEIGHT else Qt.ScrollBarAlwaysOff
         )
@@ -529,13 +529,36 @@ class EffortSlider(QSlider):
             color = QColor(color_hex)
             if index == self.value():
                 pulse = (math.sin(self._phase) + 1.0) / 2.0
-                halo = QColor(color)
-                halo.setAlpha(int(45 + pulse * 55))
                 painter.setPen(Qt.NoPen)
-                painter.setBrush(halo)
-                painter.drawEllipse(QPointF(x, y), 7 + pulse * 3, 7 + pulse * 3)
-                painter.setBrush(color)
-                painter.drawEllipse(QPointF(x, y), 3.2, 3.2)
+                if index == self.maximum():
+                    center = QPointF(x, y)
+                    radius = 17 + pulse * 5
+                    glow = QRadialGradient(center, radius)
+                    glow.setColorAt(0.0, QColor(190, 150, 255, 125))
+                    glow.setColorAt(0.42, QColor(130, 110, 255, 62))
+                    glow.setColorAt(1.0, QColor(130, 110, 255, 0))
+                    painter.setBrush(glow)
+                    painter.drawEllipse(center, radius, radius)
+                    painter.setBrush(Qt.NoBrush)
+                    painter.setPen(QPen(QColor(190, 160, 255, 170 + int(pulse * 70)), 1.4))
+                    painter.drawEllipse(center, 8 + pulse * 2.5, 8 + pulse * 2.5)
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor("#e8d8ff"))
+                    painter.drawEllipse(center, 3.8, 3.8)
+                    for spark in range(4):
+                        angle = self._phase * 1.25 + spark * (math.pi / 2)
+                        orbit = 12 + pulse * 2
+                        sx = x + math.cos(angle) * orbit
+                        sy = y + math.sin(angle) * orbit
+                        painter.setBrush(QColor("#c7a5ff"))
+                        painter.drawEllipse(QPointF(sx, sy), 1.5, 1.5)
+                else:
+                    halo = QColor(color)
+                    halo.setAlpha(int(45 + pulse * 55))
+                    painter.setBrush(halo)
+                    painter.drawEllipse(QPointF(x, y), 7 + pulse * 3, 7 + pulse * 3)
+                    painter.setBrush(color)
+                    painter.drawEllipse(QPointF(x, y), 3.2, 3.2)
             else:
                 color.setAlpha(150)
                 painter.setPen(Qt.NoPen)
@@ -559,8 +582,8 @@ class EffortSelector(QWidget):
         self._slider.setValue(2)
         self._slider.setTickPosition(QSlider.TicksBelow)
         self._slider.setTickInterval(1)
-        self._slider.setFixedWidth(276)
-        self._slider.setFixedHeight(34)
+        self._slider.setFixedWidth(300)
+        self._slider.setFixedHeight(38)
         self._slider.setStyleSheet(f"""
             QSlider {{ border: none; background: transparent; }}
             QSlider::groove:horizontal {{ height: 3px; background: #41454b; border-radius: 2px; }}
@@ -578,7 +601,7 @@ class EffortSelector(QWidget):
         for index, label_text in enumerate(("Off", "Low", "Med", "High", "Max", "Nova")):
             label = QLabel(label_text)
             label.setAlignment(Qt.AlignCenter)
-            label.setFixedWidth(46)
+            label.setFixedWidth(50)
             label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent; border: none;")
             labels.addWidget(label)
         layout.addLayout(labels)
@@ -923,14 +946,14 @@ class NovaWindow(QMainWindow):
         composer_area.setObjectName("composerArea")
         composer_area.setStyleSheet(f"QFrame#composerArea {{ background: {BG_MAIN}; border-top: 1px solid {BORDER}; }}")
         composer_layout = QVBoxLayout(composer_area)
-        composer_layout.setContentsMargins(48, 17, 48, 26)
+        composer_layout.setContentsMargins(34, 10, 34, 14)
 
         self.composer_box = QFrame()
         self.composer_box.setObjectName("composerBox")
         self.composer_box.setStyleSheet(f"QFrame#composerBox {{ background: {BG_PANEL}; border: 1px solid #304052; border-radius: 15px; }}")
         box_layout = QVBoxLayout(self.composer_box)
-        box_layout.setContentsMargins(15, 13, 13, 12)
-        box_layout.setSpacing(9)
+        box_layout.setContentsMargins(12, 8, 10, 8)
+        box_layout.setSpacing(4)
 
         self.input = ComposerEdit()
         self.input.setPlaceholderText("Message Nova…")
@@ -967,17 +990,22 @@ class NovaWindow(QMainWindow):
         add_btn = QPushButton()
         add_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; }} QPushButton:hover {{ background: {BG_INPUT}; border-radius: 6px; }}")
         add_btn.setIcon(make_icon("plus", TEXT_MUTED, 18))
-        add_btn.setFixedSize(34, 34)
+        add_btn.setFixedSize(30, 30)
         add_btn.setToolTip("Attach files")
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
 
         controls.addStretch()
 
+        self.model_selector.setMinimumHeight(32)
+        self.model_selector.setMaximumWidth(330)
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 8px; padding: 0 9px; color: {TEXT_MUTED}; font-size: 11px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; color: {TEXT}; }}")
+        controls.addWidget(self.model_selector)
+
         self.send_button = QPushButton()
         self.send_button.setStyleSheet(f"QPushButton {{ background: {ACCENT}; border: none; border-radius: 10px; }} QPushButton:hover {{ background: #a0bcff; }} QPushButton:pressed {{ background: #6f91e8; }} QPushButton:disabled {{ background: {BORDER}; }}")
         self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 17, 2.5))
-        self.send_button.setFixedSize(36, 36)
+        self.send_button.setFixedSize(32, 32)
         self.send_button.setToolTip("Send message")
         self.send_button.clicked.connect(self._send)
         controls.addWidget(self.send_button)
@@ -985,12 +1013,6 @@ class NovaWindow(QMainWindow):
         box_layout.addLayout(controls)
 
         composer_layout.addWidget(self.composer_box)
-        bottom_controls = QHBoxLayout()
-        bottom_controls.setContentsMargins(2, 8, 2, 0)
-        bottom_controls.setSpacing(9)
-        bottom_controls.addWidget(self.model_selector)
-        bottom_controls.addStretch(1)
-        composer_layout.addLayout(bottom_controls)
         main_layout.addWidget(composer_area)
 
         splitter.addWidget(main_content)
