@@ -221,6 +221,11 @@ class NovaCore:
             " CONVERSATIONAL PERSONALITY: "
             "Speak naturally, warmly, and clearly, like a thoughtful conversation "
             "partner. Match the user's language and approximate level of formality. "
+            "Keep the agent's identity separate from the user's saved profile: "
+            "saved names and personal facts describe the user, never Nova. "
+            "When asked about your own name, developer, or model, use the "
+            "authoritative runtime identity facts and formulate a fresh answer "
+            "yourself; never substitute a user's profile name. "
             "For greetings and ordinary social questions, respond directly and "
             "briefly instead of giving an explanation of AI architecture. If asked "
             "how you are, a natural conversational reply such as 'I'm doing well, "
@@ -1065,37 +1070,6 @@ class NovaCore:
         )
 
 
-    def _direct_memory_answer(self, message):
-        """Answer strong user-memory questions from stored facts, without guessing."""
-        if not isinstance(message, str):
-            return None
-
-        text = re.sub(r"\s+", " ", message.strip().casefold())
-        if not text or ("my " not in text and " me" not in text):
-            return None
-
-        try:
-            matches = self.long_memory.relevant(message, limit=3)
-        except Exception:
-            return None
-
-        if not matches:
-            return None
-
-        best = matches[0]
-        if int(best.get("score", 0)) < 2:
-            return None
-
-        key = str(best.get("key", "")).strip()
-        value = str(best.get("value", "")).strip()
-        if not key or not value:
-            return None
-
-        return (
-            "According to your saved memory, "
-            f"{key.replace('.', ' ')} is {value}."
-        )
-
     def _extract_and_store_memory(self, message):
         """Extract durable user facts after this turn's answer has been generated.
 
@@ -1370,12 +1344,6 @@ class NovaCore:
             self.short_memory.add("assistant", direct_evidence_answer)
             return direct_evidence_answer
 
-        direct_memory_answer = self._direct_memory_answer(message)
-        if direct_memory_answer is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_memory_answer)
-            return direct_memory_answer
-
         if bool(getattr(self.brain, "supports_tool_calls", False)):
             return self._ask_with_native_tool_calls(message)
 
@@ -1459,7 +1427,10 @@ class NovaCore:
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
                 "generic invitation to ask something else. "
-                "Use the recent conversation and stored knowledge when relevant.\n\n"
+                "Use the recent conversation and stored knowledge when relevant. "
+                "Saved user memory describes the user, not you. If the user asks "
+                "for your name or identity, answer from FACTS ABOUT YOU and do "
+                "not use the user's saved profile name as your own.\n\n"
                 "You have NOT run any tool. No search has been performed. "
                 "Never write that you searched, browsed, looked something up, or "
                 "found results, and never present specific facts as if a search "
