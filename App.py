@@ -582,10 +582,13 @@ class EffortSelector(QWidget):
         self._slider.setValue(2)
         self._slider.setTickPosition(QSlider.TicksBelow)
         self._slider.setTickInterval(1)
-        self._slider.setFixedWidth(300)
-        self._slider.setFixedHeight(38)
+        # Reserve breathing room around the animated NovaCode halo. The
+        # handle sits inside this padded track, so its glow/sparks aren't
+        # clipped by QSlider's paint boundary at the final stop.
+        self._slider.setFixedWidth(340)
+        self._slider.setFixedHeight(52)
         self._slider.setStyleSheet(f"""
-            QSlider {{ border: none; background: transparent; }}
+            QSlider {{ border: none; background: transparent; padding: 0 20px; }}
             QSlider::groove:horizontal {{ height: 3px; background: #41454b; border-radius: 2px; }}
             QSlider::sub-page:horizontal {{ background: #777b84; border-radius: 2px; }}
             QSlider::handle:horizontal {{ background: #e8e8eb; border: 2px solid #777b84; width: 12px; height: 12px; margin: -6px 0; border-radius: 7px; }}
@@ -598,7 +601,7 @@ class EffortSelector(QWidget):
         labels = QHBoxLayout()
         # Match the slider's handle-center travel: the handle cannot reach
         # the widget edges, so labels need the same inset to sit under each stop.
-        labels.setContentsMargins(9, 0, 9, 0)
+        labels.setContentsMargins(29, 0, 29, 0)
         labels.setSpacing(0)
         for label_text in ("Off", "Low", "Med", "High", "Max", "Nova"):
             label = QLabel(label_text)
