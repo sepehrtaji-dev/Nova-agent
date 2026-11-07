@@ -49,13 +49,13 @@ from agent.core import NovaCore
 from utils.math_parser import format_response_math
 from storage.chat_store import ChatStore
 
-BG_MAIN = "#0d1117"
-BG_PANEL = "#161b22"
-BG_INPUT = "#21262d"
-BORDER = "#30363d"
-TEXT = "#c9d1d9"
-TEXT_MUTED = "#8b949e"
-ACCENT = "#58a6ff"
+BG_MAIN = "#0b0f14"
+BG_PANEL = "#111821"
+BG_INPUT = "#17212c"
+BORDER = "#263342"
+TEXT = "#e6edf3"
+TEXT_MUTED = "#9aa9b8"
+ACCENT = "#82aaff"
 
 EFFORT_LEVELS = ("off", "low", "medium", "high", "max", "novacode")
 EFFORT_LABELS = ("Off", "Low", "Medium", "High", "Max", "NovaCode")
@@ -291,17 +291,17 @@ class StreamingMessageWidget(QFrame):
         self.setObjectName("streamingMessage")
         self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(0, 0, 0, 29)
+        layout.setSpacing(17)
         avatar = QLabel()
-        avatar.setFixedSize(32, 32)
+        avatar.setFixedSize(34, 34)
         avatar.setPixmap(make_avatar("N", 32))
         avatar.setAlignment(Qt.AlignTop)
         avatar.setStyleSheet("border: none; background: transparent;")
         layout.addWidget(avatar, 0, Qt.AlignTop)
         body = QVBoxLayout()
         name = QLabel("Nova")
-        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 600; border: none; background: transparent;")
+        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 700; border: none; background: transparent;")
         body.addWidget(name)
         self.editor = QPlainTextEdit()
         self.editor.setReadOnly(True)
@@ -764,8 +764,8 @@ class NovaWindow(QMainWindow):
         self.attachments = []
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(900, 600)
-        self.resize(1100, 760)
+        self.setMinimumSize(960, 640)
+        self.resize(1240, 820)
         
         self._build_ui()
         self._apply_theme()
@@ -807,32 +807,57 @@ class NovaWindow(QMainWindow):
 
         # Sidebar
         sidebar = QFrame()
-        sidebar.setFixedWidth(260)
+        sidebar.setObjectName("sidebar")
+        sidebar.setMinimumWidth(236)
+        sidebar.setMaximumWidth(292)
+        sidebar.setStyleSheet(f"QFrame#sidebar {{ background: {BG_MAIN}; border-right: 1px solid {BORDER}; }}")
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(16, 20, 16, 16)
-        sidebar_layout.setSpacing(16)
+        sidebar_layout.setContentsMargins(18, 22, 16, 18)
+        sidebar_layout.setSpacing(13)
 
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(0, 0, 0, 0)
+        brand_row.setSpacing(11)
+        brand_mark = QLabel("N")
+        brand_mark.setAlignment(Qt.AlignCenter)
+        brand_mark.setFixedSize(34, 34)
+        brand_mark.setStyleSheet(f"background: {BG_INPUT}; color: {ACCENT}; border: 1px solid {BORDER}; border-radius: 10px; font-size: 17px; font-weight: 800;")
+        brand_row.addWidget(brand_mark)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(1)
         title = QLabel("Nova")
-        title.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {TEXT}; border: none; background: transparent;")
-        sidebar_layout.addWidget(title)
+        title.setStyleSheet(f"font-size: 17px; font-weight: 750; color: {TEXT}; border: none; background: transparent;")
+        subtitle = QLabel("LOCAL AI WORKSPACE")
+        subtitle.setStyleSheet(f"font-size: 9px; color: {TEXT_MUTED}; border: none; background: transparent;")
+        brand_text.addWidget(title)
+        brand_text.addWidget(subtitle)
+        brand_row.addLayout(brand_text)
+        brand_row.addStretch(1)
+        sidebar_layout.addLayout(brand_row)
 
         new_chat_btn = QPushButton("+ New Chat")
-        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 10px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BORDER}; }}")
+        new_chat_btn.setFixedHeight(42)
+        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: #1d2a38; border-color: #3a4d62; }} QPushButton:pressed {{ background: {BG_PANEL}; }}
         new_chat_btn.setCursor(Qt.PointingHandCursor)
         new_chat_btn.clicked.connect(self._new_chat)
         sidebar_layout.addWidget(new_chat_btn)
 
         label_chats = QLabel("CHATS")
-        label_chats.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; font-weight: 700; margin-top: 8px; border: none; background: transparent;")
+        label_chats.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-top: 13px; border: none; background: transparent;")
         sidebar_layout.addWidget(label_chats)
 
         self.chat_list = QListWidget()
-        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 8px; border-radius: 6px; margin-bottom: 2px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: {BG_PANEL}; color: {TEXT}; border: 1px solid {BORDER}; }}")
+        self.chat_list.setFrameShape(QFrame.NoFrame)
+        self.chat_list.setSpacing(4)
+        self.chat_list.setTextElideMode(Qt.ElideRight)
+        self.chat_list.setUniformItemSizes(True)
+        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 0 11px; min-height: 38px; border: 1px solid transparent; border-radius: 8px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: #172433; color: {TEXT}; border: 1px solid #2b4057; }}
         self.chat_list.itemClicked.connect(self._on_chat_selected)
         sidebar_layout.addWidget(self.chat_list, 1)
 
         settings_btn = QPushButton("⚙  Settings")
-        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; text-align: left; padding: 8px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; }}")
+        settings_btn.setFixedHeight(40)
+        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid transparent; border-radius: 8px; text-align: left; padding: 0 10px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; border-color: {BORDER}; }}
         settings_btn.setCursor(Qt.PointingHandCursor)
         settings_btn.clicked.connect(self._open_model_settings)
         sidebar_layout.addWidget(settings_btn)
@@ -847,12 +872,16 @@ class NovaWindow(QMainWindow):
 
         # Header
         header = QFrame()
-        header.setFixedHeight(64)
+        header.setObjectName("appHeader")
+        header.setFixedHeight(72)
+        header.setStyleSheet(f"QFrame#appHeader {{ background: {BG_MAIN}; border-bottom: 1px solid {BORDER}; }}")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(24, 0, 24, 0)
+        header_layout.setContentsMargins(30, 0, 30, 0)
+        header_layout.setSpacing(16)
         
         self.model_selector = QPushButton("Loading...")
-        self.model_selector.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 12px; color: {TEXT}; font-size: 13px; }} QPushButton:hover {{ background: {BG_INPUT}; }}")
+        self.model_selector.setMinimumHeight(38)
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #3b5067; }}
         self.model_selector.clicked.connect(self._show_model_menu)
         header_layout.addWidget(self.model_selector)
 
@@ -868,7 +897,7 @@ class NovaWindow(QMainWindow):
         header_layout.addWidget(self.status_indicator)
 
         self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
+        self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 550; border: none; background: transparent;")
         self.status_label.setMinimumWidth(72)
         self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         header_layout.addWidget(self.status_label)
@@ -882,14 +911,14 @@ class NovaWindow(QMainWindow):
 
         # Chat Area
         self.chat_scroll = QScrollArea()
-        self.chat_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.chat_scroll.setStyleSheet(f"QScrollArea {{ background: {BG_MAIN}; border: none; }}")
         self.chat_scroll.setWidgetResizable(True)
         self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet(f"background: {BG_MAIN};")
         self.chat_container_layout = QVBoxLayout(self.chat_container)
-        self.chat_container_layout.setContentsMargins(40, 24, 40, 24)
+        self.chat_container_layout.setContentsMargins(48, 30, 48, 34)
         self.chat_container_layout.setSpacing(0)
         self.chat_container_layout.addStretch()
         
@@ -901,17 +930,17 @@ class NovaWindow(QMainWindow):
         composer_area.setObjectName("composerArea")
         composer_area.setStyleSheet(f"QFrame#composerArea {{ background: {BG_MAIN}; border-top: 1px solid {BORDER}; }}")
         composer_layout = QVBoxLayout(composer_area)
-        composer_layout.setContentsMargins(40, 16, 40, 24)
+        composer_layout.setContentsMargins(48, 17, 48, 26)
 
         self.composer_box = QFrame()
         self.composer_box.setObjectName("composerBox")
-        self.composer_box.setStyleSheet(f"QFrame#composerBox {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 12px; }}")
+        self.composer_box.setStyleSheet(f"QFrame#composerBox {{ background: {BG_PANEL}; border: 1px solid #304052; border-radius: 15px; }}")
         box_layout = QVBoxLayout(self.composer_box)
-        box_layout.setContentsMargins(12, 12, 12, 12)
-        box_layout.setSpacing(8)
+        box_layout.setContentsMargins(15, 13, 13, 12)
+        box_layout.setSpacing(9)
 
         self.input = ComposerEdit()
-        self.input.setPlaceholderText("Send a message...")
+        self.input.setPlaceholderText("Message Nova…")
         self.input.submitted.connect(self._send)
         box_layout.addWidget(self.input)
 
@@ -934,16 +963,18 @@ class NovaWindow(QMainWindow):
         add_btn = QPushButton()
         add_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; }} QPushButton:hover {{ background: {BG_INPUT}; border-radius: 6px; }}")
         add_btn.setIcon(make_icon("plus", TEXT_MUTED, 18))
-        add_btn.setFixedSize(28, 28)
+        add_btn.setFixedSize(34, 34)
+        add_btn.setToolTip("Attach files")
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
 
         controls.addStretch()
 
         self.send_button = QPushButton()
-        self.send_button.setStyleSheet(f"QPushButton {{ background: {ACCENT}; border: none; border-radius: 6px; }} QPushButton:hover {{ background: #79c0ff; }} QPushButton:disabled {{ background: {BORDER}; }}")
-        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 16, 2.5))
-        self.send_button.setFixedSize(28, 28)
+        self.send_button.setStyleSheet(f"QPushButton {{ background: {ACCENT}; border: none; border-radius: 10px; }} QPushButton:hover {{ background: #a0bcff; }} QPushButton:pressed {{ background: #6f91e8; }} QPushButton:disabled {{ background: {BORDER}; }}")
+        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 17, 2.5))
+        self.send_button.setFixedSize(36, 36)
+        self.send_button.setToolTip("Send message")
         self.send_button.clicked.connect(self._send)
         controls.addWidget(self.send_button)
 
@@ -952,18 +983,21 @@ class NovaWindow(QMainWindow):
         main_layout.addWidget(composer_area)
 
         splitter.addWidget(main_content)
-        splitter.setSizes([260, 840])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([272, 968])
 
     def _apply_theme(self):
         self.setStyleSheet(f"""
-            QMainWindow {{ background: {BG_MAIN}; }}
-            QSplitter::handle {{ background: {BORDER}; }}
-            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-            QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 40px; }}
-            QScrollBar::handle:vertical:hover {{ background: {TEXT_MUTED}; }}
+            QMainWindow, QWidget {{ background: {BG_MAIN}; color: {TEXT}; }}
+            QSplitter::handle {{ background: {BORDER}; width: 1px; }}
+            QScrollBar:vertical {{ background: transparent; width: 9px; margin: 3px; }}
+            QScrollBar::handle:vertical {{ background: #344354; border-radius: 4px; min-height: 42px; }}
+            QScrollBar::handle:vertical:hover {{ background: #52677d; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-            QMenu {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px; }}
-            QMenu::item {{ padding: 8px 24px 8px 12px; border-radius: 4px; color: {TEXT}; font-size: 13px; }}
+            QToolTip {{ background: {BG_PANEL}; color: {TEXT}; border: 1px solid {BORDER}; padding: 6px 8px; }}
+            QMenu {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 5px; }}
+            QMenu::item {{ padding: 9px 26px 9px 13px; border-radius: 6px; color: {TEXT}; font-size: 13px; }}
             QMenu::item:selected {{ background: {BG_INPUT}; }}
         """)
 
@@ -1027,6 +1061,8 @@ class NovaWindow(QMainWindow):
         self.chat_list.clear()
         for chat in self.chat_store.list_chats():
             item = QListWidgetItem(chat["title"])
+            item.setToolTip(chat["title"])
+            item.setSizeHint(QSize(0, 40))
             item.setData(Qt.UserRole, chat["id"])
             self.chat_list.addItem(item)
             if chat["id"] == self.current_chat_id:
