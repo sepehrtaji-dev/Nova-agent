@@ -495,61 +495,52 @@ class MessageWidget(QFrame):
 
 
 class EffortSlider(QSlider):
-    """Horizontal effort slider with a subtle animated halo at maximum effort."""
+    """Six-stop slider with a softly animated halo around the active level."""
+
+    LEVEL_COLORS = ("#8b949e", "#79c0ff", "#58a6ff", "#a78bfa", "#c084fc", "#f0abfc")
 
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self._phase = 0.0
         self._pulse_timer = QTimer(self)
-        self._pulse_timer.setInterval(35)
+        self._pulse_timer.setInterval(40)
         self._pulse_timer.timeout.connect(self._advance_pulse)
-        self.valueChanged.connect(self._sync_pulse)
-        self._sync_pulse(self.value())
-
-    def _sync_pulse(self, value):
-        if value == self.maximum():
-            if not self._pulse_timer.isActive():
-                self._pulse_timer.start()
-        else:
-            self._pulse_timer.stop()
-        self.update()
+        self._pulse_timer.start()
 
     def _advance_pulse(self):
-        self._phase = (self._phase + 0.075) % (2 * math.pi)
+        self._phase = (self._phase + 0.055) % (2 * math.pi)
         self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self.value() != self.maximum():
-            return
-
         option = QStyleOptionSlider()
         self.initStyleOption(option)
-        handle = self.style().subControlRect(
-            QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self
-        )
-        center = handle.center()
-        pulse = (math.sin(self._phase) + 1.0) / 2.0
-        radius = 13.0 + pulse * 4.0
-
+        groove = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderGroove, self)
+        handle = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
+        if self.maximum() <= self.minimum():
+            return
+        left = groove.left() + handle.width() / 2
+        right = groove.right() - handle.width() / 2
+        y = groove.center().y()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        gradient = QRadialGradient(center, radius)
-        gradient.setColorAt(0.0, QColor(168, 85, 247, int(42 + pulse * 34)))
-        gradient.setColorAt(0.48, QColor(88, 166, 255, int(24 + pulse * 22)))
-        gradient.setColorAt(1.0, QColor(88, 166, 255, 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(gradient)
-        painter.drawEllipse(center, radius, radius)
-
-        # Two tiny orbiting sparks make the max state feel active without
-        # changing the slider's geometry or interfering with mouse input.
-        for offset, color in ((0.0, QColor(190, 130, 255)), (math.pi, QColor(110, 205, 255))):
-            angle = self._phase + offset
-            x = center.x() + math.cos(angle) * 11.0
-            y = center.y() + math.sin(angle) * 7.0
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(x, y), 1.5, 1.5)
+        for index, color_hex in enumerate(self.LEVEL_COLORS):
+            x = left + (right - left) * index / (self.maximum() - self.minimum())
+            color = QColor(color_hex)
+            if index == self.value():
+                pulse = (math.sin(self._phase) + 1.0) / 2.0
+                halo = QColor(color)
+                halo.setAlpha(int(45 + pulse * 55))
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(halo)
+                painter.drawEllipse(QPointF(x, y), 7 + pulse * 3, 7 + pulse * 3)
+                painter.setBrush(color)
+                painter.drawEllipse(QPointF(x, y), 3.2, 3.2)
+            else:
+                color.setAlpha(150)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(color)
+                painter.drawEllipse(QPointF(x, y), 2.0, 2.0)
         painter.end()
 
 
@@ -559,49 +550,44 @@ class EffortSelector(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("QWidget { background: transparent; border: none; }")
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        label = QLabel("Effort")
-        label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
-        layout.addWidget(label)
+        layout.setSpacing(4)
 
         self._slider = EffortSlider()
-        self._slider.setStyleSheet(f"""
-            QSlider {{ border: none; background: transparent; }}
-            QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: {TEXT_MUTED}; width: 12px; margin: -4px 0; border-radius: 6px; }}
-            QSlider::handle:horizontal:hover {{ background: {TEXT}; }}
-            QSlider::sub-page:horizontal {{ background: {TEXT_MUTED}; border-radius: 2px; }}
-        """)
         self._slider.setRange(0, len(EFFORT_LEVELS) - 1)
         self._slider.setValue(2)
-        self._slider.setFixedWidth(100)
+        self._slider.setTickPosition(QSlider.TicksBelow)
+        self._slider.setTickInterval(1)
+        self._slider.setFixedWidth(276)
+        self._slider.setFixedHeight(34)
+        self._slider.setStyleSheet(f"""
+            QSlider {{ border: none; background: transparent; }}
+            QSlider::groove:horizontal {{ height: 3px; background: #41454b; border-radius: 2px; }}
+            QSlider::sub-page:horizontal {{ background: #777b84; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: #e8e8eb; border: 2px solid #777b84; width: 12px; height: 12px; margin: -6px 0; border-radius: 7px; }}
+            QSlider::handle:horizontal:hover {{ border-color: #ffffff; }}
+            QSlider::add-page:horizontal {{ background: #41454b; }}
+        """)
         self._slider.valueChanged.connect(self._changed)
         layout.addWidget(self._slider)
 
-        self._value = QLabel(EFFORT_LABELS[2])
-        self._value.setMinimumWidth(68)
-        self._value.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._value)
+        labels = QHBoxLayout()
+        labels.setContentsMargins(0, 0, 0, 0)
+        labels.setSpacing(0)
+        for index, label_text in enumerate(("Off", "Low", "Med", "High", "Max", "Nova")):
+            label = QLabel(label_text)
+            label.setAlignment(Qt.AlignCenter)
+            label.setFixedWidth(46)
+            label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent; border: none;")
+            labels.addWidget(label)
+        layout.addLayout(labels)
         self._set_aura(2)
 
     def _set_aura(self, index):
-        colors = ("#8b949e", "#79c0ff", "#58a6ff", "#a78bfa", "#c084fc", "#f0abfc")
-        color = colors[index]
-        self._value.setText(EFFORT_LABELS[index])
-        self._value.setStyleSheet(
-            f"color: {color}; font-size: 12px; font-weight: 700; "
-            "border: none; background: transparent;"
-        )
-        self._slider.setStyleSheet(f"""
-            QSlider {{ border: none; background: transparent; }}
-            QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: {color}; width: 12px; margin: -4px 0; border-radius: 6px; }}
-            QSlider::handle:horizontal:hover {{ background: #ffffff; }}
-            QSlider::sub-page:horizontal {{ background: {color}; border-radius: 2px; }}
-        """)
+        colors = EffortSlider.LEVEL_COLORS
+        self._slider.setProperty("activeLevel", index)
+        self._slider.update()
 
     def _changed(self, index):
         self._set_aura(index)
@@ -617,6 +603,7 @@ class EffortSelector(QWidget):
             self._slider.setValue(index)
             self._slider.blockSignals(False)
             self._set_aura(index)
+
 
 class ModelSettingsDialog(QDialog):
     def __init__(self, settings, installed_models, parent=None):
@@ -657,39 +644,37 @@ class ModelSettingsDialog(QDialog):
         note.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
         layout.addWidget(note)
 
-        provider_card = QFrame()
-        provider_card.setObjectName("providerCard")
-        provider_card.setStyleSheet(f"QFrame#providerCard {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 13px; }}")
-        provider_layout = QVBoxLayout(provider_card)
-        provider_layout.setContentsMargins(18, 15, 18, 16)
-        provider_layout.setSpacing(9)
         provider_title = QLabel("PROVIDER")
-        provider_title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px;")
-        provider_layout.addWidget(provider_title)
+        provider_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 10px;")
+        layout.addWidget(provider_title)
+        provider_rule = QFrame()
+        provider_rule.setFixedHeight(1)
+        provider_rule.setStyleSheet(f"background: {BORDER}; border: none;")
+        layout.addWidget(provider_rule)
 
         self.local_radio = QRadioButton("Local model  ·  Ollama")
-        provider_layout.addWidget(self.local_radio)
+        layout.addWidget(self.local_radio)
 
         self.local_model = QLineEdit(str(settings.get("local_model", "") or ""))
         self.local_model.setPlaceholderText("Model name, e.g. qwen2.5:3b (blank = auto-detect)")
-        provider_layout.addWidget(self.local_model)
+        layout.addWidget(self.local_model)
 
         if self._installed:
             hint = QLabel("Installed: " + ", ".join(self._installed[:6]))
             hint.setWordWrap(True)
             hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
-            provider_layout.addWidget(hint)
+            layout.addWidget(hint)
 
         self.remote_radio = QRadioButton("Remote API  ·  OpenAI-compatible")
-        provider_layout.addWidget(self.remote_radio)
+        layout.addWidget(self.remote_radio)
 
         self.api_base = QLineEdit(str(settings.get("api_base_url", "") or ""))
         self.api_base.setPlaceholderText("https://api.openai.com/v1")
-        provider_layout.addWidget(self._labelled("Base URL", self.api_base))
+        layout.addWidget(self._labelled("Base URL", self.api_base))
 
         self.api_model = QLineEdit(str(settings.get("api_model", "") or ""))
         self.api_model.setPlaceholderText("e.g. gpt-4o-mini, or a gateway model id")
-        provider_layout.addWidget(self._labelled("Model", self.api_model))
+        layout.addWidget(self._labelled("Model", self.api_model))
 
         self.api_key = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
@@ -697,8 +682,7 @@ class ModelSettingsDialog(QDialog):
             self.api_key.setPlaceholderText(f"stored: {masked_key(self._existing_key)} — leave blank to keep")
         else:
             self.api_key.setPlaceholderText("API key")
-        provider_layout.addWidget(self._labelled("API key", self.api_key))
-        layout.addWidget(provider_card)
+        layout.addWidget(self._labelled("API key", self.api_key))
 
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -918,12 +902,6 @@ class NovaWindow(QMainWindow):
         self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT}; font-size: 12px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; }}")
         self.model_selector.clicked.connect(self._show_model_menu)
 
-        self.effort_button = QPushButton(f"Effort  ·  {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
-        self.effort_button.setCursor(Qt.PointingHandCursor)
-        self.effort_button.setMinimumHeight(36)
-        self.effort_button.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT_MUTED}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; color: {TEXT}; }}")
-        self.effort_button.clicked.connect(lambda: self._show_model_menu(self.effort_button))
-
         # Chat Area
         self.chat_scroll = QScrollArea()
         self.chat_scroll.setStyleSheet(f"QScrollArea {{ background: {BG_MAIN}; border: none; }}")
@@ -964,11 +942,18 @@ class NovaWindow(QMainWindow):
         self.attachment_scroll = QScrollArea()
         self.attachment_scroll.setObjectName("attachmentCarousel")
         self.attachment_scroll.setWidgetResizable(True)
+        self.attachment_scroll.setFrameShape(QFrame.NoFrame)
+        self.attachment_scroll.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.attachment_scroll.viewport().setAutoFillBackground(False)
+        self.attachment_scroll.viewport().setStyleSheet("background: transparent; border: none;")
         self.attachment_scroll.setFixedHeight(112)
         self.attachment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.attachment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.attachment_scroll.setStyleSheet(f"QScrollArea#attachmentCarousel {{ background: transparent; border: none; }} QScrollBar:horizontal {{ height: 6px; background: transparent; }} QScrollBar::handle:horizontal {{ background: {BORDER}; border-radius: 3px; min-width: 24px; }} QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}")
         self.attachment_preview = QWidget()
+        self.attachment_preview.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.attachment_preview.setAutoFillBackground(False)
+        self.attachment_preview.setStyleSheet("background: transparent; border: none;")
         self.attachment_preview_layout = QHBoxLayout(self.attachment_preview)
         self.attachment_preview_layout.setContentsMargins(1, 2, 1, 5)
         self.attachment_preview_layout.setSpacing(8)
@@ -1004,11 +989,7 @@ class NovaWindow(QMainWindow):
         bottom_controls.setContentsMargins(2, 8, 2, 0)
         bottom_controls.setSpacing(9)
         bottom_controls.addWidget(self.model_selector)
-        bottom_controls.addWidget(self.effort_button)
         bottom_controls.addStretch(1)
-        helper = QLabel("Model & reasoning")
-        helper.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
-        bottom_controls.addWidget(helper)
         composer_layout.addLayout(bottom_controls)
         main_layout.addWidget(composer_area)
 
@@ -1036,9 +1017,7 @@ class NovaWindow(QMainWindow):
         model = str(getattr(brain, "model", "") or "model")
         remote = self._settings.get("provider") == "remote"
         provider = "API" if remote else "LOCAL"
-        self.model_selector.setText(f"◈  {model}  ·  {provider}  ▾")
-        if hasattr(self, "effort_button"):
-            self.effort_button.setText(f"Effort  ·  {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
+        self.model_selector.setText(f"◈  {model}  ·  {provider}   /   {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
         provider_name = "Remote API" if remote else "Local Ollama"
         self.model_selector.setToolTip(
             f"Provider: {provider_name}\\nModel: {model}\\n"
@@ -1191,7 +1170,7 @@ class NovaWindow(QMainWindow):
         if self.busy:
             return
         menu = QMenu(self)
-        menu.setMinimumWidth(330)
+        menu.setMinimumWidth(390)
         remote = self._settings.get("provider") == "remote"
         
         installed = []
@@ -1233,6 +1212,7 @@ class NovaWindow(QMainWindow):
         popup_effort.set_value(self._effort)
         popup_effort.changed.connect(self._on_effort_changed)
         popup_effort.changed.connect(lambda value: current_effort.setText(EFFORT_LABELS[EFFORT_LEVELS.index(value)]))
+        popup_effort.changed.connect(lambda value: self.model_selector.setText(self.model_selector.text().rsplit("/", 1)[0].strip() + f"   /   {EFFORT_LABELS[EFFORT_LEVELS.index(value)]}  ▾"))
         effort_layout.addWidget(popup_effort)
         effort_action.setDefaultWidget(effort_panel)
         menu.addAction(effort_action)
