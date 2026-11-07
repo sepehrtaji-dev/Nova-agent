@@ -165,7 +165,7 @@ def make_avatar(letter="N", size=32):
                 clip.addEllipse(0, 0, size, size)
                 painter.setClipPath(clip)
                 scaled = source.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-                painter.drawPixmap(0, 0, scaled)
+                painter.drawPixmap((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
                 painter.restore()
             else:
                 painter.setPen(QColor(TEXT))
