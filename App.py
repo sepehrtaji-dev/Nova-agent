@@ -837,7 +837,7 @@ class NovaWindow(QMainWindow):
 
         new_chat_btn = QPushButton("+ New Chat")
         new_chat_btn.setFixedHeight(42)
-        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: #1d2a38; border-color: #3a4d62; }} QPushButton:pressed {{ background: {BG_PANEL}; }}
+        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: #1d2a38; border-color: #3a4d62; }} QPushButton:pressed {{ background: {BG_PANEL}; }}")
         new_chat_btn.setCursor(Qt.PointingHandCursor)
         new_chat_btn.clicked.connect(self._new_chat)
         sidebar_layout.addWidget(new_chat_btn)
@@ -851,13 +851,13 @@ class NovaWindow(QMainWindow):
         self.chat_list.setSpacing(4)
         self.chat_list.setTextElideMode(Qt.ElideRight)
         self.chat_list.setUniformItemSizes(True)
-        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 0 11px; min-height: 38px; border: 1px solid transparent; border-radius: 8px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: #172433; color: {TEXT}; border: 1px solid #2b4057; }}
+        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 0 11px; min-height: 38px; border: 1px solid transparent; border-radius: 8px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: #172433; color: {TEXT}; border: 1px solid #2b4057; }}")
         self.chat_list.itemClicked.connect(self._on_chat_selected)
         sidebar_layout.addWidget(self.chat_list, 1)
 
         settings_btn = QPushButton("⚙  Settings")
         settings_btn.setFixedHeight(40)
-        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid transparent; border-radius: 8px; text-align: left; padding: 0 10px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; border-color: {BORDER}; }}
+        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid transparent; border-radius: 8px; text-align: left; padding: 0 10px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; border-color: {BORDER}; }}")
         settings_btn.setCursor(Qt.PointingHandCursor)
         settings_btn.clicked.connect(self._open_model_settings)
         sidebar_layout.addWidget(settings_btn)
@@ -881,7 +881,7 @@ class NovaWindow(QMainWindow):
         
         self.model_selector = QPushButton("Loading...")
         self.model_selector.setMinimumHeight(38)
-        self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #3b5067; }}
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #3b5067; }}")
         self.model_selector.clicked.connect(self._show_model_menu)
         header_layout.addWidget(self.model_selector)
 
