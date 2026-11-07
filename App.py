@@ -930,6 +930,10 @@ class ModelSettingsDialog(QDialog):
 
     def values(self):
         typed_key = self.api_key.text().strip()
+        selected = self.remote_list.currentRow()
+        active_id = self._active_remote_id
+        if 0 <= selected < len(self._remote_profiles):
+            active_id = str(self._remote_profiles[selected].get("id", ""))
         return {
             "provider": "remote" if self.remote_radio.isChecked() else "local",
             "local_model": self.local_model.text().strip(),
@@ -937,8 +941,39 @@ class ModelSettingsDialog(QDialog):
             "api_model": self.api_model.text().strip(),
             "api_key": typed_key or self._existing_key,
             "assistant_font_size": str(self.font_slider.value()),
+            "remote_models": json.dumps(self._remote_profiles, ensure_ascii=False),
+            "active_remote_model_id": active_id,
+            "model_instructions": self.model_instructions.toPlainText().strip(),
+            "profile_name": self.profile_name.text().strip(),
+            "profile_age": self.profile_age.text().strip(),
+            "profile_occupation": self.profile_occupation.text().strip(),
+            "profile_avatar": self._avatar_path,
         }
 
+    def _choose_profile_avatar(self):
+        path, _ = QFileDialog.getOpenFileName(self, 'Choose profile picture', '', 'Images (*.png *.jpg *.jpeg *.webp *.bmp)')
+        if path:
+            self._avatar_path = os.path.abspath(path)
+            self.avatar_label.setText(os.path.basename(path))
+
+    def _add_remote_model(self):
+        dialog = RemoteModelDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            profile = dialog.values()
+            profile['id'] = uuid.uuid4().hex
+            self._remote_profiles.append(profile)
+            self.remote_list.addItem(profile['name'] + '  ·  ' + profile['model'])
+            self.remote_list.setCurrentRow(self.remote_list.count() - 1)
+            self.remote_radio.setChecked(True)
+            self._refresh()
+
+    def _remove_remote_model(self):
+        row = self.remote_list.currentRow()
+        if 0 <= row < len(self._remote_profiles):
+            self._remote_profiles.pop(row)
+            self.remote_list.takeItem(row)
+            if self.remote_list.count():
+                self.remote_list.setCurrentRow(0)
     def _on_save(self):
         values = self.values()
         if values["provider"] == "remote":
