@@ -25,6 +25,8 @@ class OllamaBrain:
         if not self.model:
             self.model = self._discover_model()
         self._thinking_supported_cache = None
+        self._thinking_info_model = None
+        self._thinking_info_cache = None
 
     @staticmethod
     def _discover_model():
@@ -53,29 +55,43 @@ class OllamaBrain:
             return value.get(name, default)
         return getattr(value, name, default)
 
+    def _thinking_info(self):
+        """Fetch and cache /api/show thinking metadata for the active model."""
+        if not self.model:
+            self.model = self._discover_model()
+        if not self.model:
+            return {}
+        if self._thinking_info_model != self.model:
+            try:
+                self._thinking_info_cache = ollama.show(self.model)
+            except Exception:
+                self._thinking_info_cache = {}
+            self._thinking_info_model = self.model
+            self._thinking_supported_cache = None
+        return self._thinking_info_cache or {}
+
     def supports_thinking(self):
         """Return true only when Ollama advertises a native thinking channel."""
         if self._thinking_supported_cache is not None:
             return self._thinking_supported_cache
         if not self.model:
+            self.model = self._discover_model()
+        if not self.model:
             self._thinking_supported_cache = False
             return False
-        try:
-            info = ollama.show(self.model)
-            metadata = self._field(info, "thinking")
-            values = self._field(metadata, "values", None)
-            if isinstance(values, (list, tuple)):
-                self._thinking_supported_cache = any(
-                    value is True or (isinstance(value, str) and bool(value.strip()))
-                    for value in values
-                )
-            else:
-                capabilities = self._field(info, "capabilities", []) or []
-                self._thinking_supported_cache = any(
-                    str(value).casefold() == "thinking" for value in capabilities
-                )
-        except Exception:
-            self._thinking_supported_cache = False
+        info = self._thinking_info()
+        metadata = self._field(info, "thinking")
+        values = self._field(metadata, "values", None)
+        if isinstance(values, (list, tuple)):
+            self._thinking_supported_cache = any(
+                value is True or (isinstance(value, str) and bool(value.strip()))
+                for value in values
+            )
+        else:
+            capabilities = self._field(info, "capabilities", []) or []
+            self._thinking_supported_cache = any(
+                str(value).casefold() == "thinking" for value in capabilities
+            )
         return self._thinking_supported_cache
 
     def think_value_for_effort(self, effort="medium"):
@@ -86,7 +102,7 @@ class OllamaBrain:
         if not self.model:
             self.model = self._discover_model()
         try:
-            info = ollama.show(self.model)
+            info = self._thinking_info()
             metadata = self._field(info, "thinking")
             values = self._field(metadata, "values", None)
             if isinstance(values, (list, tuple)):
