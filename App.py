@@ -596,14 +596,16 @@ class EffortSelector(QWidget):
         layout.addWidget(self._slider)
 
         labels = QHBoxLayout()
-        labels.setContentsMargins(0, 0, 0, 0)
+        # Match the slider's handle-center travel: the handle cannot reach
+        # the widget edges, so labels need the same inset to sit under each stop.
+        labels.setContentsMargins(9, 0, 9, 0)
         labels.setSpacing(0)
-        for index, label_text in enumerate(("Off", "Low", "Med", "High", "Max", "Nova")):
+        for label_text in ("Off", "Low", "Med", "High", "Max", "Nova"):
             label = QLabel(label_text)
-            label.setAlignment(Qt.AlignCenter)
-            label.setFixedWidth(50)
+            label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent; border: none;")
-            labels.addWidget(label)
+            labels.addWidget(label, 1)
         layout.addLayout(labels)
         self._set_aura(2)
 
@@ -1218,6 +1220,9 @@ class NovaWindow(QMainWindow):
         menu.addSeparator()
         effort_action = QWidgetAction(menu)
         effort_panel = QWidget(menu)
+        effort_panel.setAttribute(Qt.WA_TranslucentBackground, True)
+        effort_panel.setAutoFillBackground(False)
+        effort_panel.setStyleSheet("background: transparent; border: none;")
         effort_layout = QVBoxLayout(effort_panel)
         effort_layout.setContentsMargins(14, 8, 14, 12)
         effort_layout.setSpacing(7)
@@ -1241,7 +1246,17 @@ class NovaWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
         anchor = anchor or self.model_selector
-        menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
+        menu.ensurePolished()
+        menu.adjustSize()
+        anchor_top = anchor.mapToGlobal(QPoint(0, 0))
+        desired = QPoint(anchor_top.x(), anchor_top.y() - menu.sizeHint().height())
+        screen = QApplication.screenAt(anchor_top)
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = max(available.left(), min(desired.x(), available.right() - menu.sizeHint().width() + 1))
+            y = max(available.top(), desired.y())
+            desired = QPoint(x, y)
+        menu.exec(desired)
 
     def _select_model(self, name):
         if self.busy or not name:
