@@ -999,6 +999,10 @@ class ModelSettingsDialog(QDialog):
             self.remote_list.takeItem(row)
             if self.remote_list.count():
                 self.remote_list.setCurrentRow(0)
+            else:
+                self._active_remote_id = ""
+                self.remote_radio.setChecked(False)
+                self.local_radio.setChecked(True)
     def _on_save(self):
         values = self.values()
         if values["provider"] == "remote":
