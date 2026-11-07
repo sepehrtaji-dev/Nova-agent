@@ -233,7 +233,7 @@ class CodeBlock(QFrame):
 
 
 class MarkdownLabel(QTextBrowser):
-    def __init__(self, text, parent=None):
+    def __init__(self, text, font_size=14, parent=None):
         super().__init__(parent)
         self.setOpenExternalLinks(True)
         self.setFrameShape(QFrame.NoFrame)
@@ -244,7 +244,7 @@ class MarkdownLabel(QTextBrowser):
         self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         
         body_style = f"""
-        body {{ font-family: 'Segoe UI', sans-serif; font-size: 14px; color: {TEXT}; line-height: 1.5; }}
+        body {{ font-family: 'Segoe UI', sans-serif; font-size: {int(font_size)}px; color: {TEXT}; line-height: 1.55; }}
         h1, h2, h3 {{ color: {TEXT}; margin: 12px 0 6px 0; }}
         h1 {{ font-size: 20px; }} h2 {{ font-size: 18px; }} h3 {{ font-size: 16px; }}
         strong {{ color: #ffffff; }}
@@ -282,7 +282,7 @@ class MarkdownLabel(QTextBrowser):
         self.update_height()
 
 
-def add_markdown_content(layout, text):
+def add_markdown_content(layout, text, font_size=14):
     for kind, value, language in split_markdown_blocks(text):
         if kind == "code":
             layout.addWidget(CodeBlock(value, language))
@@ -291,7 +291,7 @@ def add_markdown_content(layout, text):
             continue
         
         html = render_markdown_text(value)
-        label = MarkdownLabel(html)
+        label = MarkdownLabel(html, font_size=font_size)
         layout.addWidget(label)
 
 
@@ -316,7 +316,7 @@ class AgentWorker(QObject):
 
 class StreamingMessageWidget(QFrame):
     """Plain-text assistant draft updated as model deltas arrive."""
-    def __init__(self, parent=None):
+    def __init__(self, font_size=15, parent=None):
         super().__init__(parent)
         self.setObjectName("streamingMessage")
         self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
@@ -336,7 +336,7 @@ class StreamingMessageWidget(QFrame):
         self.editor = QPlainTextEdit()
         self.editor.setReadOnly(True)
         self.editor.setFrameShape(QFrame.NoFrame)
-        self.editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: none; color: {TEXT}; font-size: 14px; padding: 0; }}")
+        self.editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: none; color: {TEXT}; font-size: {int(font_size)}px; padding: 0; }}")
         self.editor.setMinimumHeight(28)
         self.editor.setMaximumHeight(360)
         body.addWidget(self.editor)
@@ -478,32 +478,30 @@ class ThinkingPanel(QFrame):
 
 
 class MessageWidget(QFrame):
-    def __init__(self, role, text, attachments=None, parent=None):
+    def __init__(self, role, text, attachments=None, font_size=15, parent=None):
         super().__init__(parent)
-        self.setObjectName("messageWidget")
-        self.setStyleSheet("QFrame#messageWidget { background: transparent; border: none; }")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 24)
-        layout.setSpacing(16)
-
+        is_user = role == "user"
+        self.setObjectName("userMessageRow" if is_user else "assistantMessageRow")
+        self.setStyleSheet("""
+            QFrame#userMessageRow, QFrame#assistantMessageRow { background: transparent; border: none; }
+            QFrame#userBubble { background: #151f2b; border: 1px solid #2b3b4e; border-radius: 15px; }
+        """)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 20)
+        row.setSpacing(12)
         avatar = QLabel()
         avatar.setFixedSize(32, 32)
-        avatar.setPixmap(make_avatar("Y" if role == "user" else "N", 32))
+        avatar.setPixmap(make_avatar("Y" if is_user else "N", 32))
         avatar.setAlignment(Qt.AlignTop)
         avatar.setStyleSheet("border: none; background: transparent;")
-        layout.addWidget(avatar, 0, Qt.AlignTop)
-
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(6)
-
-        name = QLabel("You" if role == "user" else "Nova")
-        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 600; border: none; background: transparent;")
+        name = QLabel("You" if is_user else "Nova")
+        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 650; border: none; background: transparent;")
         content.addWidget(name)
-
-        add_markdown_content(content, text if text else ("Attached files" if attachments else " "))
-
-        if role == "user" and attachments:
+        add_markdown_content(content, text if text else ("Attached files" if attachments else " "), font_size=font_size if not is_user else 14)
+        if is_user and attachments:
             badges = QHBoxLayout()
             badges.setContentsMargins(0, 4, 0, 0)
             badges.setSpacing(8)
@@ -514,13 +512,25 @@ class MessageWidget(QFrame):
                 except OSError:
                     size_label = "Unavailable"
                 badge = QLabel(f"{filename}  ·  {size_label}")
-                badge.setStyleSheet(f"color: {TEXT}; background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 8px; font-size: 11px;")
+                badge.setStyleSheet(f"color: {TEXT}; background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 7px; padding: 5px 9px; font-size: 11px;")
                 badge.setToolTip(path)
                 badges.addWidget(badge)
             badges.addStretch(1)
             content.addLayout(badges)
-
-        layout.addLayout(content, 1)
+        if is_user:
+            bubble = QFrame()
+            bubble.setObjectName("userBubble")
+            bubble.setMaximumWidth(780)
+            bubble_layout = QVBoxLayout(bubble)
+            bubble_layout.setContentsMargins(15, 11, 15, 11)
+            bubble_layout.setSpacing(0)
+            bubble_layout.addLayout(content)
+            row.addStretch(1)
+            row.addWidget(bubble, 0, Qt.AlignRight | Qt.AlignTop)
+            row.addWidget(avatar, 0, Qt.AlignTop)
+        else:
+            row.addWidget(avatar, 0, Qt.AlignTop)
+            row.addLayout(content, 1)
 
 
 class EffortSlider(QSlider):
@@ -741,6 +751,34 @@ class ModelSettingsDialog(QDialog):
             self.api_key.setPlaceholderText("API key")
         layout.addWidget(self._labelled("API key", self.api_key))
 
+        font_title = QLabel("ASSISTANT TEXT SIZE")
+        font_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 10px;")
+        layout.addWidget(font_title)
+        font_rule = QFrame()
+        font_rule.setFixedHeight(1)
+        font_rule.setStyleSheet(f"background: {BORDER}; border: none;")
+        layout.addWidget(font_rule)
+        font_row = QHBoxLayout()
+        font_hint = QLabel("Nova response font")
+        font_hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
+        font_row.addWidget(font_hint)
+        font_row.addStretch(1)
+        self.font_value = QLabel(f'{settings.get("assistant_font_size", "15")} px')
+        self.font_value.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
+        font_row.addWidget(self.font_value)
+        layout.addLayout(font_row)
+        self.font_slider = QSlider(Qt.Horizontal)
+        self.font_slider.setRange(13, 20)
+        try:
+            self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "15")))))
+        except (TypeError, ValueError):
+            self.font_slider.setValue(15)
+        self.font_slider.setTickPosition(QSlider.TicksBelow)
+        self.font_slider.setTickInterval(1)
+        self.font_slider.valueChanged.connect(lambda value: self.font_value.setText(f"{value} px"))
+        self.font_slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }} QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }} QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -6px 0; border-radius: 7px; }}")
+        layout.addWidget(self.font_slider)
+
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent; padding: 5px 2px;")
@@ -791,6 +829,7 @@ class ModelSettingsDialog(QDialog):
             "api_base_url": self.api_base.text().strip(),
             "api_model": self.api_model.text().strip(),
             "api_key": typed_key or self._existing_key,
+            "assistant_font_size": str(self.font_slider.value()),
         }
 
     def _on_save(self):
@@ -1185,9 +1224,9 @@ class NovaWindow(QMainWindow):
                 
         for item in messages:
             widget = MessageWidget(
-                item["role"], 
-                item["content"], 
-                attachments=item.get("attachments") or []
+                item["role"], item["content"],
+                attachments=item.get("attachments") or [],
+                font_size=int(self._settings.get("assistant_font_size", "15") or 15),
             )
             self.chat_container_layout.addWidget(widget)
             
@@ -1196,7 +1235,7 @@ class NovaWindow(QMainWindow):
 
     def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        widget = MessageWidget(role, text, attachments=attachments)
+        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "15") or 15))
         self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1215,7 +1254,7 @@ class NovaWindow(QMainWindow):
         if self.streaming_message is not None:
             return self.streaming_message
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        self.streaming_message = StreamingMessageWidget()
+        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "15") or 15))
         self.chat_container_layout.addWidget(self.streaming_message)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1321,6 +1360,7 @@ class NovaWindow(QMainWindow):
             apply_to_environment(values)
             if self._rebuild_core():
                 self._refresh_model_labels()
+                self._render_current_chat()
 
     def _choose_attachments(self):
         if self.busy:
