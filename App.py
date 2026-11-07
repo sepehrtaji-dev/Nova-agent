@@ -316,7 +316,7 @@ class AgentWorker(QObject):
 
 class StreamingMessageWidget(QFrame):
     """Plain-text assistant draft updated as model deltas arrive."""
-    def __init__(self, font_size=15, parent=None):
+    def __init__(self, font_size=16, parent=None):
         super().__init__(parent)
         self.setObjectName("streamingMessage")
         self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
@@ -478,7 +478,7 @@ class ThinkingPanel(QFrame):
 
 
 class MessageWidget(QFrame):
-    def __init__(self, role, text, attachments=None, font_size=15, parent=None):
+    def __init__(self, role, text, attachments=None, font_size=16, parent=None):
         super().__init__(parent)
         is_user = role == "user"
         self.setObjectName("userMessageRow" if is_user else "assistantMessageRow")
@@ -763,14 +763,14 @@ class ModelSettingsDialog(QDialog):
         font_hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         font_row.addWidget(font_hint)
         font_row.addStretch(1)
-        self.font_value = QLabel(f'{settings.get("assistant_font_size", "15")} px')
+        self.font_value = QLabel(f'{settings.get("assistant_font_size", "16")} px')
         self.font_value.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
         font_row.addWidget(self.font_value)
         layout.addLayout(font_row)
         self.font_slider = QSlider(Qt.Horizontal)
         self.font_slider.setRange(13, 20)
         try:
-            self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "15")))))
+            self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "16")))))
         except (TypeError, ValueError):
             self.font_slider.setValue(15)
         self.font_slider.setTickPosition(QSlider.TicksBelow)
@@ -1226,7 +1226,7 @@ class NovaWindow(QMainWindow):
             widget = MessageWidget(
                 item["role"], item["content"],
                 attachments=item.get("attachments") or [],
-                font_size=int(self._settings.get("assistant_font_size", "15") or 15),
+                font_size=int(self._settings.get("assistant_font_size", "16") or 16),
             )
             self.chat_container_layout.addWidget(widget)
             
@@ -1235,7 +1235,7 @@ class NovaWindow(QMainWindow):
 
     def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "15") or 15))
+        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "16") or 16))
         self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1254,7 +1254,7 @@ class NovaWindow(QMainWindow):
         if self.streaming_message is not None:
             return self.streaming_message
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "15") or 15))
+        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "16") or 16))
         self.chat_container_layout.addWidget(self.streaming_message)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1360,7 +1360,7 @@ class NovaWindow(QMainWindow):
             apply_to_environment(values)
             if self._rebuild_core():
                 self._refresh_model_labels()
-                self._render_current_chat()
+            self._render_current_chat()
 
     def _choose_attachments(self):
         if self.busy:
