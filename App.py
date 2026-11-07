@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QSplitter,
     QToolButton,
+    QWidgetAction,
 )
 
 from agent.core import NovaCore
@@ -622,49 +623,73 @@ class ModelSettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Model settings")
         self.setModal(True)
-        self.setMinimumWidth(520)
-        self.setStyleSheet(f"QDialog {{ background-color: {BG_MAIN}; color: {TEXT}; }}")
+        self.setMinimumSize(700, 560)
+        self.resize(760, 620)
+        self.setObjectName("settingsDialog")
+        self.setStyleSheet(f"""
+            QDialog#settingsDialog {{ background: {BG_MAIN}; color: {TEXT}; }}
+            QLabel {{ color: {TEXT}; }}
+            QLineEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 10px 12px; min-height: 22px; selection-background-color: #304c70; }}
+            QLineEdit:focus {{ border: 1px solid {ACCENT}; }}
+            QRadioButton {{ color: {TEXT}; spacing: 9px; padding: 7px 2px; }}
+            QRadioButton::indicator {{ width: 16px; height: 16px; }}
+            QPushButton {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 9px 16px; min-width: 86px; }}
+            QPushButton:hover {{ background: #203044; border-color: #405a76; }}
+        """)
 
         self._settings = dict(settings)
         self._installed = list(installed_models or [])
         self._existing_key = str(settings.get("api_key", "") or "")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(28, 25, 28, 24)
+        layout.setSpacing(15)
 
-        heading = QLabel("Choose how Nova reasons")
-        heading.setStyleSheet("font-size: 16px; font-weight: 700; border: none; background: transparent;")
+        brand = QLabel("NOVA  /  SETTINGS")
+        brand.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 2px;")
+        layout.addWidget(brand)
+        heading = QLabel("Model & connections")
+        heading.setStyleSheet("font-size: 23px; font-weight: 750; border: none; background: transparent;")
         layout.addWidget(heading)
 
         note = QLabel("Local keeps everything on this computer. Remote sends your messages, file contents, and tool results to the provider you configure.")
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {TEXT_MUTED}; border: none; background: transparent;")
+        note.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
         layout.addWidget(note)
 
-        self.local_radio = QRadioButton("Local model (Ollama)")
-        layout.addWidget(self.local_radio)
+        provider_card = QFrame()
+        provider_card.setObjectName("providerCard")
+        provider_card.setStyleSheet(f"QFrame#providerCard {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 13px; }}")
+        provider_layout = QVBoxLayout(provider_card)
+        provider_layout.setContentsMargins(18, 15, 18, 16)
+        provider_layout.setSpacing(9)
+        provider_title = QLabel("PROVIDER")
+        provider_title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px;")
+        provider_layout.addWidget(provider_title)
+
+        self.local_radio = QRadioButton("Local model  ·  Ollama")
+        provider_layout.addWidget(self.local_radio)
 
         self.local_model = QLineEdit(str(settings.get("local_model", "") or ""))
-        self.local_model.setPlaceholderText("e.g. qwen2.5:3b (blank = auto-detect)")
-        layout.addWidget(self.local_model)
+        self.local_model.setPlaceholderText("Model name, e.g. qwen2.5:3b (blank = auto-detect)")
+        provider_layout.addWidget(self.local_model)
 
         if self._installed:
             hint = QLabel("Installed: " + ", ".join(self._installed[:6]))
             hint.setWordWrap(True)
             hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
-            layout.addWidget(hint)
+            provider_layout.addWidget(hint)
 
-        self.remote_radio = QRadioButton("Remote API (OpenAI-compatible)")
-        layout.addWidget(self.remote_radio)
+        self.remote_radio = QRadioButton("Remote API  ·  OpenAI-compatible")
+        provider_layout.addWidget(self.remote_radio)
 
         self.api_base = QLineEdit(str(settings.get("api_base_url", "") or ""))
         self.api_base.setPlaceholderText("https://api.openai.com/v1")
-        layout.addWidget(self._labelled("Base URL", self.api_base))
+        provider_layout.addWidget(self._labelled("Base URL", self.api_base))
 
         self.api_model = QLineEdit(str(settings.get("api_model", "") or ""))
         self.api_model.setPlaceholderText("e.g. gpt-4o-mini, or a gateway model id")
-        layout.addWidget(self._labelled("Model", self.api_model))
+        provider_layout.addWidget(self._labelled("Model", self.api_model))
 
         self.api_key = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
@@ -672,16 +697,19 @@ class ModelSettingsDialog(QDialog):
             self.api_key.setPlaceholderText(f"stored: {masked_key(self._existing_key)} — leave blank to keep")
         else:
             self.api_key.setPlaceholderText("API key")
-        layout.addWidget(self._labelled("API key", self.api_key))
+        provider_layout.addWidget(self._labelled("API key", self.api_key))
+        layout.addWidget(provider_card)
 
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
+        self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent; padding: 5px 2px;")
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
+        buttons.setStyleSheet(f"QDialogButtonBox {{ border: none; }} QPushButton {{ min-width: 104px; min-height: 38px; }}")
+        layout.addStretch(1)
         layout.addWidget(buttons)
 
         if str(settings.get("provider", "local")).lower() == "remote":
@@ -871,43 +899,37 @@ class NovaWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Header
-        header = QFrame()
-        header.setObjectName("appHeader")
-        header.setFixedHeight(72)
-        header.setStyleSheet(f"QFrame#appHeader {{ background: {BG_MAIN}; border-bottom: 1px solid {BORDER}; }}")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(30, 0, 30, 0)
-        header_layout.setSpacing(16)
-        
-        self.model_selector = QPushButton("Loading...")
-        self.model_selector.setMinimumHeight(38)
-        self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #3b5067; }}")
-        self.model_selector.clicked.connect(self._show_model_menu)
-        header_layout.addWidget(self.model_selector)
-
-        self.effort_selector = EffortSelector()
-        self.effort_selector.set_value(self._effort)
-        self.effort_selector.changed.connect(self._on_effort_changed)
-        header_layout.addWidget(self.effort_selector)
-
-        header_layout.addStretch()
-
-        self.status_indicator = QLabel("●")
-        self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
-        header_layout.addWidget(self.status_indicator)
-
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 550; border: none; background: transparent;")
-        self.status_label.setMinimumWidth(72)
-        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        header_layout.addWidget(self.status_label)
-
+        # Keep status state for worker callbacks, but do not render the old
+        # top-bar indicator or "Ready" label in the new composer-first layout.
+        self.status_label = QLabel()
+        self.status_indicator = QLabel()
+        self.status_label.hide()
+        self.status_indicator.hide()
         self._status_phase = 0
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(420)
         self._status_timer.timeout.connect(self._animate_status)
 
-        main_layout.addWidget(header)
+        self.model_selector = QPushButton("Loading model…")
+        self.model_selector.setCursor(Qt.PointingHandCursor)
+        self.model_selector.setMinimumHeight(36)
+        self.model_selector.setIcon(make_icon("chevron_down", TEXT_MUTED, 13))
+        self.model_selector.setLayoutDirection(Qt.LeftToRight)
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT}; font-size: 12px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; }}")
+        self.model_selector.clicked.connect(self._show_model_menu)
+
+        self.effort_selector = EffortSelector()
+        self.effort_selector.set_value(self._effort)
+        self.effort_selector.changed.connect(self._on_effort_changed)
+        self.effort_selector.setToolTip("Reasoning effort")
+        self.effort_selector.setFixedHeight(36)
+        self.effort_selector.setStyleSheet(f"QWidget {{ background: transparent; }}")
+
+        self.effort_button = QPushButton(f"Effort  ·  {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
+        self.effort_button.setCursor(Qt.PointingHandCursor)
+        self.effort_button.setMinimumHeight(36)
+        self.effort_button.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT_MUTED}; font-size: 12px; }} QPushButton:hover {{ background: {BG_INPUT}; color: {TEXT}; }}")
+        self.effort_button.clicked.connect(self._show_model_menu)
 
         # Chat Area
         self.chat_scroll = QScrollArea()
@@ -944,18 +966,22 @@ class NovaWindow(QMainWindow):
         self.input.submitted.connect(self._send)
         box_layout.addWidget(self.input)
 
-        # Pending attachments must be visible before the user sends the message.
-        # Keep this strip inside the composer so it stays next to the text box.
-        self.attachment_preview = QFrame()
-        self.attachment_preview.setObjectName("attachmentPreview")
-        self.attachment_preview.setStyleSheet(
-            f"QFrame#attachmentPreview {{ background: transparent; border: none; }}"
-        )
-        self.attachment_preview_layout = QVBoxLayout(self.attachment_preview)
-        self.attachment_preview_layout.setContentsMargins(0, 2, 0, 2)
-        self.attachment_preview_layout.setSpacing(4)
-        self.attachment_preview.hide()
-        box_layout.addWidget(self.attachment_preview)
+        # Pending files appear as portrait cards in a horizontal carousel
+        # above the text editor, like a modern chat composer.
+        self.attachment_scroll = QScrollArea()
+        self.attachment_scroll.setObjectName("attachmentCarousel")
+        self.attachment_scroll.setWidgetResizable(True)
+        self.attachment_scroll.setFixedHeight(112)
+        self.attachment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.attachment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.attachment_scroll.setStyleSheet(f"QScrollArea#attachmentCarousel {{ background: transparent; border: none; }} QScrollBar:horizontal {{ height: 6px; background: transparent; }} QScrollBar::handle:horizontal {{ background: {BORDER}; border-radius: 3px; min-width: 24px; }} QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}")
+        self.attachment_preview = QWidget()
+        self.attachment_preview_layout = QHBoxLayout(self.attachment_preview)
+        self.attachment_preview_layout.setContentsMargins(1, 2, 1, 5)
+        self.attachment_preview_layout.setSpacing(8)
+        self.attachment_scroll.setWidget(self.attachment_preview)
+        self.attachment_scroll.hide()
+        box_layout.insertWidget(0, self.attachment_scroll)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -979,7 +1005,18 @@ class NovaWindow(QMainWindow):
         controls.addWidget(self.send_button)
 
         box_layout.addLayout(controls)
+
         composer_layout.addWidget(self.composer_box)
+        bottom_controls = QHBoxLayout()
+        bottom_controls.setContentsMargins(2, 8, 2, 0)
+        bottom_controls.setSpacing(9)
+        bottom_controls.addWidget(self.model_selector)
+        bottom_controls.addWidget(self.effort_button)
+        bottom_controls.addStretch(1)
+        helper = QLabel("Model & reasoning")
+        helper.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+        bottom_controls.addWidget(helper)
+        composer_layout.addLayout(bottom_controls)
         main_layout.addWidget(composer_area)
 
         splitter.addWidget(main_content)
@@ -1006,7 +1043,9 @@ class NovaWindow(QMainWindow):
         model = str(getattr(brain, "model", "") or "model")
         remote = self._settings.get("provider") == "remote"
         provider = "API" if remote else "LOCAL"
-        self.model_selector.setText(f"◈  {model}  ·  {provider}")
+        self.model_selector.setText(f"◈  {model}  ·  {provider}  ▾")
+        if hasattr(self, "effort_button"):
+            self.effort_button.setText(f"Effort  ·  {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
         provider_name = "Remote API" if remote else "Local Ollama"
         self.model_selector.setToolTip(
             f"Provider: {provider_name}\\nModel: {model}\\n"
@@ -1159,6 +1198,7 @@ class NovaWindow(QMainWindow):
         if self.busy:
             return
         menu = QMenu(self)
+        menu.setMinimumWidth(330)
         remote = self._settings.get("provider") == "remote"
         
         installed = []
@@ -1176,14 +1216,35 @@ class NovaWindow(QMainWindow):
         if current and current not in installed:
             installed.insert(0, current)
 
+        title_action = menu.addSection("MODEL")
         for name in sorted(set(installed), key=str.lower):
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setChecked(not remote and name == current)
+            action = menu.addAction(("✓  " if (not remote and name == current) else "    ") + name)
             action.triggered.connect(lambda _, n=name: self._select_model(n))
 
         menu.addSeparator()
-        menu.addAction("API and model settings...").triggered.connect(self._open_model_settings)
+        effort_action = QWidgetAction(menu)
+        effort_panel = QWidget(menu)
+        effort_layout = QVBoxLayout(effort_panel)
+        effort_layout.setContentsMargins(14, 8, 14, 12)
+        effort_layout.setSpacing(7)
+        effort_head = QHBoxLayout()
+        effort_title = QLabel("EFFORT")
+        effort_title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 800; letter-spacing: 1px;")
+        effort_head.addWidget(effort_title)
+        effort_head.addStretch(1)
+        current_effort = QLabel(EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)])
+        current_effort.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
+        effort_head.addWidget(current_effort)
+        effort_layout.addLayout(effort_head)
+        popup_effort = EffortSelector()
+        popup_effort.set_value(self._effort)
+        popup_effort.changed.connect(self._on_effort_changed)
+        popup_effort.changed.connect(lambda value: current_effort.setText(EFFORT_LABELS[EFFORT_LEVELS.index(value)]))
+        effort_layout.addWidget(popup_effort)
+        effort_action.setDefaultWidget(effort_panel)
+        menu.addAction(effort_action)
+        menu.addSeparator()
+        menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
         menu.exec(self.model_selector.mapToGlobal(QPoint(0, self.model_selector.height())))
 
     def _select_model(self, name):
@@ -1232,49 +1293,48 @@ class NovaWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
 
-        self.attachment_preview.setVisible(bool(self.attachments))
+        self.attachment_scroll.setVisible(bool(self.attachments))
         for index, path in enumerate(self.attachments):
-            row = QFrame()
-            row.setObjectName("attachmentChip")
-            row.setStyleSheet(
-                f"QFrame#attachmentChip {{ background: {BG_INPUT}; "
-                f"border: 1px solid {BORDER}; border-radius: 7px; }}"
-            )
-            layout = QHBoxLayout(row)
-            layout.setContentsMargins(9, 5, 6, 5)
-            layout.setSpacing(8)
+            card = QFrame()
+            card.setObjectName("attachmentCard")
+            card.setFixedSize(132, 96)
+            card.setStyleSheet(f"QFrame#attachmentCard {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 10px; }}")
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(9, 7, 8, 7)
+            layout.setSpacing(3)
 
-            file_icon = QLabel("📎")
-            file_icon.setStyleSheet("border: none; background: transparent;")
-            layout.addWidget(file_icon)
+            top = QHBoxLayout()
+            top.setContentsMargins(0, 0, 0, 0)
+            file_icon = QLabel("▤")
+            file_icon.setStyleSheet(f"color: {ACCENT}; font-size: 17px; border: none; background: transparent;")
+            top.addWidget(file_icon)
+            top.addStretch(1)
+            remove = QToolButton()
+            remove.setText("×")
+            remove.setToolTip(f"Remove {os.path.basename(path)}")
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.setFixedSize(20, 20)
+            remove.setStyleSheet(f"QToolButton {{ color: {TEXT_MUTED}; background: transparent; border: none; font-size: 16px; }} QToolButton:hover {{ color: {TEXT}; background: {BORDER}; border-radius: 5px; }}")
+            remove.clicked.connect(lambda checked=False, item_path=path: self._remove_attachment(item_path))
+            top.addWidget(remove)
+            layout.addLayout(top)
 
             filename = os.path.basename(path) or path
+            name = QLabel(filename)
+            name.setWordWrap(True)
+            name.setMaximumHeight(34)
+            name.setStyleSheet(f"color: {TEXT}; font-size: 10px; border: none; background: transparent;")
+            name.setToolTip(path)
+            layout.addWidget(name)
             try:
                 size_text = format_bytes(os.path.getsize(path))
             except OSError:
                 size_text = "Unavailable"
-            details = QLabel(f"{filename}  ·  {size_text}")
-            details.setMinimumWidth(0)
-            details.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            details.setStyleSheet(
-                f"color: {TEXT}; border: none; background: transparent; font-size: 11px;"
-            )
-            details.setToolTip(path)
-            layout.addWidget(details, 1)
-
-            remove = QToolButton()
-            remove.setText("×")
-            remove.setToolTip(f"Remove {filename}")
-            remove.setCursor(Qt.PointingHandCursor)
-            remove.setFixedSize(22, 22)
-            remove.setStyleSheet(
-                f"QToolButton {{ color: {TEXT_MUTED}; background: transparent; "
-                f"border: none; font-size: 17px; border-radius: 4px; }}"
-                f"QToolButton:hover {{ color: {TEXT}; background: {BORDER}; }}"
-            )
-            remove.clicked.connect(lambda checked=False, item_path=path: self._remove_attachment(item_path))
-            layout.addWidget(remove)
-            self.attachment_preview_layout.addWidget(row)
+            size = QLabel(size_text)
+            size.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; border: none; background: transparent;")
+            layout.addWidget(size)
+            self.attachment_preview_layout.addWidget(card)
+        self.attachment_preview_layout.addStretch(1)
 
     def _remove_attachment(self, path):
         if path in self.attachments:
