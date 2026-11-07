@@ -106,6 +106,256 @@ class OpenAICompatibleBrain:
         self.max_retries = max(0, int(max_retries))
         self.last_error = None
 
+    def generate_tool_turn(self, messages, tools, system_prompt=None, options=None):
+        """Run one native function-calling turn against an OpenAI-compatible API.
+
+        Tool execution stays in Nova. This operation is not retried: replaying
+        a timed-out tool decision could duplicate a side effect.
+        """
+        if not self.is_configured():
+            raise RemoteBrainError(
+                "Remote provider is not fully configured. " + self.configuration_help()
+            )
+        wire_messages = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            wire_item = dict(item)
+            calls = wire_item.get("tool_calls")
+            if wire_item.get("role") == "assistant" and isinstance(calls, list):
+                wire_calls = []
+                for call in calls:
+                    if not isinstance(call, dict):
+                        continue
+                    wire_call = dict(call)
+                    function = wire_call.get("function")
+                    if isinstance(function, dict):
+                        wire_function = dict(function)
+                        arguments = wire_function.get("arguments")
+                        if isinstance(arguments, dict):
+                            wire_function["arguments"] = json.dumps(arguments, ensure_ascii=False)
+                        wire_call["function"] = wire_function
+                    wire_calls.append(wire_call)
+                wire_item["tool_calls"] = wire_calls
+            wire_messages.append(wire_item)
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": str(system_prompt or _DEFAULT_SYSTEM_PROMPT)},
+                *wire_messages,
+            ],
+            "tools": list(tools or []),
+            "tool_choice": "auto",
+            "temperature": 0.1,
+        }
+        if isinstance(options, dict):
+            for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
+                if key in options:
+                    payload[key] = options[key]
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "application/json",
+                "User-Agent": "NovaAgent/2.1",
+            },
+        )
+        try:
+            context = ssl.create_default_context()
+            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+                raw = response.read().decode("utf-8", "replace")
+            data = json.loads(raw)
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:500]
+            except Exception:
+                pass
+            finally:
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+            detail = _scrub(detail, self.api_key)
+            self.last_error = f"HTTP {exc.code}: {detail}"
+            hint = _rate_limit_hint(detail) if exc.code == 429 else "Check provider status and request configuration."
+            raise RemoteBrainError(
+                f"Remote tool-call request returned HTTP {exc.code}. {hint}",
+                transient=exc.code in (408, 409, 429, 500, 502, 503, 504),
+            ) from exc
+        except urllib.error.URLError as exc:
+            self.last_error = _scrub(str(exc.reason), self.api_key)
+            raise RemoteBrainError(
+                f"Remote tool-call request did not respond: {self.last_error}",
+                transient=True,
+            ) from exc
+        except (TimeoutError, OSError) as exc:
+            self.last_error = _scrub(f"{type(exc).__name__}: {exc}", self.api_key)
+            raise RemoteBrainError(
+                f"Remote tool-call request timed out or failed: {self.last_error}",
+                transient=True,
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise RemoteBrainError(
+                f"Remote provider returned a non-JSON tool-call response: {exc}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise RemoteBrainError("Remote provider returned an unexpected tool-call response.")
+        if isinstance(data.get("error"), (dict, str)):
+            error = data["error"]
+            detail = error.get("message") if isinstance(error, dict) else error
+            raise RemoteBrainError("Remote tool-call error: " + _scrub(str(detail), self.api_key))
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise RemoteBrainError("Remote provider returned no tool-call choices.")
+        choice = choices[0]
+        message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list):
+            calls = []
+        content = message.get("content")
+        if content is None:
+            content = ""
+        elif not isinstance(content, str):
+            content = str(content)
+        return {
+            "content": content,
+            "tool_calls": calls,
+            "finish_reason": choice.get("finish_reason"),
+        }
+
+    def generate_tool_turn_stream(
+        self, messages, tools, system_prompt=None, options=None,
+        on_token=None, on_thought_delta=None,
+    ):
+        """Stream an OpenAI-compatible native tool-call turn from SSE deltas."""
+        if not self.is_configured():
+            raise RemoteBrainError(
+                "Remote provider is not fully configured. " + self.configuration_help()
+            )
+        wire_messages = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            wire_item = dict(item)
+            calls = wire_item.get("tool_calls")
+            if wire_item.get("role") == "assistant" and isinstance(calls, list):
+                for call in calls:
+                    function = call.get("function") if isinstance(call, dict) else None
+                    if isinstance(function, dict) and isinstance(function.get("arguments"), dict):
+                        function["arguments"] = json.dumps(function["arguments"], ensure_ascii=False)
+            wire_messages.append(wire_item)
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": str(system_prompt or _DEFAULT_SYSTEM_PROMPT)},
+                *wire_messages,
+            ],
+            "tools": list(tools or []),
+            "tool_choice": "auto",
+            "temperature": 0.1,
+            "stream": True,
+        }
+        if isinstance(options, dict):
+            for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
+                if key in options:
+                    payload[key] = options[key]
+
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "text/event-stream",
+                "User-Agent": "NovaAgent/2.1",
+            },
+        )
+        text_parts = []
+        thought_parts = []
+        tool_parts = {}
+        try:
+            context = ssl.create_default_context()
+            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = event.get("choices") if isinstance(event, dict) else None
+                    if not isinstance(choices, list) or not choices:
+                        continue
+                    delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
+                    if not isinstance(delta, dict):
+                        continue
+                    thought = delta.get("reasoning_content", "")
+                    if isinstance(thought, str) and thought:
+                        thought_parts.append(thought)
+                        if callable(on_thought_delta):
+                            on_thought_delta(thought)
+                    token = delta.get("content", "")
+                    if token:
+                        token = token if isinstance(token, str) else str(token)
+                        text_parts.append(token)
+                        if callable(on_token):
+                            on_token(token)
+                    for call in delta.get("tool_calls", []) or []:
+                        if not isinstance(call, dict):
+                            continue
+                        index = call.get("index", 0)
+                        current = tool_parts.setdefault(index, {
+                            "id": "", "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        })
+                        if call.get("id"):
+                            current["id"] = call["id"]
+                        function = call.get("function", {})
+                        if isinstance(function, dict):
+                            current["function"]["name"] += str(function.get("name") or "")
+                            current["function"]["arguments"] += str(function.get("arguments") or "")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:500]
+            except Exception:
+                pass
+            raise RemoteBrainError(
+                f"Remote provider returned HTTP {exc.code}: {_scrub(detail, self.api_key)}",
+                transient=exc.code in (408, 409, 429, 500, 502, 503, 504),
+            ) from exc
+        except urllib.error.URLError as exc:
+            self.last_error = _scrub(str(exc.reason), self.api_key)
+            raise RemoteBrainError(f"Remote provider did not respond: {self.last_error}", transient=True) from exc
+
+        calls = []
+        for index in sorted(tool_parts):
+            call = tool_parts[index]
+            try:
+                arguments = json.loads(call["function"]["arguments"] or "{}")
+            except json.JSONDecodeError:
+                arguments = call["function"]["arguments"]
+            call["function"]["arguments"] = arguments
+            calls.append(call)
+        return {
+            "content": "".join(text_parts),
+            "thinking": "".join(thought_parts),
+            "tool_calls": calls,
+            "finish_reason": None,
+        }
+
     # ------------------------------------------------------------------ status
     @property
     def provider_label(self):

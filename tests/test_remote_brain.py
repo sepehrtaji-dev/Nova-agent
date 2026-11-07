@@ -49,6 +49,28 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"boom")
             return
+        if override == "tool_call":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_test",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": "{\"path\": \"index.html\"}"
+                            }
+                        }]
+                    }
+                }]
+            }).encode())
+            return
         if override == "garbage":
             self.send_response(200)
             self.end_headers()
@@ -86,6 +108,109 @@ class RemoteBrainTests(unittest.TestCase):
         self.brain = OpenAICompatibleBrain(
             model="test-model", api_key="sk-good", base_url=self.base,
             max_retries=0)
+
+    def test_native_tool_turn_preserves_structured_tool_calls(self):
+        RESPONSES["status"] = "tool_call"
+        definitions = [{
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        }]
+        result = self.brain.generate_tool_turn(
+            messages=[{"role": "user", "content": "Read index.html"}],
+            tools=definitions,
+            system_prompt="Nova test",
+        )
+        self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(
+            json.loads(result["tool_calls"][0]["function"]["arguments"]),
+            {"path": "index.html"},
+        )
+        sent = CAPTURED[-1]["body"]
+        self.assertEqual(sent["tools"], definitions)
+        self.assertEqual(sent["tool_choice"], "auto")
+        self.assertEqual(sent["messages"][-1]["content"], "Read index.html")
+
+    def test_remote_tool_history_serializes_function_arguments(self):
+        RESPONSES["status"] = "tool_call"
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_previous",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": {"path": "index.html"},
+                    },
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_previous",
+                "name": "read_file",
+                "content": "{\"ok\": true}",
+            },
+        ]
+        self.brain.generate_tool_turn(messages=messages, tools=[], system_prompt="Nova")
+        sent_messages = CAPTURED[-1]["body"]["messages"]
+        self.assertEqual(
+            json.loads(sent_messages[1]["tool_calls"][0]["function"]["arguments"]),
+            {"path": "index.html"},
+        )
+        self.assertEqual(sent_messages[2]["tool_call_id"], "call_previous")
+
+    def test_ollama_native_tool_turn_uses_tool_name_for_tool_results(self):
+        from model.ollama import OllamaBrain
+
+        response = {"message": {"content": "done", "tool_calls": []}}
+        with mock.patch("model.ollama.ollama.chat", return_value=response) as chat:
+            brain = OllamaBrain(model="test-model")
+            result = brain.generate_tool_turn(
+                messages=[
+                    {
+                        "role": "assistant",
+                        "thinking": "I previously reasoned that this file must be inspected.",
+                        "tool_calls": [{
+                            "id": "call_previous",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": {"path": "index.html"},
+                            },
+                        }],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_previous",
+                        "name": "read_file",
+                        "content": "file contents",
+                    },
+                ],
+                tools=[],
+                system_prompt="Nova",
+            )
+        self.assertEqual(result["content"], "done")
+        sent_messages = chat.call_args.kwargs["messages"]
+        self.assertEqual(sent_messages[-1]["role"], "tool")
+        self.assertEqual(sent_messages[-1]["tool_name"], "read_file")
+        self.assertNotIn("tool_call_id", sent_messages[-1])
+        assistant_call = sent_messages[-2]["tool_calls"][0]
+        self.assertEqual(
+            sent_messages[-2]["thinking"],
+            "I previously reasoned that this file must be inspected.",
+        )
+        self.assertEqual(assistant_call["function"]["arguments"], {"path": "index.html"})
+        self.assertNotIn("id", assistant_call)
+        self.assertNotIn("type", assistant_call)
 
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
@@ -269,6 +394,82 @@ class ProviderSelectionTests(unittest.TestCase):
         text = describe_brain(OllamaBrain(model="qwen2.5:3b"))
         self.assertIn("qwen2.5:3b", text)
         self.assertIn("nothing is sent", text)
+
+
+    def test_ollama_native_tool_turn_returns_native_thinking(self):
+        response = {"message": {
+            "content": "The answer is 42.",
+            "thinking": "I should calculate this carefully.",
+            "tool_calls": [],
+        }}
+        with mock.patch("model.ollama.ollama.show", return_value={
+            "thinking": {"values": [True], "default": True},
+        }), mock.patch("model.ollama.ollama.chat", return_value=response) as chat:
+            brain = OllamaBrain(model="test-model")
+            result = brain.generate_tool_turn(
+                messages=[{"role": "user", "content": "Calculate 6 times 7."}],
+                tools=[],
+            )
+        self.assertEqual(result["thinking"], "I should calculate this carefully.")
+        self.assertEqual(result["content"], "The answer is 42.")
+        self.assertIs(chat.call_args.kwargs["think"], True)
+
+    def test_ollama_native_tool_stream_emits_thinking_and_tool_calls(self):
+        chunks = [
+            {"message": {"thinking": "First, inspect ", "content": ""}},
+            {"message": {"thinking": "the request.", "content": ""}},
+            {"message": {"thinking": "", "content": "", "tool_calls": [{
+                "function": {"name": "read_file", "arguments": {"path": "README.md"}}
+            }]}},
+            {"message": {"thinking": "", "content": "I inspected the README."}},
+        ]
+        thoughts = []
+        with mock.patch("model.ollama.ollama.show", return_value={
+            "thinking": {"values": [True], "default": True},
+        }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat:
+            brain = OllamaBrain(model="test-model")
+            result = brain.generate_tool_turn_stream(
+                messages=[{"role": "user", "content": "Read README"}],
+                tools=[],
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual("".join(thoughts), "First, inspect the request.")
+        self.assertEqual(result["thinking"], "First, inspect the request.")
+        self.assertEqual(result["content"], "I inspected the README.")
+        self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertIs(chat.call_args.kwargs["think"], True)
+
+    def test_effort_wrapper_forwards_native_thought_callback(self):
+        from model.effort import EffortAwareBrain
+
+        class StreamingBrain:
+            def __init__(self):
+                self.received = None
+
+            def generate_tool_turn_stream(self, **kwargs):
+                self.received = kwargs
+                kwargs["on_thought_delta"]("native thought")
+                return {"content": "answer", "thinking": "native thought", "tool_calls": []}
+
+        backend = StreamingBrain()
+        wrapper = EffortAwareBrain(backend, "high")
+        thoughts = []
+        result = wrapper.generate_tool_turn_stream(
+            messages=[], tools=[], on_thought_delta=thoughts.append,
+        )
+        self.assertEqual(thoughts, ["native thought"])
+        self.assertEqual(result["thinking"], "native thought")
+        self.assertTrue(callable(backend.received["on_thought_delta"]))
+
+    def test_ollama_effort_uses_only_model_advertised_thinking_levels(self):
+        with mock.patch("model.ollama.ollama.show", return_value={
+            "thinking": {"values": ["low", "medium"], "default": "medium"},
+        }) as show:
+            brain = OllamaBrain(model="test-model")
+            self.assertEqual(brain.think_value_for_effort("low"), "low")
+            self.assertEqual(brain.think_value_for_effort("high"), "medium")
+            self.assertIs(brain.think_value_for_effort("off"), False)
+            show.assert_called_once_with("test-model")
 
 
 if __name__ == "__main__":
