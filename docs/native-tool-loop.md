@@ -18,6 +18,11 @@ advertises native tool-call support.
    to the conversation sent on the next model turn.
 6. The model chooses another tool or returns its final answer.
 
+For Ollama thinking-capable models, the assistant's native `thinking` field is
+also retained on the assistant tool-call message and replayed with the next
+turn. The model receives its prior thinking together with the actual tool
+result instead of being forced to reconstruct the reasoning from scratch.
+
 There is no mandatory second planner pass after each successful read. The
 model receives the actual result and decides whether another operation is
 needed. This avoids turning every file read into a separate plan-rewrite
