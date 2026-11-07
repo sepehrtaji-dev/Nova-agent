@@ -1074,6 +1074,10 @@ class CoreTests(unittest.TestCase):
         brain = IdentityBrain()
         core = self._make_conversation_core(brain)
         core.long_memory = ProfileMemory()
+        # Restore the real prompt-context methods: the shared test fixture
+        # intentionally stubs these for unrelated conversation tests.
+        core._long_memory_context = NovaCore._long_memory_context.__get__(core, NovaCore)
+        core._identity_system_prompt = NovaCore._identity_system_prompt.__get__(core, NovaCore)
 
         response = core.ask("What is your name?")
 
