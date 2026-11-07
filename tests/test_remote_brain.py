@@ -178,6 +178,7 @@ class RemoteBrainTests(unittest.TestCase):
                 messages=[
                     {
                         "role": "assistant",
+                        "thinking": "I previously reasoned that this file must be inspected.",
                         "tool_calls": [{
                             "id": "call_previous",
                             "type": "function",
@@ -203,6 +204,10 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertEqual(sent_messages[-1]["tool_name"], "read_file")
         self.assertNotIn("tool_call_id", sent_messages[-1])
         assistant_call = sent_messages[-2]["tool_calls"][0]
+        self.assertEqual(
+            sent_messages[-2]["thinking"],
+            "I previously reasoned that this file must be inspected.",
+        )
         self.assertEqual(assistant_call["function"]["arguments"], {"path": "index.html"})
         self.assertNotIn("id", assistant_call)
         self.assertNotIn("type", assistant_call)
