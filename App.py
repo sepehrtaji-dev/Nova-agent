@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -720,8 +721,8 @@ class ModelSettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Model settings")
         self.setModal(True)
-        self.setMinimumSize(700, 560)
-        self.resize(760, 620)
+        self.setMinimumSize(760, 760)
+        self.resize(820, 900)
         self.setObjectName("settingsDialog")
         self.setStyleSheet(f"""
             QDialog#settingsDialog {{ background: {BG_MAIN}; color: {TEXT}; }}
@@ -737,6 +738,14 @@ class ModelSettingsDialog(QDialog):
         self._settings = dict(settings)
         self._installed = list(installed_models or [])
         self._existing_key = str(settings.get("api_key", "") or "")
+        try:
+            self._remote_profiles = json.loads(settings.get("remote_models", "[]") or "[]")
+            if not isinstance(self._remote_profiles, list):
+                self._remote_profiles = []
+        except (TypeError, json.JSONDecodeError):
+            self._remote_profiles = []
+        self._active_remote_id = str(settings.get("active_remote_model_id", "") or "")
+        self._avatar_path = str(settings.get("profile_avatar", "") or "")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 25, 28, 24)
