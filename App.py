@@ -795,13 +795,19 @@ class ModelSettingsDialog(QDialog):
         self.api_model.setPlaceholderText("e.g. gpt-4o-mini, or a gateway model id")
         layout.addWidget(self._labelled("Model", self.api_model))
 
-        self.api_key = QLineEdit()
+        key_row = QHBoxLayout()
+        self.api_key = QLineEdit(self._existing_key)
         self.api_key.setEchoMode(QLineEdit.Password)
-        if self._existing_key:
-            self.api_key.setPlaceholderText(f"stored: {masked_key(self._existing_key)} — leave blank to keep")
-        else:
-            self.api_key.setPlaceholderText("API key")
-        layout.addWidget(self._labelled("API key", self.api_key))
+        self.api_key.setPlaceholderText("API key")
+        self.key_visibility = QToolButton()
+        self.key_visibility.setText("Show")
+        self.key_visibility.setCheckable(True)
+        self.key_visibility.toggled.connect(lambda visible: (self.api_key.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password), self.key_visibility.setText("Hide" if visible else "Show")))
+        key_row.addWidget(self.api_key, 1)
+        key_row.addWidget(self.key_visibility)
+        key_wrap = QWidget()
+        key_wrap.setLayout(key_row)
+        layout.addWidget(self._labelled("API key", key_wrap))
 
         font_title = QLabel("ASSISTANT TEXT SIZE")
         font_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 10px;")
