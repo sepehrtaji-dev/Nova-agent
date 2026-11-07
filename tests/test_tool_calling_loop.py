@@ -73,6 +73,7 @@ class ToolCallingLoopTests(unittest.TestCase):
         brain = ScriptedToolBrain([
             {
                 "content": "",
+                "thinking": "I should inspect the note before deciding what to change.",
                 "tool_calls": [{
                     "id": "call_read",
                     "type": "function",
@@ -118,6 +119,7 @@ class ToolCallingLoopTests(unittest.TestCase):
         self.assertEqual(verified, ["read_note", "write_note", "read_note"])
         self.assertEqual(len(brain.calls), 4)
         second_messages = brain.calls[1]["messages"]
+        self.assertEqual(second_messages[-2]["thinking"], "I should inspect the note before deciding what to change.")
         self.assertEqual(second_messages[-1]["role"], "tool")
         self.assertIn("NOTE CONTENT", second_messages[-1]["content"])
         third_messages = brain.calls[2]["messages"]
