@@ -1423,7 +1423,6 @@ class CoreTests(unittest.TestCase):
         core.execution_state = {"last_plan": None, "verified_tools": [], "last_verified": None}
         core._direct_self_diagnostics_answer = lambda message: None
         core._direct_evidence_answer = lambda message: None
-        core._direct_memory_answer = lambda message: None
         core._extract_and_store_memory = lambda message: None
         core._identity_system_prompt = lambda extra="": "Nova identity"
         core._build_final_prompt = lambda **kwargs: "Final response prompt"
