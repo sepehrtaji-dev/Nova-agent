@@ -113,6 +113,22 @@ def render_markdown_text(text):
     return render_markdown(format_response_math(str(text or "")))
 
 
+def nova_logo_path():
+    """Return the optional Nova brand asset path."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "nova-logo.png")
+
+
+def load_nova_logo(size):
+    """Load and smoothly scale the user-provided Nova logo asset."""
+    path = nova_logo_path()
+    if not os.path.isfile(path):
+        return QPixmap()
+    source = QPixmap(path)
+    if source.isNull():
+        return QPixmap()
+    return source.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
 def make_avatar(letter="N", size=32):
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
@@ -121,9 +137,22 @@ def make_avatar(letter="N", size=32):
     painter.setBrush(QColor(BG_INPUT))
     painter.setPen(Qt.NoPen)
     painter.drawEllipse(0, 0, size, size)
-    painter.setPen(QColor(TEXT))
-    painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    if letter == "N":
+        logo = load_nova_logo(max(16, int(size * 0.88)))
+        if not logo.isNull():
+            painter.drawPixmap(
+                (size - logo.width()) // 2,
+                (size - logo.height()) // 2,
+                logo,
+            )
+        else:
+            painter.setPen(QColor(TEXT))
+            painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    else:
+        painter.setPen(QColor(TEXT))
+        painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
     painter.end()
     return pixmap
 
@@ -804,6 +833,9 @@ class NovaWindow(QMainWindow):
         self.attachments = []
 
         self.setWindowTitle("Nova")
+        logo = load_nova_logo(256)
+        if not logo.isNull():
+            self.setWindowIcon(QIcon(logo))
         self.setMinimumSize(960, 640)
         self.resize(1240, 820)
         
@@ -858,10 +890,16 @@ class NovaWindow(QMainWindow):
         brand_row = QHBoxLayout()
         brand_row.setContentsMargins(0, 0, 0, 0)
         brand_row.setSpacing(11)
-        brand_mark = QLabel("N")
+        brand_mark = QLabel()
         brand_mark.setAlignment(Qt.AlignCenter)
         brand_mark.setFixedSize(34, 34)
-        brand_mark.setStyleSheet(f"background: {BG_INPUT}; color: {ACCENT}; border: 1px solid {BORDER}; border-radius: 10px; font-size: 17px; font-weight: 800;")
+        brand_mark.setStyleSheet(f"background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 10px;")
+        brand_logo = load_nova_logo(30)
+        if not brand_logo.isNull():
+            brand_mark.setPixmap(brand_logo)
+        else:
+            brand_mark.setText("N")
+            brand_mark.setStyleSheet(f"background: {BG_INPUT}; color: {ACCENT}; border: 1px solid {BORDER}; border-radius: 10px; font-size: 17px; font-weight: 800;")
         brand_row.addWidget(brand_mark)
         brand_text = QVBoxLayout()
         brand_text.setSpacing(1)
