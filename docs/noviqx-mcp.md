@@ -44,11 +44,26 @@ python -m integrations.noviqx.mcp_server
 Configure an MCP client to launch this command from the Nova repository root.
 The server uses stdio; do not launch it in shared network mode.
 
+## Nova ToolRegistry integration
+
+Nova also registers two NoviqX-backed tools in `config/tools.json`:
+
+- `noviqx_github_get_file`: read a remote file and obtain its current blob SHA.
+- `noviqx_github_update_file`: update an existing file using that SHA as
+  `expected_sha`; stale writes are rejected.
+
+These tools use `NoviqXGitHubTools`, which shares the same
+`NoviqXGitHub` REST client and GitHub App authentication as the stdio MCP
+server. They are registered in Nova's existing ToolRegistry and use its normal
+model-selected tool-call loop, capability permissions, and verifier. Nova does
+not start a second agent or hardcode a version-bump workflow. The stdio MCP
+server remains available to external MCP clients.
+
 ## Tools
 
 - Read repository metadata, issues, pull requests, and workflow runs.
 - Create branches, issues, and draft pull requests.
-- Create or update a repository file on a selected branch.
+- Read a repository file and update it with an expected blob SHA on a selected branch.
 
 Merge, delete, release, workflow-editing, and administration operations are not
 exposed. GitHub App permissions and selected installation repositories remain
