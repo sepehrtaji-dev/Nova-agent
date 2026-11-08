@@ -10,7 +10,7 @@ class ThinkingProcessTests(unittest.TestCase):
         core.status_callback = events.append
         return core, events
 
-    def test_publishes_only_planner_authored_visible_summary(self):
+    def test_does_not_publish_planner_summary_as_native_thinking(self):
         core, events = self.make_core()
         plan = {
             "visible_summary": (
@@ -26,14 +26,8 @@ class ThinkingProcessTests(unittest.TestCase):
             plan,
         )
 
-        self.assertEqual(
-            events,
-            [
-                "MODEL_THOUGHT_START",
-                "MODEL_THOUGHT_DELTA:" + plan["visible_summary"],
-                "MODEL_THOUGHT_END",
-            ],
-        )
+        # Planner summaries describe orchestration, not native model reasoning.
+        self.assertEqual(events, [])
 
     def test_does_not_invent_summary_when_planner_did_not_return_one(self):
         core, events = self.make_core()
