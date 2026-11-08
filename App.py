@@ -1077,6 +1077,22 @@ class NovaWindow(QMainWindow):
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
 
+        self.think_button = QPushButton("Think")
+        self.think_button.setCheckable(True)
+        self.think_button.setChecked(False)
+        self.think_button.setFixedHeight(32)
+        self.think_button.setCursor(Qt.PointingHandCursor)
+        self.think_button.setToolTip("Show the model's native thinking output")
+        self.think_button.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {TEXT_MUTED}; "
+            f"border: 1px solid {BORDER}; border-radius: 8px; padding: 0 12px; "
+            f"font-size: 11px; font-weight: 650; }}"
+            f"QPushButton:hover {{ background: {BG_INPUT}; color: {TEXT}; }}"
+            f"QPushButton:checked {{ background: #182b40; color: {ACCENT}; "
+            f"border-color: {ACCENT}; }}"
+        )
+        controls.addWidget(self.think_button)
+
         controls.addStretch()
 
         self.model_selector.setMinimumHeight(32)
@@ -1472,10 +1488,13 @@ class NovaWindow(QMainWindow):
         self._animate_status()
 
         self._apply_effort(self._effort)
+        self._thinking_enabled = self.think_button.isChecked()
+        self.core.set_thinking_enabled(self._thinking_enabled)
         self.thinking_panel = None
         self._discard_streaming_message()
-        if self._effort != "off":
+        if self._thinking_enabled:
             self.thinking_panel = self._insert_thinking_panel()
+        self.think_button.setEnabled(False)
 
         self.worker = AgentWorker(self.core, message)
         self.worker.status.connect(self._on_status)
@@ -1537,6 +1556,7 @@ class NovaWindow(QMainWindow):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.think_button.setEnabled(True)
         self._status_timer.stop()
         self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
         self.status_label.setText("Ready")
