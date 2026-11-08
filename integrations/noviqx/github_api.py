@@ -102,24 +102,95 @@ class NoviqXGitHub:
                             payload={"title": title[:256], "head": head, "base": base,
                                      "body": body[:60000], "draft": True})
 
-    def put_file(self, repo, path, content, message, branch):
+    @staticmethod
+    def _safe_file_path(path):
+        if (not isinstance(path, str) or not path.strip()
+                or path.startswith("/") or "\\" in path
+                or any(part in {"", ".", ".."} for part in path.split("/"))):
+            raise ValueError("path must be a safe repository-relative file path.")
+        return path
+
+    @staticmethod
+    def _safe_branch(branch):
+        if (not isinstance(branch, str) or not branch.strip()
+                or branch.startswith("-") or ".." in branch
+                or any(char in branch for char in "\\r\\n")):
+            raise ValueError("branch must be a valid non-empty branch name.")
+        return branch
+
+    def get_file(self, repo, path, branch="main"):
+        """Read a repository file and return decoded UTF-8 content plus its blob SHA."""
         safe_repo = self._repo(repo)
-        if not path or path.startswith("/") or ".." in path.split("/"):
-            raise ValueError("path must be a safe repository-relative path.")
-        if not message.strip() or not branch.strip():
-            raise ValueError("message and branch are required.")
+        path = self._safe_file_path(path)
+        branch = self._safe_branch(branch)
+        encoded_path = urllib.parse.quote(path, safe="/")
+        data = self.request(
+            "GET", f"/repos/{safe_repo}/contents/{encoded_path}",
+            query={"ref": branch},
+        )
+        if not isinstance(data, dict) or data.get("type") != "file":
+            raise GitHubAPIError("GitHub did not return a regular file.")
+        raw_content = data.get("content")
+        if not isinstance(raw_content, str):
+            raise GitHubAPIError("GitHub did not return file content.")
+        try:
+            if data.get("encoding") == "base64":
+                content = base64.b64decode(raw_content).decode("utf-8")
+            else:
+                content = raw_content
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise GitHubAPIError("GitHub returned file content that is not valid UTF-8.") from exc
+        sha = data.get("sha")
+        if not isinstance(sha, str) or not sha:
+            raise GitHubAPIError("GitHub did not return the file blob SHA.")
+        return {
+            "path": data.get("path", path),
+            "sha": sha,
+            "content": content,
+            "html_url": data.get("html_url"),
+        }
+
+    def get_commit(self, repo, commit_sha):
+        """Read commit metadata for independent author and commit verification."""
+        safe_repo = self._repo(repo)
+        if not isinstance(commit_sha, str) or not re.fullmatch(r"[0-9a-fA-F]{7,40}", commit_sha):
+            raise ValueError("commit_sha must be a valid Git commit SHA.")
+        return self.request("GET", f"/repos/{safe_repo}/commits/{commit_sha}")
+
+    def put_file(self, repo, path, content, message, branch, expected_sha=None):
+        """Create or update a file; expected_sha prevents overwriting a stale version."""
+        safe_repo = self._repo(repo)
+        path = self._safe_file_path(path)
+        branch = self._safe_branch(branch)
+        if not isinstance(content, str):
+            raise ValueError("content must be a string.")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("message is required.")
+        if expected_sha is not None and (
+            not isinstance(expected_sha, str) or not expected_sha.strip()
+        ):
+            raise ValueError("expected_sha must be a non-empty blob SHA when provided.")
+
         encoded_path = urllib.parse.quote(path, safe="/")
         endpoint = f"/repos/{safe_repo}/contents/{encoded_path}"
-        # Contents API requires the current blob SHA when replacing a file.
         existing = None
         try:
             existing = self.request("GET", endpoint, query={"ref": branch})
         except GitHubAPIError as exc:
             if "HTTP 404" not in str(exc):
                 raise
-        payload = {"message": message[:256],
-                   "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
-                   "branch": branch}
-        if isinstance(existing, dict) and isinstance(existing.get("sha"), str):
-            payload["sha"] = existing["sha"]
+
+        current_sha = existing.get("sha") if isinstance(existing, dict) else None
+        if expected_sha is not None and current_sha != expected_sha:
+            raise GitHubAPIError(
+                "The remote file changed after it was read; refusing a stale update."
+            )
+
+        payload = {
+            "message": message[:256],
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "branch": branch,
+        }
+        if isinstance(current_sha, str):
+            payload["sha"] = current_sha
         return self.request("PUT", endpoint, payload=payload)
