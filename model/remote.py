@@ -515,7 +515,8 @@ class OpenAICompatibleBrain:
         )
 
     def generate_stream(
-        self, prompt, on_token, system_prompt=None, json_mode=False, options=None
+        self, prompt, on_token, system_prompt=None, json_mode=False, options=None,
+        on_thought_delta=None,
     ):
         """Stream OpenAI-compatible SSE deltas to on_token and return full text."""
         if not self.is_configured():
@@ -573,7 +574,12 @@ class OpenAICompatibleBrain:
                     if not isinstance(choices, list) or not choices:
                         continue
                     delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
-                    token = delta.get("content", "") if isinstance(delta, dict) else ""
+                    if not isinstance(delta, dict):
+                        continue
+                    thought = delta.get("reasoning_content", delta.get("reasoning", ""))
+                    if thought and callable(on_thought_delta):
+                        on_thought_delta(thought if isinstance(thought, str) else str(thought))
+                    token = delta.get("content", "")
                     if not token:
                         continue
                     if not isinstance(token, str):
