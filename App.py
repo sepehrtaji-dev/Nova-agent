@@ -244,7 +244,15 @@ class MarkdownLabel(QTextBrowser):
         self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         
         body_style = f"""
-        body {{ font-family: 'Segoe UI', sans-serif; font-size: {int(font_size)}px; color: {TEXT}; line-height: 1.55; }}
+        /* QTextBrowser receives a fragment rooted at <div>, not a full <body>.
+           Apply the configured message size to the actual rendered elements so
+           older messages and newly generated messages use the same typography. */
+        body, div, p, span, li, td, th, blockquote {{
+            font-family: 'Segoe UI', sans-serif;
+            font-size: {int(font_size)}px;
+            color: {TEXT};
+            line-height: 1.55;
+        }}
         h1, h2, h3 {{ color: {TEXT}; margin: 12px 0 6px 0; }}
         h1 {{ font-size: 20px; }} h2 {{ font-size: 18px; }} h3 {{ font-size: 16px; }}
         strong {{ color: #ffffff; }}
