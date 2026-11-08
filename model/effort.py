@@ -63,12 +63,16 @@ class EffortAwareBrain:
         if callable(method):
             from model.remote import OpenAICompatibleBrain
             if isinstance(self.brain, OpenAICompatibleBrain):
+                remote_options = self._remote_options(options)
+                if not callable(on_thought_delta):
+                    remote_options.pop("reasoning_effort", None)
                 return method(
                     messages=messages,
                     tools=tools,
                     system_prompt=system_prompt,
-                    options=self._remote_options(options),
+                    options=remote_options,
                     on_token=on_token,
+                    on_thought_delta=on_thought_delta,
                 )
             think_resolver = getattr(self.brain, "think_value_for_effort", None)
             think_value = (
