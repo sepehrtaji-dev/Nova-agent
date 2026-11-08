@@ -63,14 +63,11 @@ class EffortAwareBrain:
         if callable(method):
             from model.remote import OpenAICompatibleBrain
             if isinstance(self.brain, OpenAICompatibleBrain):
-                remote_options = self._remote_options(options)
-                if not callable(on_thought_delta):
-                    remote_options.pop("reasoning_effort", None)
                 return method(
                     messages=messages,
                     tools=tools,
                     system_prompt=system_prompt,
-                    options=remote_options,
+                    options=self._remote_options(options),
                     on_token=on_token,
                     on_thought_delta=on_thought_delta,
                 )
@@ -78,8 +75,8 @@ class EffortAwareBrain:
             think_value = (
                 think_resolver(self.effort)
                 if callable(think_resolver)
-                else _LEVEL.get(self.effort, "medium")
-            ) if callable(on_thought_delta) else False
+                else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
+            )
             return method(
                 messages=messages,
                 tools=tools,
@@ -115,19 +112,16 @@ class EffortAwareBrain:
                 on_token(result)
             return result
         if isinstance(self.brain, OpenAICompatibleBrain):
-            remote_options = self._remote_options(options)
-            if not callable(on_thought_delta):
-                remote_options.pop("reasoning_effort", None)
             return stream(
                 prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
-                options=remote_options, on_thought_delta=on_thought_delta,
+                options=self._remote_options(options), on_thought_delta=on_thought_delta,
             )
         think_resolver = getattr(self.brain, "think_value_for_effort", None)
         think_value = (
             think_resolver(self.effort)
             if callable(think_resolver)
-            else _LEVEL.get(self.effort, "medium")
-        ) if callable(on_thought_delta) else False
+            else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
+        )
         return stream(
             prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
             options=options, think=think_value, on_thought_delta=on_thought_delta,
