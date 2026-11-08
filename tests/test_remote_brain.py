@@ -212,6 +212,38 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertNotIn("id", assistant_call)
         self.assertNotIn("type", assistant_call)
 
+    def test_stream_exposes_provider_native_reasoning_separately(self):
+        class FakeStreamResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                events = [
+                    {"choices": [{"delta": {"reasoning_content": "I should inspect the request. "}}]},
+                    {"choices": [{"delta": {"content": "Here is the answer."}}]},
+                    {"choices": [{"delta": {}}]},
+                ]
+                return iter([
+                    ("data: " + json.dumps(event) + "\\n").encode()
+                    for event in events
+                ] + [b"data: [DONE]\\n"])
+
+        thoughts = []
+        answers = []
+        with mock.patch("model.remote.urllib.request.urlopen", return_value=FakeStreamResponse()):
+            result = self.brain.generate_stream(
+                "hello",
+                answers.append,
+                on_thought_delta=thoughts.append,
+            )
+
+        self.assertEqual(result, "Here is the answer.")
+        self.assertEqual(answers, ["Here is the answer."])
+        self.assertEqual(thoughts, ["I should inspect the request. "])
+
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
         sent = CAPTURED[-1]
