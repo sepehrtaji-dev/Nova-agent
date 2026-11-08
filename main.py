@@ -217,7 +217,6 @@ def render_header(core: NovaCore) -> RenderableType:
     info.append(f" v{version}", style="dim")
     info.append("\n")
     info.append(f"{model_name} · {profile['provider']}", style="dim")
-    info.append("\n")
     info.append(str(profile["working_directory"]), style="dim")
 
     banner = Table(box=None, show_header=False, expand=False, padding=(0, 3), pad_edge=False)
@@ -704,6 +703,7 @@ def run_agent(
     message: str,
     result: dict,
     state: dict,
+    lock: threading.Lock,
 ):
     def on_status(status_message: str):
         status_message = str(status_message).strip()
@@ -711,20 +711,22 @@ def run_agent(
             return
 
         label, color, kind = classify_status(status_message, getattr(getattr(core, "tools", None), "tools", {}).keys())
-        state["current"] = status_message
+        
+        with lock:
+            state["current"] = status_message
 
-        if status_message == state["last_status"]:
-            return
+            if status_message == state["last_status"]:
+                return
 
-        state["last_status"] = status_message
-        state["events"].append({
-            "time": now(),
-            "label": label,
-            "color": color,
-            "kind": kind,
-            "message": status_message,
-        })
-        state["event_count"] += 1
+            state["last_status"] = status_message
+            state["events"].append({
+                "time": now(),
+                "label": label,
+                "color": color,
+                "kind": kind,
+                "message": status_message,
+            })
+            state["event_count"] += 1
 
     core.status_callback = on_status
 
