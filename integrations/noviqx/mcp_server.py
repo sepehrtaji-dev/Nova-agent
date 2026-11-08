@@ -57,11 +57,22 @@ def github_create_pull_request(repo: str, title: str, head: str,
 
 
 @mcp.tool()
+def github_get_file(repo: str, path: str, branch: str = "main") -> str:
+    """Read a UTF-8 repository file and return its content and blob SHA."""
+    return json.dumps(github.get_file(repo, path, branch), ensure_ascii=False)
+
+
+@mcp.tool()
 def github_put_file(repo: str, path: str, content: str,
-                    message: str, branch: str) -> str:
-    """Create or update a repository file on a branch."""
-    return json.dumps(github.put_file(repo, path, content, message, branch),
-                      ensure_ascii=False)
+                    message: str, branch: str, expected_sha: str = "") -> str:
+    """Create or update a repository file; pass expected_sha to reject stale updates."""
+    return json.dumps(
+        github.put_file(
+            repo, path, content, message, branch,
+            expected_sha=expected_sha or None,
+        ),
+        ensure_ascii=False,
+    )
 
 
 def main():
