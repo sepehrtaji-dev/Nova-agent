@@ -704,34 +704,45 @@ def run_agent(
     message: str,
     result: dict,
     state: dict,
+    lock: threading.Lock,
 ):
     def on_status(status_message: str):
         status_message = str(status_message).strip()
         if not status_message:
             return
 
-        label, color, kind = classify_status(status_message, getattr(getattr(core, "tools", None), "tools", {}).keys())
-        state["current"] = status_message
+        label, color, kind = classify_status(
+            status_message,
+            getattr(getattr(core, "tools", None), "tools", {}).keys(),
+        )
 
-        if status_message == state["last_status"]:
-            return
+        # The worker owns status updates; the UI takes short snapshots under
+        # the same lock and performs all Rich rendering after releasing it.
+        with lock:
+            state["current"] = status_message
 
-        state["last_status"] = status_message
-        state["events"].append({
-            "time": now(),
-            "label": label,
-            "color": color,
-            "kind": kind,
-            "message": status_message,
-        })
-        state["event_count"] += 1
+            if status_message == state["last_status"]:
+                return
+
+            state["last_status"] = status_message
+            state["events"].append({
+                "time": now(),
+                "label": label,
+                "color": color,
+                "kind": kind,
+                "message": status_message,
+            })
+            state["event_count"] += 1
 
     core.status_callback = on_status
 
     try:
-        result["response"] = core.ask(message)
+        response = core.ask(message)
+        with lock:
+            result["response"] = response
     except Exception as exc:
-        result["error"] = exc
+        with lock:
+            result["error"] = exc
 
 
 def ask(
@@ -739,6 +750,7 @@ def ask(
     message: str,
 ) -> tuple[str, float, list]:
     result = {}
+    lock = threading.Lock()
     state = {
         "current": "Thinking...",
         "last_status": "",
@@ -749,12 +761,11 @@ def ask(
 
     thread = threading.Thread(
         target=run_agent,
-        args=(core, message, result, state),
+        args=(core, message, result, state, lock),
         daemon=True,
     )
     thread.start()
 
-    frame = 0
     with Live(
         console=console,
         refresh_per_second=12,
@@ -762,56 +773,76 @@ def ask(
     ) as live:
         while thread.is_alive():
             elapsed = time.perf_counter() - state["started"]
+
+            # Copy shared data while locked; never hold the lock while Rich
+            # builds or renders the activity panel.
+            with lock:
+                events_snapshot = list(state["events"])
+                current_snapshot = state["current"]
+                event_count_snapshot = state["event_count"]
+
             live.update(
                 build_activity_panel(
-                    state["events"],
-                    state["current"],
+                    events_snapshot,
+                    current_snapshot,
                     elapsed,
-                    state["event_count"],
+                    event_count_snapshot,
                 )
             )
-            frame += 1
             time.sleep(0.08)
 
+        # Make completion explicit before reading the worker's result.
+        thread.join()
         elapsed = time.perf_counter() - state["started"]
 
-        if "error" in result:
-            error = str(result["error"])
-            label, color, kind = classify_status(error, getattr(getattr(core, "tools", None), "tools", {}).keys())
-            state["events"].append({
-                "time": now(),
-                "label": label,
-                "color": color,
-                "kind": "error",
-                "message": error,
-            })
+        with lock:
+            error = result.get("error")
+            response = result.get("response", "I couldn't generate a response.")
+
+        if error is not None:
+            error_message = str(error)
+            label, color, _ = classify_status(
+                error_message,
+                getattr(getattr(core, "tools", None), "tools", {}).keys(),
+            )
+            with lock:
+                state["events"].append({
+                    "time": now(),
+                    "label": label,
+                    "color": color,
+                    "kind": "error",
+                    "message": error_message,
+                })
+                state["event_count"] += 1
+                events_snapshot = list(state["events"])
+                event_count_snapshot = state["event_count"]
 
             live.update(
                 build_activity_panel(
-                    state["events"],
+                    events_snapshot,
                     "Request failed",
                     elapsed,
-                    state["event_count"] + 1,
+                    event_count_snapshot,
                 )
             )
             time.sleep(0.25)
-            raise result["error"]
+            raise error
+
+        with lock:
+            events_snapshot = list(state["events"])
+            event_count_snapshot = state["event_count"]
 
         live.update(
             build_activity_panel(
-                state["events"],
+                events_snapshot,
                 "Completed",
                 elapsed,
-                state["event_count"],
+                event_count_snapshot,
             )
         )
         time.sleep(0.2)
 
-    return (
-        result.get("response", "I couldn't generate a response."),
-        elapsed,
-        list(state["events"]),
-    )
+    return response, elapsed, events_snapshot
 
 
 # ── Commands ─────────────────────────────────────────────────────────────────
