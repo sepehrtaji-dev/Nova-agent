@@ -1057,6 +1057,7 @@ class NovaWindow(QMainWindow):
         self.worker = None
         self.busy = False
         self.thinking_panel = None
+        self.thinking_enabled = False
         self.streaming_message = None
         self.attachments = []
 
@@ -1265,6 +1266,18 @@ class NovaWindow(QMainWindow):
         add_btn.setToolTip("Attach files")
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
+
+        self.think_button = QPushButton("Think")
+        self.think_button.setCheckable(True)
+        self.think_button.setChecked(False)
+        self.think_button.setToolTip("Show the model's native thinking output")
+        self.think_button.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {TEXT_MUTED}; border: 1px solid {BORDER}; border-radius: 8px; padding: 0 11px; font-size: 11px; font-weight: 600; }}"
+            f"QPushButton:checked {{ background: {BG_INPUT}; color: {ACCENT}; border-color: {ACCENT}; }}"
+            f"QPushButton:disabled {{ color: {TEXT_MUTED}; border-color: {BORDER}; }}"
+        )
+        self.think_button.setFixedHeight(32)
+        controls.addWidget(self.think_button)
 
         controls.addStretch()
 
@@ -1661,9 +1674,14 @@ class NovaWindow(QMainWindow):
         self._animate_status()
 
         self._apply_effort(self._effort)
+        self.thinking_enabled = self.think_button.isChecked()
+        setter = getattr(self.core, "set_thinking_enabled", None)
+        if callable(setter):
+            setter(self.thinking_enabled)
+        self.think_button.setEnabled(False)
         self.thinking_panel = None
         self._discard_streaming_message()
-        if self._effort != "off":
+        if self.thinking_enabled:
             self.thinking_panel = self._insert_thinking_panel()
 
         self.worker = AgentWorker(self.core, message)
@@ -1726,6 +1744,7 @@ class NovaWindow(QMainWindow):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.think_button.setEnabled(True)
         self._status_timer.stop()
         self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
         self.status_label.setText("Ready")
