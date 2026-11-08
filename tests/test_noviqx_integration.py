@@ -1,4 +1,5 @@
 """Unit tests for the optional NoviqX integration."""
+import base64
 import json
 import os
 import tempfile
@@ -89,6 +90,102 @@ class TestNoviqXAuth(unittest.TestCase):
         client = NoviqXGitHub(auth=NoAuth())
         with self.assertRaises(ValueError):
             client.get_repository("../bad")
+
+
+    def test_get_file_decodes_contents_and_returns_blob_sha(self):
+        payload = {
+            "type": "file",
+            "path": "version.txt",
+            "encoding": "base64",
+            "content": base64.b64encode(b"2.1\\n").decode("ascii"),
+            "sha": "blob-sha",
+            "html_url": "https://github.com/owner/repo/blob/main/version.txt",
+        }
+        calls = []
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        def opener(request, timeout):
+            calls.append(request)
+            return _Response(payload)
+
+        client = NoviqXGitHub(auth=FakeAuth(), opener=opener)
+        result = client.get_file("owner/repo", "version.txt", "main")
+
+        self.assertEqual(result["content"], "2.1\\n")
+        self.assertEqual(result["sha"], "blob-sha")
+        self.assertIn("ref=main", calls[0].full_url)
+
+    def test_update_file_rejects_stale_blob_sha_before_put(self):
+        calls = []
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        def opener(request, timeout):
+            calls.append(request)
+            return _Response({
+                "type": "file",
+                "path": "version.txt",
+                "encoding": "base64",
+                "content": base64.b64encode(b"2.1\\n").decode("ascii"),
+                "sha": "current-blob-sha",
+            })
+
+        client = NoviqXGitHub(auth=FakeAuth(), opener=opener)
+        from integrations.noviqx.github_api import GitHubAPIError
+
+        with self.assertRaises(GitHubAPIError):
+            client.put_file(
+                "owner/repo", "version.txt", "2.2\\n",
+                "Bump version to 2.2", "main",
+                expected_sha="stale-blob-sha",
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].method, "GET")
+
+    def test_update_file_sends_matching_blob_sha_to_contents_api(self):
+        calls = []
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        def opener(request, timeout):
+            calls.append(request)
+            if request.method == "GET":
+                return _Response({
+                    "type": "file",
+                    "path": "version.txt",
+                    "encoding": "base64",
+                    "content": base64.b64encode(b"2.1\\n").decode("ascii"),
+                    "sha": "current-blob-sha",
+                })
+            return _Response({
+                "commit": {"sha": "new-commit-sha"},
+                "content": {"sha": "new-blob-sha", "html_url": "https://github.com/owner/repo/blob/main/version.txt"},
+            })
+
+        client = NoviqXGitHub(auth=FakeAuth(), opener=opener)
+        result = client.put_file(
+            "owner/repo", "version.txt", "2.2\\n",
+            "Bump version to 2.2", "main",
+            expected_sha="current-blob-sha",
+        )
+
+        self.assertEqual(result["commit"]["sha"], "new-commit-sha")
+        self.assertEqual(calls[-1].method, "PUT")
+        request_payload = json.loads(calls[-1].data.decode("utf-8"))
+        self.assertEqual(request_payload["sha"], "current-blob-sha")
 
 
 if __name__ == "__main__":
