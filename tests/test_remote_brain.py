@@ -227,7 +227,7 @@ class RemoteBrainTests(unittest.TestCase):
                     {"choices": [{"delta": {}}]},
                 ]
                 return iter([
-                    ("data: " + json.dumps(event) + "\\n").encode()
+                    ("data: " + json.dumps(event) + "\n").encode()
                     for event in events
                 ] + [b"data: [DONE]\\n"])
 
