@@ -114,7 +114,7 @@ class NoviqXGitHub:
     def _safe_branch(branch):
         if (not isinstance(branch, str) or not branch.strip()
                 or branch.startswith("-") or ".." in branch
-                or any(char in branch for char in "\\r\\n")):
+                or any(ord(char) < 32 for char in branch)):
             raise ValueError("branch must be a valid non-empty branch name.")
         return branch
 
