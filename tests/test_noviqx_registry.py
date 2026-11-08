@@ -15,7 +15,7 @@ class FakeGitHub:
         return {
             "path": path,
             "sha": "blob-sha",
-            "content": "2.1\\n",
+            "content": self.updated["content"] if self.updated else "2.1\n",
             "html_url": f"https://github.com/{repo}/blob/{branch}/{path}",
         }
 
@@ -48,14 +48,14 @@ class TestNoviqXRegistryTools(unittest.TestCase):
             "path": "version.txt",
             "branch": "main",
         }))
-        self.assertEqual(result["content"], "2.1\\n")
+        self.assertEqual(result["content"], "2.1\n")
         self.assertEqual(result["sha"], "blob-sha")
 
     def test_update_file_passes_expected_sha_and_returns_commit(self):
         result = json.loads(self.adapter.update_file({
             "repo": "sepehrtaji-dev/Nova-agent",
             "path": "version.txt",
-            "content": "2.2\\n",
+            "content": "2.2\n",
             "message": "Bump version to 2.2",
             "branch": "main",
             "expected_sha": "blob-sha",
@@ -68,7 +68,7 @@ class TestNoviqXRegistryTools(unittest.TestCase):
             self.adapter.update_file({
                 "repo": "sepehrtaji-dev/Nova-agent",
                 "path": "version.txt",
-                "content": "2.2\\n",
+                "content": "2.2\n",
                 "message": "Bump version to 2.2",
                 "branch": "main",
             })
@@ -86,7 +86,7 @@ class TestNoviqXRegistryTools(unittest.TestCase):
         tool_input = {
             "repo": "sepehrtaji-dev/Nova-agent",
             "path": "version.txt",
-            "content": "2.2\\n",
+            "content": "2.2\n",
             "message": "Bump version to 2.2",
             "branch": "main",
             "expected_sha": "blob-sha",
