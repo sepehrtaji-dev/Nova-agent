@@ -97,7 +97,7 @@ class TestNoviqXAuth(unittest.TestCase):
             "type": "file",
             "path": "version.txt",
             "encoding": "base64",
-            "content": base64.b64encode(b"2.1\\n").decode("ascii"),
+            "content": base64.b64encode(b"2.1\n").decode("ascii"),
             "sha": "blob-sha",
             "html_url": "https://github.com/owner/repo/blob/main/version.txt",
         }
@@ -116,7 +116,7 @@ class TestNoviqXAuth(unittest.TestCase):
         client = NoviqXGitHub(auth=FakeAuth(), opener=opener)
         result = client.get_file("owner/repo", "version.txt", "main")
 
-        self.assertEqual(result["content"], "2.1\\n")
+        self.assertEqual(result["content"], "2.1\n")
         self.assertEqual(result["sha"], "blob-sha")
         self.assertIn("ref=main", calls[0].full_url)
 
@@ -135,7 +135,7 @@ class TestNoviqXAuth(unittest.TestCase):
                 "type": "file",
                 "path": "version.txt",
                 "encoding": "base64",
-                "content": base64.b64encode(b"2.1\\n").decode("ascii"),
+                "content": base64.b64encode(b"2.1\n").decode("ascii"),
                 "sha": "current-blob-sha",
             })
 
@@ -144,7 +144,7 @@ class TestNoviqXAuth(unittest.TestCase):
 
         with self.assertRaises(GitHubAPIError):
             client.put_file(
-                "owner/repo", "version.txt", "2.2\\n",
+                "owner/repo", "version.txt", "2.2\n",
                 "Bump version to 2.2", "main",
                 expected_sha="stale-blob-sha",
             )
@@ -167,7 +167,7 @@ class TestNoviqXAuth(unittest.TestCase):
                     "type": "file",
                     "path": "version.txt",
                     "encoding": "base64",
-                    "content": base64.b64encode(b"2.1\\n").decode("ascii"),
+                    "content": base64.b64encode(b"2.1\n").decode("ascii"),
                     "sha": "current-blob-sha",
                 })
             return _Response({
@@ -177,7 +177,7 @@ class TestNoviqXAuth(unittest.TestCase):
 
         client = NoviqXGitHub(auth=FakeAuth(), opener=opener)
         result = client.put_file(
-            "owner/repo", "version.txt", "2.2\\n",
+            "owner/repo", "version.txt", "2.2\n",
             "Bump version to 2.2", "main",
             expected_sha="current-blob-sha",
         )
