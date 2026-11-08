@@ -1150,3 +1150,85 @@ class Verifier:
             evidence=tool_result[:800],
             message=f"✓ GitHub {action} query completed for {repo}.",
         )
+
+
+    def _verify_noviqx_github_update_file(self, tool_input, tool_result):
+        """Re-read the remote file and commit to verify content and GitHub App authorship."""
+        try:
+            payload = json.loads(tool_result)
+        except (TypeError, json.JSONDecodeError):
+            return VerificationResult(
+                "failed", str(tool_result)[:400],
+                "NoviqX update returned an invalid result payload.",
+            )
+        if not isinstance(payload, dict):
+            return VerificationResult(
+                "failed", str(tool_result)[:400],
+                "NoviqX update returned an invalid result object.",
+            )
+
+        commit_sha = payload.get("commit_sha")
+        if not isinstance(commit_sha, str) or not commit_sha:
+            return VerificationResult(
+                "failed", str(tool_result)[:400],
+                "NoviqX update did not return a commit SHA.",
+            )
+
+        metadata = getattr(self.tools, "tools", {}).get(
+            "noviqx_github_update_file", {}
+        )
+        handler = metadata.get("function") if isinstance(metadata, dict) else None
+        owner = getattr(handler, "__self__", None)
+        github = getattr(owner, "github", None)
+        if github is None:
+            return VerificationResult(
+                "unverifiable", commit_sha,
+                "NoviqX commit was created, but the GitHub client is unavailable for independent verification.",
+            )
+
+        repo = str(tool_input.get("repo", "")).strip()
+        path = str(tool_input.get("path", "")).strip()
+        branch = str(tool_input.get("branch", "")).strip()
+        expected_content = tool_input.get("content")
+        try:
+            remote_file = github.get_file(repo, path, branch)
+            if remote_file.get("content") != expected_content:
+                return VerificationResult(
+                    "failed",
+                    f"Remote content at {repo}/{path} on {branch} does not match the requested content.",
+                    "GitHub accepted the update, but an independent read found different file content.",
+                )
+            commit = github.get_commit(repo, commit_sha)
+        except Exception as exc:
+            return VerificationResult(
+                "unverifiable",
+                f"{commit_sha}: {type(exc).__name__}",
+                "The update returned a commit, but GitHub could not independently verify its file or author.",
+            )
+
+        author = commit.get("author") if isinstance(commit, dict) else None
+        committer = commit.get("committer") if isinstance(commit, dict) else None
+        author_login = (
+            author.get("login") if isinstance(author, dict) else None
+        ) or (
+            committer.get("login") if isinstance(committer, dict) else None
+        )
+        if not isinstance(author_login, str) or not author_login:
+            return VerificationResult(
+                "unverifiable",
+                f"Commit: {commit_sha}; remote content matches; GitHub did not expose an author login.",
+                "The remote file content is confirmed, but GitHub did not expose enough author metadata to confirm the App identity.",
+            )
+        if not author_login.casefold().endswith("[bot]"):
+            return VerificationResult(
+                "failed",
+                f"Commit: {commit_sha}; author: {author_login}",
+                f"The file content is correct, but the commit author is '{author_login}', not a GitHub App bot.",
+            )
+
+        return VerificationResult(
+            "confirmed",
+            f"Repository: {repo}\nBranch: {branch}\nPath: {path}\n"
+            f"Commit: {commit_sha}\nAuthor: {author_login}",
+            f"✓ GitHub file update independently confirmed; commit authored by {author_login}.",
+        )
