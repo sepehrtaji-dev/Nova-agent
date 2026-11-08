@@ -4,6 +4,7 @@ import unittest
 
 from agent.verifier import Verifier
 from integrations.noviqx.registry_tools import NoviqXGitHubTools
+from tools import load_tools
 from tools.registry import ToolRegistry
 
 
@@ -99,6 +100,16 @@ class TestNoviqXRegistryTools(unittest.TestCase):
         )
         self.assertTrue(result.confirmed(), result.message)
         self.assertIn("noviqx[bot]", result.evidence)
+
+
+    def test_noviqx_tools_are_loaded_from_the_live_manifest(self):
+        registry = load_tools()
+        self.assertTrue(registry.exists("noviqx_github_get_file"))
+        self.assertTrue(registry.exists("noviqx_github_update_file"))
+        self.assertEqual(
+            registry.get_capability("noviqx_github_update_file"),
+            "git",
+        )
 
 
 if __name__ == "__main__":
