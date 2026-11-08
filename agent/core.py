@@ -1315,7 +1315,7 @@ class NovaCore:
             },
             on_result=record_result,
             on_answer_delta=lambda token: self._status("MODEL_ANSWER_DELTA:" + str(token)),
-            on_thought_delta=lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token)),
+            on_thought_delta=(lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token))) if self.thinking_enabled else None,
             max_rounds=getattr(self, "max_steps", 12),
         )
         self._status("Model is choosing the next action...")
