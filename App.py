@@ -1719,11 +1719,20 @@ class NovaWindow(QMainWindow):
         self.status_label.setText(message[:28])
         self.status_label.setToolTip(message)
 
+    def _separate_thinking_panel_from_reply(self):
+        """Add breathing room between the native-thinking card and Nova's reply."""
+        if not self.thinking_panel:
+            return
+        self.thinking_panel.finish()
+        self.thinking_panel = None
+        # The final layout item is the stretch spacer. Insert a real layout
+        # gap immediately before it so the next assistant message is separated.
+        index = max(0, self.chat_container_layout.count() - 1)
+        self.chat_container_layout.insertSpacing(index, 18)
+
     def _on_finished(self, response):
         self._discard_streaming_message()
-        if self.thinking_panel:
-            self.thinking_panel.finish()
-            self.thinking_panel = None
+        self._separate_thinking_panel_from_reply()
         self._add_message("nova", str(response))
         self.chat_store.add_message(self.current_chat_id, "assistant", str(response))
         self._refresh_chat_history()
@@ -1731,9 +1740,7 @@ class NovaWindow(QMainWindow):
 
     def _on_failed(self, error):
         self._discard_streaming_message()
-        if self.thinking_panel:
-            self.thinking_panel.finish()
-            self.thinking_panel = None
+        self._separate_thinking_panel_from_reply()
         text = f"I hit an internal error.\n\nError: {error}"
         self._add_message("nova", text)
         self.chat_store.add_message(self.current_chat_id, "assistant", text)
