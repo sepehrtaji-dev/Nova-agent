@@ -35,6 +35,30 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         }):
             self.assertFalse(brain.supports_thinking())
 
+    def test_standard_stream_forwards_native_thought_callback(self):
+        brain = OllamaBrain(model="gemma4:latest")
+        chunks = [
+            Chunk(Message(thinking="Native reasoning. ")),
+            Chunk(Message(content="Final answer.")),
+        ]
+        thoughts = []
+        answers = []
+        with (
+            patch("model.ollama.ollama.show", return_value={
+                "thinking": {"values": [False, True], "default": True},
+                "capabilities": ["completion", "thinking"],
+            }),
+            patch("model.ollama.ollama.chat", return_value=iter(chunks)),
+        ):
+            result = brain.generate_stream(
+                "hello", answers.append, system_prompt="Nova",
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual(result, "Final answer.")
+        self.assertEqual(answers, ["Final answer."])
+        self.assertEqual(thoughts, ["Native reasoning. "])
+
+
     def test_streams_native_thinking_separately_from_answer(self):
         brain = OllamaBrain(model="gemma4:latest")
         chunks = [
