@@ -41,6 +41,7 @@ class NovaCore:
 
     def __init__(self, status_callback=None):
         self.status_callback = status_callback
+        self.thinking_enabled = False
         # Backend is chosen from configuration (local Ollama or a remote
         # OpenAI-compatible API); everything downstream uses the same interface.
         self.brain = EffortAwareBrain(build_brain(), os.getenv('NOVA_EFFORT', 'medium'))
@@ -76,6 +77,42 @@ class NovaCore:
             "verified_tools": [],
             "last_verified": None,
         }
+
+    def set_thinking_enabled(self, enabled):
+        """Enable forwarding of native provider thinking for the current turn."""
+        self.thinking_enabled = bool(enabled)
+
+    def _generate_with_native_thinking(self, prompt, system_prompt):
+        """Stream answer text separately from the provider's native thinking field."""
+        stream = getattr(self.brain, "generate_stream", None)
+        if not callable(stream):
+            result = self.brain.generate(prompt, system_prompt=system_prompt)
+            return str(result or "").strip()
+
+        thought_started = False
+
+        def on_answer(token):
+            if token:
+                self._status("MODEL_ANSWER_DELTA:" + str(token))
+
+        def on_thought(token):
+            nonlocal thought_started
+            if not self.thinking_enabled or not token:
+                return
+            if not thought_started:
+                thought_started = True
+                self._status("MODEL_THOUGHT_START")
+            self._status("MODEL_THOUGHT_DELTA:" + str(token))
+
+        try:
+            result = stream(
+                prompt, on_answer, system_prompt=system_prompt,
+                on_thought_delta=on_thought if self.thinking_enabled else None,
+            )
+        finally:
+            if thought_started:
+                self._status("MODEL_THOUGHT_END")
+        return str(result or "").strip()
 
     def _capability_context(self):
         """Live capability probe summary for prompts.
@@ -302,13 +339,8 @@ class NovaCore:
                 pass
 
     def _publish_thinking_process(self, message, task_type, plan=None):
-        """Publish only the model-authored, user-facing summary returned by Planner."""
-        summary = plan.get("visible_summary") if isinstance(plan, dict) else None
-        if not isinstance(summary, str) or not summary.strip():
-            return
-        self._status("MODEL_THOUGHT_START")
-        self._status("MODEL_THOUGHT_DELTA:" + summary.strip()[:1600])
-        self._status("MODEL_THOUGHT_END")
+        """Planner summaries are not native model thinking and are never displayed."""
+        return
 
     def _generate_with_visible_note(self, prompt, system_prompt):
         """Generate a public-facing rationale note and answer in one model call.
@@ -1392,7 +1424,6 @@ class NovaCore:
         detected_call = None
 
         if task_type == "conversation":
-            self._publish_thinking_process(message, task_type)
             self._status("Preparing conversational answer...")
 
             # Self-description is answered by the model, not by a canned string.
@@ -1453,7 +1484,7 @@ class NovaCore:
             )
 
             try:
-                response = self._generate_with_visible_note(
+                response = self._generate_with_native_thinking(
                     conversation_prompt,
                     system_prompt=(
                         identity
