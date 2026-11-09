@@ -24,12 +24,10 @@ class NoviqXCoreIdentityTests(unittest.TestCase):
         return core
 
     def _prompt(self, core):
-        with patch("agent.capability_probe.describe_model", return_value="Model: test-model."), \\
-             patch("agent.capability_probe.probe_model_details", return_value={
-                 "model": "test-model",
-                 "parameter_size": None,
-             }), \\
-             patch("agent.core.backend_kind", return_value="local"):
+        with patch("agent.capability_probe.describe_model", return_value="Model: test-model."), patch(
+            "agent.capability_probe.probe_model_details",
+            return_value={"model": "test-model", "parameter_size": None},
+        ), patch("agent.core.backend_kind", return_value="local"):
             return core._identity_system_prompt()
 
     def test_system_prompt_teaches_noviqx_bot_identity_and_safe_usage(self):
