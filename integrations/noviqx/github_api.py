@@ -174,10 +174,16 @@ class NoviqXGitHub:
         if not isinstance(raw_content, str):
             raise GitHubAPIError("GitHub did not return file content.")
         try:
-            if data.get("encoding") == "base64":
+            encoding = data.get("encoding")
+            if encoding == "base64":
                 content = base64.b64decode(raw_content).decode("utf-8")
-            else:
+            elif encoding in {"utf-8", "utf8"}:
                 content = raw_content
+            else:
+                raise GitHubAPIError(
+                    "GitHub did not provide inline UTF-8 content for this file; "
+                    "the file may exceed the Contents API size limit."
+                )
         except (ValueError, UnicodeDecodeError) as exc:
             raise GitHubAPIError("GitHub returned file content that is not valid UTF-8.") from exc
         sha = data.get("sha")
