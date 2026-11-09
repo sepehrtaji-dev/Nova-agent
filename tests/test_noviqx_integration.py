@@ -22,8 +22,9 @@ except ImportError:
 
 
 class _Response:
-    def __init__(self, payload):
+    def __init__(self, payload, status=200):
         self.payload = json.dumps(payload).encode()
+        self.status = status
 
     def __enter__(self):
         return self
@@ -119,7 +120,36 @@ class TestNoviqXAuth(unittest.TestCase):
 
         self.assertEqual(result["content"], "2.1\n")
         self.assertEqual(result["sha"], "blob-sha")
+        self.assertEqual(result["http_status"], 200)
+        self.assertEqual(result["size_bytes"], len("2.1\n".encode("utf-8")))
         self.assertIn("ref=main", calls[0].full_url)
+
+    def test_get_file_reports_utf8_byte_length_not_character_count(self):
+        content = "Nova — هوش مصنوعی 🚀"
+        payload = {
+            "type": "file",
+            "path": "README.md",
+            "encoding": "base64",
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "sha": "unicode-blob-sha",
+        }
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        client = NoviqXGitHub(
+            auth=FakeAuth(),
+            opener=lambda request, timeout: _Response(payload, status=200),
+        )
+        result = client.get_file("owner/repo", "README.md", "main")
+
+        self.assertEqual(result["content"], content)
+        self.assertEqual(result["size_bytes"], len(content.encode("utf-8")))
+        self.assertNotEqual(result["size_bytes"], len(content))
+        self.assertEqual(result["http_status"], 200)
 
     def test_get_file_rejects_github_responses_without_inline_content(self):
         from integrations.noviqx.github_api import GitHubAPIError
