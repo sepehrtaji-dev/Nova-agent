@@ -14,7 +14,11 @@ _REPO_PART = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class GitHubAPIError(RuntimeError):
-    """A sanitized GitHub REST API error."""
+    """A sanitized GitHub REST API error with a machine-readable HTTP status."""
+
+    def __init__(self, message, *, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class NoviqXGitHub:
@@ -32,7 +36,9 @@ class NoviqXGitHub:
         return "/".join(parts)
 
     def request(self, method, path, *, payload=None, query=None):
-        if not path.startswith("/") or path.startswith("//") or ".." in path.split("/"):
+        if (not isinstance(path, str) or not path.startswith("/")
+                or path.startswith("//") or ".." in path.split("/")
+                or any(ord(char) < 32 for char in path)):
             raise ValueError("Invalid GitHub API path.")
         url = self.auth.api_root + path
         if query:
@@ -53,7 +59,10 @@ class NoviqXGitHub:
                 raw = response.read()
                 return json.loads(raw.decode("utf-8")) if raw else {}
         except urllib.error.HTTPError as exc:
-            raise GitHubAPIError(f"GitHub API request failed with HTTP {exc.code}.") from exc
+            raise GitHubAPIError(
+                f"GitHub API request failed with HTTP {exc.code}.",
+                status_code=exc.code,
+            ) from exc
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
             raise GitHubAPIError(
                 f"GitHub API request failed ({type(exc).__name__})."
@@ -106,6 +115,7 @@ class NoviqXGitHub:
     def _safe_file_path(path):
         if (not isinstance(path, str) or not path.strip()
                 or path.startswith("/") or "\\" in path
+                or any(ord(char) < 32 for char in path)
                 or any(part in {"", ".", ".."} for part in path.split("/"))):
             raise ValueError("path must be a safe repository-relative file path.")
         return path
@@ -113,8 +123,13 @@ class NoviqXGitHub:
     @staticmethod
     def _safe_branch(branch):
         if (not isinstance(branch, str) or not branch.strip()
-                or branch.startswith("-") or ".." in branch
-                or any(ord(char) < 32 for char in branch)):
+                or branch.startswith("/") or branch.endswith("/")
+                or branch.startswith("-") or branch.endswith(".")
+                or ".." in branch or "//" in branch or "@{" in branch
+                or any(char in branch for char in " ~^:?*[\\\\")
+                or any(ord(char) < 32 for char in branch)
+                or any(part.startswith(".") or part.endswith(".lock")
+                       for part in branch.split("/"))):
             raise ValueError("branch must be a valid non-empty branch name.")
         return branch
 
@@ -177,7 +192,7 @@ class NoviqXGitHub:
         try:
             existing = self.request("GET", endpoint, query={"ref": branch})
         except GitHubAPIError as exc:
-            if "HTTP 404" not in str(exc):
+            if exc.status_code != 404:
                 raise
 
         current_sha = existing.get("sha") if isinstance(existing, dict) else None
