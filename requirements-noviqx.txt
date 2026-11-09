@@ -1,3 +1,3 @@
-# Optional dependencies for the NoviqX GitHub App + MCP integration.
-PyJWT[crypto]>=2.10,<3
+# Optional dependency for the standalone NoviqX MCP server.
+# PyJWT[crypto] is installed by the core requirements.txt.
 mcp>=1.9,<2
