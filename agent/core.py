@@ -170,9 +170,9 @@ class NovaCore:
             noviqx = SelfKnowledge._noviqx_state(self)
             lines.extend([
                 f"Dedicated GitHub App identity: NoviqX ({noviqx['bot_login']}).",
-                "This is your separate GitHub App bot identity for authenticated "
-                "remote repository operations; it is not your developer and "
-                "not the company that trained your model.",
+                "This is your separate service identity: a GitHub App bot for "
+                "authenticated remote repository operations; it is not your "
+                "developer and not the company that trained your model.",
                 f"NoviqX runtime status: {noviqx['status']}.",
             ])
             if noviqx["registered_tools"]:
