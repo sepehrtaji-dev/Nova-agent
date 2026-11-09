@@ -4,9 +4,11 @@ Product identity comes from agent.identity; everything the running process can
 measure (registered tools, model metadata, network reachability) is probed live
 so a stale declaration can never be reported as a current capability.
 """
+import os
 import platform
 import re
 import sys
+from pathlib import Path
 
 from agent import capability_probe
 from agent.identity import (
@@ -15,6 +17,7 @@ from agent.identity import (
     NOVA_NAME,
     NOVA_REPOSITORY,
     NOVA_VERSION,
+    NOVIQX_GITHUB_BOT_LOGIN,
     identity_lines,
     identity_sentence,
 )
@@ -28,6 +31,39 @@ class SelfKnowledge:
     def _allowed(core, capability):
         access = getattr(core, "access", {}) or {}
         return bool(access.get(capability, True))
+
+    @staticmethod
+    def _noviqx_state(core):
+        """Describe the dedicated GitHub App identity without exposing credentials."""
+        registry = getattr(getattr(core, "tools", None), "tools", {}) or {}
+        tool_names = sorted(
+            name for name in registry
+            if isinstance(name, str) and name.startswith("noviqx_github_")
+        )
+        access = getattr(core, "access", {}) or {}
+        key_path = os.getenv("NOVIQX_PRIVATE_KEY_PATH", "").strip()
+        configured = bool(
+            os.getenv("NOVIQX_APP_ID", "").strip()
+            and os.getenv("NOVIQX_INSTALLATION_ID", "").strip()
+            and key_path
+            and Path(key_path).expanduser().is_file()
+        )
+        if not tool_names:
+            status = "not_registered"
+        elif not access.get("git", True):
+            status = "permission_disabled"
+        elif configured:
+            status = "configured_not_yet_verified"
+        else:
+            status = "configuration_missing"
+        return {
+            "bot_login": NOVIQX_GITHUB_BOT_LOGIN,
+            "registered_tools": tool_names,
+            "registered": bool(tool_names),
+            "enabled": bool(tool_names and access.get("git", True)),
+            "configured": configured,
+            "status": status,
+        }
 
     def snapshot(self, core):
         brain = getattr(core, "brain", None)
@@ -80,6 +116,7 @@ class SelfKnowledge:
             "python_version": platform.python_version(),
             "platform": sys.platform,
             "tools": tools,
+            "noviqx": self._noviqx_state(core),
             "access": {
                 key: bool(access.get(key, True))
                 for key in ("web", "git", "pc")
@@ -114,6 +151,16 @@ class SelfKnowledge:
         for component in profile["components"]:
             status = "present" if component["present"] else "missing"
             lines.append(f"- {component['name']}: {component['implementation']} [{status}]")
+        noviqx = state["noviqx"]
+        lines.append(
+            f"Dedicated GitHub App identity: {noviqx['bot_login']} (NoviqX; "
+            "separate from Nova's developer identity and the underlying model provider)."
+        )
+        lines.append(
+            "NoviqX runtime status: " + noviqx["status"]
+            + ("; registered tools: " + ", ".join(noviqx["registered_tools"]) if noviqx["registered_tools"] else "; no NoviqX tools registered")
+            + "."
+        )
         lines.append("Registered tools:")
         if state["tools"]:
             for tool in state["tools"]:
@@ -297,6 +344,32 @@ class SelfKnowledge:
             lines.append("- Tools currently enabled for you: " + ", ".join(enabled))
         else:
             lines.append("- No tools are enabled for you in this session.")
+
+        noviqx = state["noviqx"]
+        lines.append(
+            f"- Your dedicated GitHub App integration is NoviqX; its GitHub bot "
+            f"identity is {noviqx['bot_login']}. This is a separate service "
+            "identity, not your developer or the model provider."
+        )
+        lines.append(
+            f"- NoviqX tool status: {noviqx['status']}. Registered tools: "
+            + (", ".join(noviqx["registered_tools"]) if noviqx["registered_tools"] else "none")
+            + "."
+        )
+        if noviqx["enabled"]:
+            lines.append(
+                "- Use noviqx_github_get_file to read remote repository files and "
+                "obtain their blob SHA. Use noviqx_github_update_file only after "
+                "reading the file and passing that exact expected_sha. These "
+                "tools use the NoviqX GitHub App identity; do not confuse it "
+                "with the read-only gh-based github tool."
+            )
+        else:
+            lines.append(
+                "- Do not claim NoviqX operations are currently available: the "
+                "tools may be unregistered, Git permission-disabled, or missing "
+                "local App configuration. Report the observed status honestly."
+            )
 
         lines.append(
             "- You are not a product of Anthropic, OpenAI, Google, Meta, or any "
