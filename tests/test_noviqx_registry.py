@@ -102,6 +102,37 @@ class TestNoviqXRegistryTools(unittest.TestCase):
         self.assertIn("noviqx[bot]", result.evidence)
 
 
+    def test_verifier_rejects_a_different_github_app_bot(self):
+        github = FakeGitHub()
+        github.get_commit = lambda repo, commit_sha: {
+            "author": {"login": "another-app[bot]"}
+        }
+        adapter = NoviqXGitHubTools(github=github)
+        registry = ToolRegistry()
+        registry.register(
+            "noviqx_github_update_file",
+            "Update remote GitHub file",
+            adapter.update_file,
+            capability="git",
+            verifier_method="_verify_noviqx_github_update_file",
+        )
+        verifier = Verifier(registry)
+        tool_input = {
+            "repo": "sepehrtaji-dev/Nova-agent",
+            "path": "version.txt",
+            "content": "2.2\\n",
+            "message": "Bump version to 2.2",
+            "branch": "main",
+            "expected_sha": "blob-sha",
+        }
+        result = verifier.verify(
+            "noviqx_github_update_file",
+            json.dumps(tool_input),
+            adapter.update_file(tool_input),
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertIn("noviqx[bot]", result.message)
+
     def test_noviqx_tools_are_loaded_from_the_live_manifest(self):
         registry = load_tools()
         self.assertTrue(registry.exists("noviqx_github_get_file"))
