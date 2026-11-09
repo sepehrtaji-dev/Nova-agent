@@ -180,7 +180,7 @@ class NovaCore:
                     "NoviqX tools registered in this runtime: "
                     + ", ".join(noviqx["registered_tools"]) + "."
                 )
-            if noviqx["enabled"]:
+            if noviqx["status"] == "configured_not_yet_verified":
                 lines.extend([
                     "For authenticated GitHub file operations, select "
                     "noviqx_github_get_file to read the target file and obtain "
