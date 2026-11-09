@@ -17,6 +17,8 @@ class FakeGitHub:
             "path": path,
             "sha": "blob-sha",
             "content": self.updated["content"] if self.updated else "2.1\n",
+            "size_bytes": len((self.updated["content"] if self.updated else "2.1\n").encode("utf-8")),
+            "http_status": 200,
             "html_url": f"https://github.com/{repo}/blob/{branch}/{path}",
         }
 
@@ -51,6 +53,8 @@ class TestNoviqXRegistryTools(unittest.TestCase):
         }))
         self.assertEqual(result["content"], "2.1\n")
         self.assertEqual(result["sha"], "blob-sha")
+        self.assertEqual(result["size_bytes"], len("2.1\n".encode("utf-8")))
+        self.assertEqual(result["http_status"], 200)
 
     def test_update_file_passes_expected_sha_and_returns_commit(self):
         result = json.loads(self.adapter.update_file({
