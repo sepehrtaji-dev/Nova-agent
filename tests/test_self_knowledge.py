@@ -1,4 +1,7 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -70,6 +73,55 @@ class GroundingTests(unittest.TestCase):
         core = make_core(access={"web": False, "git": False, "pc": False})
         text = self.knowledge.grounding(core)
         self.assertIn("No tools are enabled", text)
+
+    def test_grounding_explains_dedicated_noviqx_identity_and_tool_usage(self):
+        core = make_core(
+            access={"web": True, "git": True, "pc": True},
+            tools={
+                "noviqx_github_get_file": {
+                    "description": "Read a remote GitHub file.",
+                    "capability": "git",
+                },
+                "noviqx_github_update_file": {
+                    "description": "Update a remote GitHub file.",
+                    "capability": "git",
+                },
+            },
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            key_path = Path(directory) / "test.pem"
+            key_path.write_text("test-only-placeholder", encoding="utf-8")
+            env = {
+                "NOVIQX_APP_ID": "5667949",
+                "NOVIQX_INSTALLATION_ID": "179860235",
+                "NOVIQX_PRIVATE_KEY_PATH": str(key_path),
+            }
+            with patch.dict(os.environ, env):
+                state = self.knowledge.snapshot(core)
+                text = self.knowledge.grounding(core)
+
+        self.assertEqual(state["noviqx"]["status"], "configured_not_yet_verified")
+        self.assertEqual(state["noviqx"]["bot_login"], "noviqx[bot]")
+        self.assertIn("NoviqX", text)
+        self.assertIn("noviqx[bot]", text)
+        self.assertIn("noviqx_github_get_file", text)
+        self.assertIn("noviqx_github_update_file", text)
+        self.assertIn("expected_sha", text)
+        self.assertNotIn("test-only-placeholder", text)
+
+    def test_noviqx_is_reported_disabled_when_git_permission_is_off(self):
+        core = make_core(
+            access={"web": True, "git": False, "pc": True},
+            tools={
+                "noviqx_github_get_file": {
+                    "description": "Read a remote GitHub file.",
+                    "capability": "git",
+                },
+            },
+        )
+        state = self.knowledge.snapshot(core)
+        self.assertEqual(state["noviqx"]["status"], "permission_disabled")
+        self.assertFalse(state["noviqx"]["enabled"])
 
     def test_grounding_forbids_foreign_vendor_authorship(self):
         text = self.knowledge.grounding(self.core)
