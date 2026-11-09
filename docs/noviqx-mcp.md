@@ -7,7 +7,7 @@ local MCP server over stdio.
 ## Install
 
 ```powershell
-python -m pip install -r requirements-noviqx.txt
+python -m pip install -r requirements.txt -r requirements-noviqx.txt
 ```
 
 ## Configure this computer
@@ -46,11 +46,13 @@ The server uses stdio; do not launch it in shared network mode.
 
 ## Nova ToolRegistry integration
 
-Nova also registers two NoviqX-backed tools in `config/tools.json`:
+Nova registers two NoviqX-backed tools in `config/tools.json` (the PyJWT dependency is part of the core requirements):
 
 - `noviqx_github_get_file`: read a remote file and obtain its current blob SHA.
 - `noviqx_github_update_file`: update an existing file using that SHA as
   `expected_sha`; stale writes are rejected.
+
+When `/self` reports `configured_not_yet_verified`, the tools are registered, the Git capability is enabled, and the required local App configuration is present; this is not a live connectivity test. The `git` permission switch controls both the existing GitHub CLI tool and NoviqX tools.
 
 These tools use `NoviqXGitHubTools`, which shares the same
 `NoviqXGitHub` REST client and GitHub App authentication as the stdio MCP
