@@ -356,7 +356,7 @@ class SelfKnowledge:
             + (", ".join(noviqx["registered_tools"]) if noviqx["registered_tools"] else "none")
             + "."
         )
-        if noviqx["enabled"]:
+        if noviqx["status"] == "configured_not_yet_verified":
             lines.append(
                 "- Use noviqx_github_get_file to read remote repository files and "
                 "obtain their blob SHA. Use noviqx_github_update_file only after "
