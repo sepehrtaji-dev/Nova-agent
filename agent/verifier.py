@@ -18,6 +18,8 @@ import subprocess
 import re
 from urllib.parse import urlsplit
 
+from agent.identity import NOVIQX_GITHUB_BOT_LOGIN
+
 
 class VerificationResult:
     def __init__(self, status, evidence, message):
@@ -1219,11 +1221,11 @@ class Verifier:
                 f"Commit: {commit_sha}; remote content matches; GitHub did not expose an author login.",
                 "The remote file content is confirmed, but GitHub did not expose enough author metadata to confirm the App identity.",
             )
-        if not author_login.casefold().endswith("[bot]"):
+        if author_login.casefold() != NOVIQX_GITHUB_BOT_LOGIN.casefold():
             return VerificationResult(
                 "failed",
-                f"Commit: {commit_sha}; author: {author_login}",
-                f"The file content is correct, but the commit author is '{author_login}', not a GitHub App bot.",
+                f"Commit: {commit_sha}; author: {author_login}; expected: {NOVIQX_GITHUB_BOT_LOGIN}",
+                f"The file content is correct, but the commit author is '{author_login}', not Nova's dedicated NoviqX identity '{NOVIQX_GITHUB_BOT_LOGIN}'.",
             )
 
         return VerificationResult(
