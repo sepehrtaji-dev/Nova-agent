@@ -29,7 +29,7 @@ class NoviqXCoreIdentityTests(unittest.TestCase):
                  "model": "test-model",
                  "parameter_size": None,
              }), \\
-             patch("model.provider.backend_kind", return_value="local"):
+             patch("agent.core.backend_kind", return_value="local"):
             return core._identity_system_prompt()
 
     def test_system_prompt_teaches_noviqx_bot_identity_and_safe_usage(self):
