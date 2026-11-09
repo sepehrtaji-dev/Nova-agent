@@ -20,12 +20,15 @@ import os
 # --- Static product facts ---------------------------------------------------
 # Overridable by environment so a fork can rebrand without editing source.
 NOVA_NAME = os.getenv("NOVA_NAME", "Nova")
-NOVA_VERSION = os.getenv("NOVA_VERSION", "2.1")
+NOVA_VERSION = os.getenv("NOVA_VERSION", "2.2")
 NOVA_DEVELOPER = os.getenv("NOVA_DEVELOPER", "Taji-Soft team")
 NOVA_REPOSITORY = os.getenv(
     "NOVA_REPOSITORY", "https://github.com/sepehrtaji-dev/Nova-agent"
 )
 NOVA_LICENSE = os.getenv("NOVA_LICENSE", "open source")
+
+# Separate GitHub App identity used for authenticated repository operations.
+NOVIQX_GITHUB_BOT_LOGIN = os.getenv("NOVIQX_GITHUB_BOT_LOGIN", "noviqx[bot]")
 
 # What Nova can do when the corresponding tools are enabled. Phrased as
 # capabilities, not as promises: the live registry decides what is actually
@@ -43,6 +46,7 @@ def identity_lines() -> list[str]:
         f"Name: {NOVA_NAME} {NOVA_VERSION}",
         f"Developer: {NOVA_DEVELOPER}",
         f"Source: {NOVA_REPOSITORY} ({NOVA_LICENSE})",
+        f"Dedicated GitHub App bot identity: {NOVIQX_GITHUB_BOT_LOGIN} (NoviqX; separate from Nova developer identity and model provider).",
         "Capabilities when the matching tools are enabled: " + "; ".join(
             f"{name} — {detail}" for name, detail in NOVA_CAPABILITIES
         ),

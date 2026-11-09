@@ -13,3 +13,5 @@ build/
 dist/
 memory/*.json
 memory/database/*.json
+*.pem
+*.key

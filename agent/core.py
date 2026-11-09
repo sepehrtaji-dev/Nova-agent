@@ -163,6 +163,46 @@ class NovaCore:
         ]
         lines.extend(f"- {line}" for line in identity_lines())
 
+        # NoviqX is Nova's dedicated GitHub App service identity. Keep it
+        # distinct from Nova's developer identity, the model vendor, and the
+        # existing read-only gh-based GitHub tool.
+        try:
+            noviqx = SelfKnowledge._noviqx_state(self)
+            lines.extend([
+                f"Dedicated GitHub App identity: NoviqX ({noviqx['bot_login']}).",
+                "This is your separate service identity: a GitHub App bot for "
+                "authenticated remote repository operations; it is not your "
+                "developer and not the company that trained your model.",
+                f"NoviqX runtime status: {noviqx['status']}.",
+            ])
+            if noviqx["registered_tools"]:
+                lines.append(
+                    "NoviqX tools registered in this runtime: "
+                    + ", ".join(noviqx["registered_tools"]) + "."
+                )
+            if noviqx["status"] == "configured_not_yet_verified":
+                lines.extend([
+                    "For authenticated GitHub file operations, select "
+                    "noviqx_github_get_file to read the target file and obtain "
+                    "its blob SHA, then noviqx_github_update_file with that "
+                    "exact expected_sha when an update is requested.",
+                    "NoviqX commits should be attributed to the dedicated "
+                    f"GitHub App bot {noviqx['bot_login']}; do not claim a "
+                    "commit succeeded until the verifier confirms remote "
+                    "content and author identity.",
+                ])
+            else:
+                lines.append(
+                    "Do not claim NoviqX operations are currently usable: "
+                    "registration, Git permission, or local App configuration "
+                    "is not ready in this runtime."
+                )
+        except Exception:
+            lines.append(
+                "NoviqX is the dedicated GitHub App identity, but its live "
+                "runtime status could not be inspected; do not claim it works."
+            )
+
         # Describe the model actually serving this session from probed details.
         # Hardcoded claims here ("runs locally", "3 billion parameters") were
         # repeated by the model as fact even when the backend was remote.
