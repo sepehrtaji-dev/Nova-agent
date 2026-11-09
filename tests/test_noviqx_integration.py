@@ -121,6 +121,30 @@ class TestNoviqXAuth(unittest.TestCase):
         self.assertEqual(result["sha"], "blob-sha")
         self.assertIn("ref=main", calls[0].full_url)
 
+    def test_get_file_rejects_github_responses_without_inline_content(self):
+        from integrations.noviqx.github_api import GitHubAPIError
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        payload = {
+            "type": "file",
+            "path": "large.bin",
+            "encoding": "none",
+            "content": "",
+            "sha": "blob-sha",
+            "size": 2_000_000,
+        }
+        client = NoviqXGitHub(
+            auth=FakeAuth(),
+            opener=lambda request, timeout: _Response(payload),
+        )
+        with self.assertRaises(GitHubAPIError):
+            client.get_file("owner/repo", "large.bin", "main")
+
     def test_update_file_rejects_stale_blob_sha_before_put(self):
         calls = []
 
