@@ -72,6 +72,13 @@ class GitHubAppAuth:
                 f"Could not create NoviqX App JWT ({type(exc).__name__})."
             ) from exc
 
+    def invalidate_token(self, token=None):
+        """Discard the cached token after GitHub rejects it."""
+        with self._lock:
+            if token is None or self._token == token:
+                self._token = None
+                self._token_expires_at = 0.0
+
     def get_installation_token(self, *, force_refresh=False):
         """Return a cached installation token, refreshing it before expiration."""
         with self._lock:
