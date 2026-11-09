@@ -188,5 +188,58 @@ class TestNoviqXAuth(unittest.TestCase):
         self.assertEqual(request_payload["sha"], "current-blob-sha")
 
 
+    def test_api_error_preserves_http_status_for_callers(self):
+        from integrations.noviqx.github_api import GitHubAPIError
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        def forbidden(request, timeout):
+            raise __import__("urllib.error").error.HTTPError(
+                request.full_url, 403, "Forbidden", None, None
+            )
+
+        client = NoviqXGitHub(auth=FakeAuth(), opener=forbidden)
+        with self.assertRaises(GitHubAPIError) as caught:
+            client.get_file("owner/repo", "version.txt", "main")
+        self.assertEqual(caught.exception.status_code, 403)
+
+    def test_update_does_not_treat_permission_error_as_missing_file(self):
+        from integrations.noviqx.github_api import GitHubAPIError
+
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def get_installation_token(self):
+                return "test-token"
+
+        calls = []
+
+        def forbidden(request, timeout):
+            calls.append(request)
+            raise __import__("urllib.error").error.HTTPError(
+                request.full_url, 403, "Forbidden", None, None
+            )
+
+        client = NoviqXGitHub(auth=FakeAuth(), opener=forbidden)
+        with self.assertRaises(GitHubAPIError) as caught:
+            client.put_file(
+                "owner/repo", "version.txt", "2.2\\n",
+                "Update version", "main", expected_sha="old-blob-sha",
+            )
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual([call.method for call in calls], ["GET"])
+
+    def test_safe_branch_rejects_invalid_git_refs(self):
+        for branch in ("feature//broken", "bad branch", "trailing.", "name.lock", "a@{b}"):
+            with self.subTest(branch=branch):
+                with self.assertRaises(ValueError):
+                    NoviqXGitHub._safe_branch(branch)
+
+
+
 if __name__ == "__main__":
     unittest.main()
