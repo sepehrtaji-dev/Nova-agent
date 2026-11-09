@@ -35,7 +35,7 @@ class NoviqXGitHub:
             raise ValueError("repo must be owner/name.")
         return "/".join(parts)
 
-    def request(self, method, path, *, payload=None, query=None):
+    def request(self, method, path, *, payload=None, query=None, include_status=False):
         if (not isinstance(path, str) or not path.startswith("/")
                 or path.startswith("//") or ".." in path.split("/")
                 or any(ord(char) < 32 for char in path)):
@@ -60,7 +60,14 @@ class NoviqXGitHub:
             try:
                 with self._opener(request, timeout=30) as response:
                     raw = response.read()
-                    return json.loads(raw.decode("utf-8")) if raw else {}
+                    result = json.loads(raw.decode("utf-8")) if raw else {}
+                    if include_status:
+                        status = getattr(response, "status", None)
+                        if status is None:
+                            getcode = getattr(response, "getcode", None)
+                            status = getcode() if callable(getcode) else None
+                        return result, status
+                    return result
             except urllib.error.HTTPError as exc:
                 if exc.code == 401 and attempt == 0:
                     invalidate = getattr(self.auth, "invalidate_token", None)
@@ -164,9 +171,10 @@ class NoviqXGitHub:
         path = self._safe_file_path(path)
         branch = self._safe_branch(branch)
         encoded_path = urllib.parse.quote(path, safe="/")
-        data = self.request(
+        data, http_status = self.request(
             "GET", f"/repos/{safe_repo}/contents/{encoded_path}",
             query={"ref": branch},
+            include_status=True,
         )
         if not isinstance(data, dict) or data.get("type") != "file":
             raise GitHubAPIError("GitHub did not return a regular file.")
@@ -193,6 +201,8 @@ class NoviqXGitHub:
             "path": data.get("path", path),
             "sha": sha,
             "content": content,
+            "size_bytes": len(content.encode("utf-8")),
+            "http_status": http_status,
             "html_url": data.get("html_url"),
         }
 
