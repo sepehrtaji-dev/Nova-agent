@@ -44,29 +44,39 @@ class NoviqXGitHub:
         if query:
             url += "?" + urllib.parse.urlencode(query)
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
-        request = urllib.request.Request(
-            url, data=body, method=method.upper(),
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {self.auth.get_installation_token()}",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "Content-Type": "application/json",
-                "User-Agent": "Nova-NoviqX-MCP",
-            },
-        )
-        try:
-            with self._opener(request, timeout=30) as response:
-                raw = response.read()
-                return json.loads(raw.decode("utf-8")) if raw else {}
-        except urllib.error.HTTPError as exc:
-            raise GitHubAPIError(
-                f"GitHub API request failed with HTTP {exc.code}.",
-                status_code=exc.code,
-            ) from exc
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-            raise GitHubAPIError(
-                f"GitHub API request failed ({type(exc).__name__})."
-            ) from exc
+
+        for attempt in range(2):
+            token = self.auth.get_installation_token()
+            request = urllib.request.Request(
+                url, data=body, method=method.upper(),
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Nova-NoviqX-MCP",
+                },
+            )
+            try:
+                with self._opener(request, timeout=30) as response:
+                    raw = response.read()
+                    return json.loads(raw.decode("utf-8")) if raw else {}
+            except urllib.error.HTTPError as exc:
+                if exc.code == 401 and attempt == 0:
+                    invalidate = getattr(self.auth, "invalidate_token", None)
+                    if callable(invalidate):
+                        invalidate(token)
+                        continue
+                raise GitHubAPIError(
+                    f"GitHub API request failed with HTTP {exc.code}.",
+                    status_code=exc.code,
+                ) from exc
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+                raise GitHubAPIError(
+                    f"GitHub API request failed ({type(exc).__name__})."
+                ) from exc
+
+        raise GitHubAPIError("GitHub API request failed after token refresh.")
 
     def get_repository(self, repo):
         return self.request("GET", f"/repos/{self._repo(repo)}")
