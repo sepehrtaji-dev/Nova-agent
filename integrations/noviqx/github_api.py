@@ -98,8 +98,8 @@ class NoviqXGitHub:
 
     def create_branch(self, repo, branch, from_branch="main"):
         safe_repo = self._repo(repo)
-        if not branch or branch.startswith("-") or ".." in branch or " " in branch:
-            raise ValueError("Invalid branch name.")
+        branch = self._safe_branch(branch)
+        from_branch = self._safe_branch(from_branch)
         source_ref = urllib.parse.quote(from_branch, safe="")
         source = self.request("GET", f"/repos/{safe_repo}/git/ref/heads/{source_ref}")
         sha = source.get("object", {}).get("sha")
@@ -115,8 +115,23 @@ class NoviqXGitHub:
                             payload={"title": title[:256], "body": body[:60000]})
 
     def create_pull_request(self, repo, title, head, base="main", body=""):
-        if not title.strip() or not head.strip() or not base.strip():
-            raise ValueError("title, head, and base are required.")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("title is required.")
+        if not isinstance(head, str) or not head.strip():
+            raise ValueError("head branch is required.")
+        if not isinstance(base, str) or not base.strip():
+            raise ValueError("base branch is required.")
+        # GitHub accepts owner:branch for a head in a fork; validate both parts.
+        if ":" in head:
+            owner, head_branch = head.split(":", 1)
+            if not _REPO_PART.fullmatch(owner):
+                raise ValueError("head must be a branch or owner:branch.")
+            self._safe_branch(head_branch)
+        else:
+            self._safe_branch(head)
+        base = self._safe_branch(base)
+        if not isinstance(body, str):
+            raise ValueError("body must be text.")
         return self.request("POST", f"/repos/{self._repo(repo)}/pulls",
                             payload={"title": title[:256], "head": head, "base": base,
                                      "body": body[:60000], "draft": True})
