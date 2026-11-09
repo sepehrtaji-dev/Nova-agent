@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -198,7 +199,7 @@ class TestNoviqXAuth(unittest.TestCase):
                 return "test-token"
 
         def forbidden(request, timeout):
-            raise __import__("urllib.error").error.HTTPError(
+            raise urllib.error.HTTPError(
                 request.full_url, 403, "Forbidden", None, None
             )
 
@@ -238,6 +239,43 @@ class TestNoviqXAuth(unittest.TestCase):
             with self.subTest(branch=branch):
                 with self.assertRaises(ValueError):
                     NoviqXGitHub._safe_branch(branch)
+
+    def test_request_refreshes_installation_token_once_after_401(self):
+        class FakeAuth:
+            api_root = "https://api.github.com"
+
+            def __init__(self):
+                self.token = "expired-token"
+                self.refreshes = 0
+
+            def get_installation_token(self):
+                return self.token
+
+            def invalidate_token(self, token=None):
+                self.asserted_token = token
+                self.token = "fresh-token"
+                self.refreshes += 1
+
+        auth = FakeAuth()
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url, 401, "Unauthorized", None, None
+                )
+            return _Response({"full_name": "owner/repo"})
+
+        client = NoviqXGitHub(auth=auth, opener=opener)
+        result = client.get_repository("owner/repo")
+
+        self.assertEqual(result["full_name"], "owner/repo")
+        self.assertEqual(auth.refreshes, 1)
+        self.assertEqual(auth.asserted_token, "expired-token")
+        self.assertEqual(len(calls), 2)
+        self.assertIn("Bearer expired-token", calls[0].headers["Authorization"])
+        self.assertIn("Bearer fresh-token", calls[1].headers["Authorization"])
 
 
 
