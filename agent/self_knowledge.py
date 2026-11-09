@@ -42,12 +42,13 @@ class SelfKnowledge:
         )
         access = getattr(core, "access", {}) or {}
         key_path = os.getenv("NOVIQX_PRIVATE_KEY_PATH", "").strip()
-        configured = bool(
-            os.getenv("NOVIQX_APP_ID", "").strip()
-            and os.getenv("NOVIQX_INSTALLATION_ID", "").strip()
-            and key_path
-            and Path(key_path).expanduser().is_file()
-        )
+        app_id = os.getenv("NOVIQX_APP_ID", "").strip()
+        installation_id = os.getenv("NOVIQX_INSTALLATION_ID", "").strip()
+        try:
+            key_exists = bool(key_path and Path(key_path).expanduser().is_file())
+        except OSError:
+            key_exists = False
+        configured = app_id.isdigit() and installation_id.isdigit() and key_exists
         if not tool_names:
             status = "not_registered"
         elif not access.get("git", True):
