@@ -699,6 +699,12 @@ def render_spinner(status: str, frame: int) -> Text:
 
 # ── Agent Runner ─────────────────────────────────────────────────────────────
 
+# Worker thread of the currently running ask(); used to prevent a second
+# concurrent core.ask() on the same NovaCore after Ctrl+C (the daemon thread
+# keeps running and both would interleave on shared agent state).
+_active_worker = [None]
+
+
 def run_agent(
     core: NovaCore,
     message: str,
@@ -710,6 +716,17 @@ def run_agent(
         status_message = str(status_message).strip()
         if not status_message:
             return
+
+        # Streaming protocol messages fire for EVERY token. They must not flood
+        # the activity trace with raw "MODEL_ANSWER_DELTA:..." rows.
+        if status_message.startswith(("MODEL_ANSWER_DELTA:", "MODEL_THOUGHT_DELTA:")):
+            with lock:
+                state["current"] = "Generating response..."
+            return
+        if status_message in ("MODEL_ANSWER_RESET", "MODEL_THOUGHT_END", "MODEL_THOUGHT_START"):
+            return
+        if status_message.startswith("THINKING_UPDATE:"):
+            status_message = status_message[len("THINKING_UPDATE:"):].strip() or "Working"
 
         label, color, kind = classify_status(
             status_message,
@@ -764,6 +781,7 @@ def ask(
         args=(core, message, result, state, lock),
         daemon=True,
     )
+    _active_worker[0] = thread
     thread.start()
 
     with Live(
@@ -793,6 +811,7 @@ def ask(
 
         # Make completion explicit before reading the worker's result.
         thread.join()
+        _active_worker[0] = None
         elapsed = time.perf_counter() - state["started"]
 
         with lock:
@@ -939,6 +958,17 @@ def main():
 
         console.print()
         console.print(render_user(message))
+
+        worker = _active_worker[0]
+        if worker is not None and worker.is_alive():
+            # Ctrl+C abandoned the previous worker, but it is still running
+            # core.ask() on the shared core. Starting another ask now would
+            # interleave two turns on the same agent state.
+            console.print(
+                "[warning]  \u23bf  Nova is still processing the previous message \u2014 "
+                "please wait for it to finish first.[/warning]"
+            )
+            continue
 
         try:
             response, elapsed, events = ask(core, message)

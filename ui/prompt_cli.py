@@ -1,6 +1,8 @@
 """Optional prompt_toolkit-based CLI for terminals where a full-screen TUI is not wanted."""
 from __future__ import annotations
 
+import sys
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import InMemoryHistory
@@ -20,8 +22,23 @@ console = Console()
 STYLE = Style.from_dict({"prompt": "#22d3ee bold", "": "ansidefault"})
 
 
+def _create_core():
+    """Build the core, reporting a misconfigured provider like the other UIs
+    do instead of dying with a traceback before the prompt loop starts."""
+    try:
+        return NovaCore()
+    except Exception as exc:
+        console.print(Panel(
+            f"Nova could not start: {type(exc).__name__}: {exc}\n\n"
+            "Check the provider configuration (NOVA_PROVIDER / model settings) "
+            "or start Ollama, then try again.",
+            title="Startup failed", border_style="red",
+        ))
+        sys.exit(1)
+
+
 def main() -> None:
-    core = NovaCore()
+    core = _create_core()
     session = PromptSession(history=InMemoryHistory())
     completer = WordCompleter(COMMANDS, sentence=True, match_middle=True)
     console.print(Panel("Nova · prompt_toolkit mode\nType /help for commands. Tab completes slash commands.", border_style="cyan"))
@@ -83,7 +100,7 @@ def main() -> None:
         elif command == "/permissions":
             console.print(core.get_access())
         elif command == "/reset":
-            core = NovaCore()
+            core = _create_core()
             console.print("Started a fresh session.")
         else:
             try:

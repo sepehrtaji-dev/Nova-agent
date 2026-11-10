@@ -338,6 +338,15 @@ class NovaTextualApp(App):
 
     def _record_activity(self, message: str) -> None:
         message = message.strip()
+        # Streaming protocol messages fire for EVERY token. Logging each one
+        # floods the activity table with raw "MODEL_ANSWER_DELTA:..." rows and
+        # replaces the real status with token fragments.
+        if message.startswith(("MODEL_ANSWER_DELTA:", "MODEL_THOUGHT_DELTA:")):
+            return
+        if message in ("MODEL_ANSWER_RESET", "MODEL_THOUGHT_END", "MODEL_THOUGHT_START"):
+            return
+        if message.startswith("THINKING_UPDATE:"):
+            message = message[len("THINKING_UPDATE:"):].strip() or "Working"
         if message and message != self._last_event:
             self._last_event = message
             label, color, kind = "NOVA", "bright_cyan", "info"
@@ -523,8 +532,15 @@ class NovaTextualApp(App):
         if self.core is None:
             self.call_from_thread(self._finish_error, "Nova core is not initialized.")
             return
-        profile = runtime_profile(self.core)
-        model = inspect_model(self.core)
+        try:
+            profile = runtime_profile(self.core)
+            model = inspect_model(self.core)
+        except Exception as exc:
+            # Without this handler a failed network call to Ollama left the
+            # app stuck busy forever: _finish_inspection never ran and the
+            # prompt stayed disabled.
+            self.call_from_thread(self._finish_error, f"{type(exc).__name__}: {exc}")
+            return
         table = Table(show_header=False, expand=True, box=None, padding=(0, 1))
         table.add_column("field", style="dim")
         table.add_column("value")
