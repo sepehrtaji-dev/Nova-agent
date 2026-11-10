@@ -1,0 +1,85 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach Nova.exe to (empty = build artifact only)"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Nova.exe (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install PySide6-Essentials pillow pyinstaller
+
+      - name: Convert logo to .ico
+        shell: bash
+        run: |
+          python -c "from PIL import Image; im = Image.open('assets/nova-logo.png').convert('RGBA'); im.save('assets/nova-logo.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          ls -la assets/
+
+      - name: Build Nova.exe
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onefile \
+            --name Nova \
+            --icon assets/nova-logo.ico \
+            --add-data "assets;assets" \
+            --hidden-import PySide6.QtSvg \
+            --collect-all textual \
+            --collect-all markdown \
+            --collect-all pymdownx \
+            --collect-submodules agent \
+            --collect-submodules api \
+            --collect-submodules config \
+            --collect-submodules integrations \
+            --collect-submodules memory \
+            --collect-submodules model \
+            --collect-submodules sandbox \
+            --collect-submodules storage \
+            --collect-submodules tools \
+            App.py
+          ls -la dist/
+
+      - name: Attach Nova.exe to release
+        if: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          TAG="${TAG_NAME}"
+          if [ -n "$TAG" ] && [ "$TAG" != "main" ]; then
+            gh release upload "$TAG" dist/Nova.exe --clobber --repo "${{ github.repository }}"
+            echo "attached Nova.exe to release $TAG"
+          else
+            echo "no tag to attach to, skipping"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nova-windows-exe
+          path: dist/Nova.exe
+          if-no-files-found: error
