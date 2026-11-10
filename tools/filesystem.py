@@ -12,7 +12,10 @@ Example:
     {"path": "/home/user/Documents/notes.txt", "location": "system"}
     {"path": "C:/Users/user/Documents/notes.txt", "location": "system"}
 
-Protected system paths are blocked even in system mode.
+Protected system paths are blocked even in system mode. Note that user home
+directories (/home, /root, and their Windows equivalents) are currently blocked
+in system mode as well, so the examples below are NOT reachable until that
+policy is relaxed.
 """
 
 import os
@@ -56,7 +59,7 @@ class FileSystemTool:
         self.desktop_path  = os.path.join(os.path.expanduser("~"), "Desktop")
         os.makedirs(self.projects_path, exist_ok=True)
 
-    def _atomic_write_text(self, full_path, content):
+    def _atomic_write_text(self, full_path, content, encoding="utf-8"):
         """Replace a text file atomically, preserving existing permission bits."""
         parent = os.path.dirname(full_path) or os.curdir
         os.makedirs(parent, exist_ok=True)
@@ -73,7 +76,7 @@ class FileSystemTool:
             dir=parent,
         )
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            with os.fdopen(descriptor, "w", encoding=encoding, newline="") as handle:
                 handle.write(content)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -222,7 +225,15 @@ class FileSystemTool:
                 continue
 
             for prefix in blocked_prefixes:
-                if folded == prefix or folded.startswith(prefix + "/"):
+                # Also block suffix variants ("/etc/shadow-", "/etc/sudoers.d/x",
+                # "/etc/hosts.allow") that continue past the prefix with "-", "."
+                # or "/" — these are real protected files/directories.
+                if (
+                    folded == prefix
+                    or folded.startswith(prefix + "/")
+                    or folded.startswith(prefix + "-")
+                    or folded.startswith(prefix + ".")
+                ):
                     raise PermissionError(
                         f"Access denied: {full_path!r} resolves to a protected system path."
                     )
@@ -443,18 +454,19 @@ class FileSystemTool:
 
             try:
                 with open(full_path, "r", encoding="utf-8") as f:
-                    content = f.read(50000)  # max 50k chars
+                    content = f.read(50001)  # max 50k chars (+1 to detect truncation)
             except UnicodeDecodeError:
                 # Try latin-1 as fallback
                 try:
                     with open(full_path, "r", encoding="latin-1") as f:
-                        content = f.read(50000)
+                        content = f.read(50001)
                 except Exception:
                     return f"File is not a readable text file: {full_path}"
 
             truncated = ""
-            if len(content) >= 50000:
-                truncated = f"\n\n[Truncated: showing first 50,000 characters]"
+            if len(content) > 50000:
+                content = content[:50000]
+                truncated = "\n\n[Truncated: showing first 50,000 characters]"
 
             return content + truncated
 
@@ -618,6 +630,7 @@ class FileSystemTool:
                     f"Maximum allowed: 512,000 bytes (500KB)."
                 )
 
+            used_encoding = "utf-8"
             try:
                 with open(full_path, "r", encoding="utf-8") as f:
                     original = f.read()
@@ -626,6 +639,7 @@ class FileSystemTool:
                 try:
                     with open(full_path, "r", encoding="latin-1") as f:
                         original = f.read()
+                    used_encoding = "latin-1"
                 except Exception:
                     return f"File is not a readable text file: {full_path}"
 
@@ -649,7 +663,9 @@ class FileSystemTool:
                 updated  = original.replace(old_str, new_str, 1)
                 replaced = 1
 
-            self._atomic_write_text(full_path, updated)
+            # Write back with the SAME encoding the file was read with, so a
+            # latin-1 file is not silently re-encoded (and grown) as UTF-8.
+            self._atomic_write_text(full_path, updated, encoding=used_encoding)
             size = os.path.getsize(full_path)
 
             return (

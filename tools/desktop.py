@@ -306,18 +306,16 @@ class DesktopTool:
         if not key:
             return "DESKTOP ERROR: key requires 'key' field."
 
-        # Block dangerous key combinations
-        dangerous_combos = [
-            "ctrl+alt+delete",
-            "ctrl+alt+del",
-            "ctrl+shift+esc",
-            "ctrl+alt+f4",
-            "alt+f4",
-        ]
+        # Block dangerous key combinations. Check the SET of parts so that
+        # reordering ("delete+alt+ctrl", "f4+alt") cannot bypass the filter.
         key_lower = key.lower().replace(" ", "")
-        for combo in dangerous_combos:
-            if combo in key_lower:
-                return f"DESKTOP ERROR: dangerous key combination '{key}' is blocked."
+        parts = {p.strip() for p in key_lower.split("+")}
+        if {"ctrl", "alt", "delete"} <= parts or {"ctrl", "alt", "del"} <= parts:
+            return f"DESKTOP ERROR: dangerous key combination '{key}' is blocked."
+        if "alt" in parts and ("f4" in parts or ({"ctrl", "shift"} <= parts and "esc" in parts)):
+            return f"DESKTOP ERROR: dangerous key combination '{key}' is blocked."
+        if {"ctrl", "shift", "esc"} <= parts:
+            return f"DESKTOP ERROR: dangerous key combination '{key}' is blocked."
 
         # Support combos like "ctrl+c", "ctrl+shift+t"
         if "+" in key:
@@ -517,30 +515,14 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
 
         try:
             if is_windows:
-                # Escape special characters for PowerShell filter
-                escaped_title = (
-                    title
-                    .replace('"', '\"')
-                    .replace("'", "\'")
-                    .replace("`", "``")
-                    .replace("$", "`$")
-                    .replace("(", "`(")
-                    .replace(")", "`)")
-                    .replace("[", "`[")
-                    .replace("]", "`]")
-                    .replace("{", "`{")
-                    .replace("}", "`}")
-                    .replace("|", "`|")
-                    .replace("&", "`&")
-                    .replace("<", "`<")
-                    .replace(">", "`>")
-                    .replace("*", "`*")
-                    .replace("?", "`?")
-                )
+                # The title is passed as a single argv element to taskkill (no
+                # shell involved), so quote escaping is not needed — but wildcards
+                # in the WINDOWTITLE filter are neutralized.
+                escaped_title = title.replace("*", "`").replace("?", "`")
                 filter_value = f'WINDOWTITLE eq *{escaped_title}*'
                 result = subprocess.run(
                     ["taskkill", "/F", "/FI", filter_value],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, timeout=10
                 )
                 success = result.returncode == 0
             elif is_mac:
@@ -548,14 +530,14 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
                 script = f'tell application "{escaped_title}" to quit'
                 result = subprocess.run(
                     ["osascript", "-e", script],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, timeout=10
                 )
                 success = result.returncode == 0
             else:
                 # Linux — use wmctrl if available
                 result = subprocess.run(
                     ["wmctrl", "-c", title],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, timeout=10
                 )
                 success = result.returncode == 0
 
@@ -706,8 +688,8 @@ Get-StartApps | Select-Object Name, AppID | ForEach-Object {
         if not pyautogui:
             return f"DESKTOP ERROR: {err}"
 
-        image = data.get("image", "").strip()
-        text = data.get("text", "").strip()
+        image = str(data.get("image") or "").strip()
+        text = str(data.get("text") or "").strip()
 
         if image:
             if not os.path.isfile(image):

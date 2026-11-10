@@ -102,18 +102,24 @@ class ImageGenTool:
         """
         data = self._parse_input(input_data)
 
-        prompt = data.get("prompt", "").strip()
+        prompt = str(data.get("prompt") or "").strip()
         if not prompt:
             return "IMAGE ERROR: 'prompt' is required."
 
-        # Parse parameters with defaults
-        negative_prompt = data.get("negative_prompt", "").strip() or None
-        width = int(data.get("width", 512))
-        height = int(data.get("height", 512))
-        steps = int(data.get("num_inference_steps", 20))
-        guidance = float(data.get("guidance_scale", 7.5))
-        seed = data.get("seed")
-        filename = data.get("filename", "").strip()
+        # Parse parameters with defaults. Model-supplied values can be any
+        # JSON type; reject bad types with a clean error instead of crashing.
+        try:
+            negative_prompt = str(data.get("negative_prompt") or "").strip() or None
+            width = int(data.get("width", 512))
+            height = int(data.get("height", 512))
+            steps = int(data.get("num_inference_steps", 20))
+            guidance = float(data.get("guidance_scale", 7.5))
+            seed = data.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            filename = str(data.get("filename") or "").strip()
+        except (TypeError, ValueError):
+            return "IMAGE ERROR: width, height, num_inference_steps, guidance_scale and seed must be numbers."
 
         if width <= 0 or height <= 0 or width > 2048 or height > 2048:
             return "IMAGE ERROR: width and height must be between 1 and 2048."
@@ -138,7 +144,7 @@ class ImageGenTool:
         # Set seed if provided
         generator = None
         if seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(int(seed))
+            generator = torch.Generator(device=self.device).manual_seed(seed)
 
         try:
             # Generate image

@@ -212,7 +212,9 @@ class WebSearchTool:
                         if (parsed_link.hostname or "").endswith("duckduckgo.com"):
                             target = urllib.parse.parse_qs(parsed_link.query).get("uddg", [""])[0]
                             if target:
-                                result_url = urllib.parse.unquote(target)
+                                # parse_qs already percent-decodes uddg; decoding
+                                # again corrupts URLs containing %20/%25/...
+                                result_url = target
                     if provider == "bing":
                         bparsed = urllib.parse.urlsplit(result_url)
                         if (bparsed.hostname or "").endswith("bing.com") and bparsed.path.startswith("/ck/a"):
@@ -488,7 +490,11 @@ class WebSearchTool:
             charset = response.headers.get_content_charset() or "utf-8"
         except Exception:
             pass
-        document = raw.decode(charset, errors="replace")
+        try:
+            document = raw.decode(charset, errors="replace")
+        except (LookupError, UnicodeError):
+            # Unknown or invalid header charset (e.g. iso-8859-11): fall back.
+            document = raw.decode("utf-8", errors="replace")
         if "html" in content_type:
             document = re.sub(r"(?is)<(script|style|noscript|svg)\b[^>]*>.*?</\1\s*>", " ", document)
             document = re.sub(r"(?s)<[^>]+>", " ", document)
