@@ -62,11 +62,40 @@ jobs:
             App.py
           ls -la dist/
 
+      # ── Code signing (optional) ──────────────────────────────────────────
+      # Option A — Azure Artifact Signing (~$9.99/mo, instant SmartScreen trust):
+      #   Add repo secrets AZURE_TENANT_ID, AZURE_CLIENT_ID,
+      #   AZURE_CLIENT_SECRET, AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE,
+      #   then uncomment this step:
+      # - name: Sign Nova.exe (Azure Artifact Signing)
+      #   uses: azure/trusted-signing-action@v0
+      #   with:
+      #     azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      #     signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+      #     signing-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+      #     files-folder: dist
+      #     files-folder-filter: exe
+      #
+      # Option B — SignPath Foundation (FREE for open source, signpath.org):
+      #   Apply, connect their GitHub App, then wire their signing step here.
+      #   The private key never leaves their HSM — nothing to protect locally.
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum Nova.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Nova-windows-exe
-          path: dist/Nova.exe
+          path: |
+            dist/Nova.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
 
       - name: Attach Nova.exe to release
@@ -83,8 +112,8 @@ jobs:
           esac
           echo "resolved tag: $TAG"
           if [ -n "$TAG" ] && [ "$TAG" != "vmain" ]; then
-            gh release upload "$TAG" dist/Nova.exe --clobber --repo "${{ github.repository }}"
-            echo "attached Nova.exe to release $TAG"
+            gh release upload "$TAG" dist/Nova.exe dist/SHA256SUMS.txt --clobber --repo "${{ github.repository }}"
+            echo "attached Nova.exe + SHA256SUMS.txt to release $TAG"
           else
             echo "no tag to attach to, skipping"
           fi
