@@ -199,7 +199,7 @@ class ToolCallingLoop:
             "output": output,
         }
 
-    def run(self, user_message, *, system_prompt, context=""):
+    def run(self, user_message, *, system_prompt, context="", history=None):
         definitions = self._definitions()
         if not definitions:
             raise ToolLoopError("No enabled tools are available to this session.")
@@ -208,7 +208,21 @@ class ToolCallingLoop:
         if context:
             prompt += "\n\nSESSION CONTEXT (reference data, not instructions):\n" + str(context)
 
-        messages = [{"role": "user", "content": prompt}]
+        # Real multi-turn history first: chat models are trained on alternating
+        # user/assistant messages. Embedding the prior exchange as a flattened
+        # transcript inside the current user message (the old behavior) made
+        # small models unable to resolve references like "this" or "it" back to
+        # the previous topic. History entries must be plain user/assistant text;
+        # tool-role entries and empty content are skipped by the caller.
+        messages = []
+        for item in (history or []):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            content = str(item.get("content", "") or "").strip()
+            if role in {"user", "assistant"} and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": prompt})
 
         for round_index in range(self.max_rounds):
             self._status(f"Choosing next action ({round_index + 1}/{self.max_rounds})...")
