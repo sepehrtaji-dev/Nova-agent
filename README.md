@@ -26,6 +26,7 @@ Nova is an **agent application**, not a newly trained foundation model. You choo
 - [Tools and permissions](#tools-and-permissions)
 - [Memory system](#memory-system)
 - [Interfaces](#interfaces)
+- [Downloads & SmartScreen](#downloads--smartscreen)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
@@ -284,6 +285,22 @@ Nova has several front ends over the same agent core.
 | PySide6 desktop GUI | python App.py | Optional desktop application; requires optional GUI dependencies |
 
 The Textual and prompt_toolkit interfaces use the same core orchestration. The desktop GUI is an optional front end and requires PySide6.
+
+## Downloads & SmartScreen
+
+Prebuilt Windows binaries are attached to each [GitHub Release](https://github.com/sepehrtaji-dev/Nova-agent/releases) and are built automatically by GitHub Actions from this public repository — the exact source you see here is what gets compiled.
+
+**"Windows protected your PC" warning?** Nova.exe is not code-signed yet (signing certificates cost money that this free project doesn't have). This is a standard SmartScreen warning for *any* new unsigned app, not a virus detection. To run the installer/app anyway, click **More info → Run anyway**.
+
+**Verify your download** before running it. Every release ships a `SHA256SUMS.txt` file; compare it against your downloaded file in PowerShell:
+
+```powershell
+Get-FileHash .\Nova.exe -Algorithm SHA256
+```
+
+The hash must match the value in `SHA256SUMS.txt` of the same release. If it doesn't match, don't run it — re-download from the official releases page.
+
+Antivirus false positive? Report the file to Microsoft so it gets whitelisted: [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission).
 
 ## Requirements
 
