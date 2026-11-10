@@ -294,15 +294,23 @@ class GitTool:
                     "Install it from https://cli.github.com/ and run 'gh auth login'"
                 )
 
-            name = data.get("name", "").strip()
+            name = str(data.get("name") or "").strip()
             if not name:
                 return "GIT ERROR: 'name' is required for create_repo."
 
-            visibility = data.get("visibility", "public").strip().lower()
+            # Validate the repo name so it cannot be parsed by gh as a flag
+            # (e.g. "--source=..." would make gh push an arbitrary local repo).
+            try:
+                name = self._safe_remote_or_branch(name, "repository name")
+            except ValueError as exc:
+                return f"GIT ERROR: {exc}"
+
+            visibility = str(data.get("visibility") or "public").strip().lower()
             if visibility not in ("public", "private"):
                 visibility = "public"
 
-            description = data.get("description", "").strip()
+            # A description starting with "-" would be parsed as a flag.
+            description = str(data.get("description") or "").strip().lstrip("-")
 
             # Create repo on GitHub
             args = ["repo", "create", name, f"--{visibility}"]
@@ -382,7 +390,7 @@ class GitTool:
 
         # ── clone ─────────────────────────────────────────────────────────
         if action == "clone":
-            url = data.get("url", "").strip()
+            url = str(data.get("url") or "").strip()
             if not url:
                 return "GIT ERROR: 'url' is required for clone."
 
@@ -427,7 +435,7 @@ class GitTool:
 
         # ── commit ────────────────────────────────────────────────────────
         if action == "commit":
-            message = data.get("message", "").strip()
+            message = str(data.get("message") or "").strip()
             if not message:
                 return "GIT ERROR: 'message' is required for commit."
 
@@ -475,8 +483,11 @@ class GitTool:
 
         # ── log ───────────────────────────────────────────────────────────
         if action == "log":
-            n    = int(data.get("n", 10))
-            n    = min(max(n, 1), 100)
+            try:
+                n = int(data.get("n", 10))
+            except (TypeError, ValueError):
+                return "GIT ERROR: 'n' must be an integer."
+            n = min(max(n, 1), 100)
             args = [
                 "log",
                 f"-{n}",
@@ -490,7 +501,11 @@ class GitTool:
             file_ = data.get("file")
             args  = ["diff"]
             if file_:
-                args.append(str(file_))
+                file_ = str(file_)
+                # Reject a path that would be parsed as a git flag.
+                if file_.startswith("-"):
+                    return "GIT ERROR: invalid diff path."
+                args.append(file_)
             return self._run_git(args, cwd)
 
         # ── branch ───────────────────────────────────────────────────────
@@ -499,21 +514,27 @@ class GitTool:
 
         # ── checkout ─────────────────────────────────────────────────────
         if action == "checkout":
-            branch = data.get("branch", "").strip()
-            if not branch:
-                return "GIT ERROR: 'branch' is required for checkout."
+            try:
+                # Validated so the branch cannot be parsed as a git flag
+                # (e.g. "-f" would force-checkout and discard changes).
+                branch = self._safe_remote_or_branch(str(data.get("branch") or ""), "branch")
+            except ValueError as exc:
+                return f"GIT ERROR: {exc}"
             return self._run_git(["checkout", branch], cwd)
 
         # ── create_branch ─────────────────────────────────────────────────
         if action == "create_branch":
-            new_branch = data.get("new_branch", "").strip()
-            if not new_branch:
-                return "GIT ERROR: 'new_branch' is required for create_branch."
+            try:
+                new_branch = self._safe_remote_or_branch(
+                    str(data.get("new_branch") or ""), "new branch"
+                )
+            except ValueError as exc:
+                return f"GIT ERROR: {exc}"
             return self._run_git(["checkout", "-b", new_branch], cwd)
 
         # ── stash ─────────────────────────────────────────────────────────
         if action == "stash":
-            sub = data.get("sub", "push").strip().lower()
+            sub = str(data.get("sub") or "push").strip().lower()
             if sub == "push":
                 return self._run_git(["stash", "push"], cwd)
             if sub == "pop":
