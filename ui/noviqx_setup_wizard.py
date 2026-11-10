@@ -175,12 +175,21 @@ class NoviqXSetupWizard(QDialog):
 
     def _render_step(self) -> None:
         self.progress.setValue(self._step)
-        # Clear body
+        # Clear body. takeAt() only removes the layout item; the widget itself
+        # is still parented to self.body and stays visible until deleteLater()
+        # fires on the next event loop tick — by which time the new step's
+        # widgets are already on screen, causing the visual overlap users see.
+        # Fix: detach the widget from its parent immediately with setParent(None)
+        # so it disappears from the layout NOW, then schedule deletion.
         while self.body_layout.count():
             item = self.body_layout.takeAt(0)
             w = item.widget()
             if w is not None:
+                w.setParent(None)
                 w.deleteLater()
+        # Force the body to re-layout immediately so the new widgets appear in
+        # the correct position rather than overlapping the previous step's.
+        self.body.updateGeometry()
 
         if self._step == 0:
             self._render_intro()
