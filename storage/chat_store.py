@@ -83,7 +83,7 @@ class ChatStore:
     def create_chat(self, title="New chat"):
         chat_id = uuid.uuid4().hex
         now = self._now()
-        with self._connect() as db:
+        with self._db() as db:
             db.execute(
                 "INSERT INTO chats(id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 (chat_id, str(title or "New chat")[:100], now, now),
@@ -91,7 +91,7 @@ class ChatStore:
         return chat_id
 
     def list_chats(self, limit=200):
-        with self._connect() as db:
+        with self._db() as db:
             rows = db.execute(
                 "SELECT c.id, c.title, c.created_at, c.updated_at, "
                 "(SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id) AS message_count "
@@ -101,7 +101,7 @@ class ChatStore:
         return [dict(row) for row in rows]
 
     def get_messages(self, chat_id):
-        with self._connect() as db:
+        with self._db() as db:
             rows = db.execute(
                 "SELECT role, content, context, attachments, created_at "
                 "FROM messages WHERE chat_id=? ORDER BY id",
@@ -133,7 +133,7 @@ class ChatStore:
             if isinstance(item, (str, os.PathLike))
         ]
         now = self._now()
-        with self._connect() as db:
+        with self._db() as db:
             exists = db.execute(
                 "SELECT 1 FROM chats WHERE id=?", (str(chat_id),)
             ).fetchone()
@@ -167,6 +167,6 @@ class ChatStore:
                 )
 
     def delete_chat(self, chat_id):
-        with self._connect() as db:
+        with self._db() as db:
             cursor = db.execute("DELETE FROM chats WHERE id=?", (str(chat_id),))
             return cursor.rowcount > 0

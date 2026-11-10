@@ -297,7 +297,9 @@ class OllamaBrain:
                 if callable(on_token):
                     on_token(token)
             if chunk_calls:
-                calls = list(chunk_calls)
+                # Ollama streams one complete tool call per chunk; accumulate
+                # instead of overwriting, or every call but the last is lost.
+                calls.extend(list(chunk_calls))
         return {
             "content": "".join(content_parts),
             "thinking": "".join(thinking_parts),

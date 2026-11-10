@@ -7,6 +7,7 @@ ignored by git.
 import json
 import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,11 +64,25 @@ class EpisodicMemory:
     def _save(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-            with temporary.open("w", encoding="utf-8") as handle:
-                json.dump(self._episodes, handle, ensure_ascii=False, indent=2)
-                handle.flush()
-            temporary.replace(self.path)
+            # Use a UNIQUE temp file. The previous fixed "episodic.json.tmp" name
+            # let two concurrent writers interleave into the same temp file and
+            # os.replace promote a corrupt mixture; the next _load then silently
+            # returned [] and wiped all episode history.
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=self.path.name + ".", suffix=".tmp",
+                dir=str(self.path.parent),
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    json.dump(self._episodes, handle, ensure_ascii=False, indent=2)
+                    handle.flush()
+                os.replace(temporary_name, self.path)
+            except Exception:
+                try:
+                    os.unlink(temporary_name)
+                except OSError:
+                    pass
+                raise
             return True
         except OSError:
             return False

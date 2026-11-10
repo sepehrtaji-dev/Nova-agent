@@ -26,11 +26,13 @@ class MemoryManager:
         elif isinstance(self.data[category], list):
             replacement = {key: value}
             replaced = False
+            # Replace EVERY dict containing the key. forget() removes all
+            # matches; replacing only the first left a stale duplicate with the
+            # old value behind, which relevant() could still surface.
             for index, item in enumerate(self.data[category]):
                 if isinstance(item, dict) and key in item:
                     self.data[category][index] = replacement
                     replaced = True
-                    break
             if not replaced:
                 self.data[category].append(replacement)
         else:
