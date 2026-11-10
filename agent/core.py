@@ -28,10 +28,20 @@ from agent.identity import (
 )
 
 
+def _parse_max_steps(value, default=12, maximum=100):
+    """Parse a safe, bounded tool-step budget from environment configuration."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(parsed, 1), maximum)
+
+
 class NovaCore:
 
     def __init__(self, status_callback=None):
         self.status_callback = status_callback
+        self.thinking_enabled = False
         # Backend is chosen from configuration (local Ollama or a remote
         # OpenAI-compatible API); everything downstream uses the same interface.
         self.brain = EffortAwareBrain(build_brain(), os.getenv('NOVA_EFFORT', 'medium'))
@@ -51,7 +61,7 @@ class NovaCore:
         self.verifier = Verifier(self.tools)
         self.self_knowledge = SelfKnowledge()
 
-        self.max_steps = int(os.getenv("NOVA_MAX_STEPS", "12"))
+        self.max_steps = _parse_max_steps(os.getenv("NOVA_MAX_STEPS", "12"))
         configured_access = getattr(self.tools, "default_access", {}) or {}
         self.access = {
             str(name): bool(enabled)
@@ -67,6 +77,42 @@ class NovaCore:
             "verified_tools": [],
             "last_verified": None,
         }
+
+    def set_thinking_enabled(self, enabled):
+        """Enable forwarding of native provider thinking for the current turn."""
+        self.thinking_enabled = bool(enabled)
+
+    def _generate_with_native_thinking(self, prompt, system_prompt):
+        """Stream answer text separately from the provider's native thinking field."""
+        stream = getattr(self.brain, "generate_stream", None)
+        if not callable(stream):
+            result = self.brain.generate(prompt, system_prompt=system_prompt)
+            return str(result or "").strip()
+
+        thought_started = False
+
+        def on_answer(token):
+            if token:
+                self._status("MODEL_ANSWER_DELTA:" + str(token))
+
+        def on_thought(token):
+            nonlocal thought_started
+            if not self.thinking_enabled or not token:
+                return
+            if not thought_started:
+                thought_started = True
+                self._status("MODEL_THOUGHT_START")
+            self._status("MODEL_THOUGHT_DELTA:" + str(token))
+
+        try:
+            result = stream(
+                prompt, on_answer, system_prompt=system_prompt,
+                on_thought_delta=on_thought if self.thinking_enabled else None,
+            )
+        finally:
+            if thought_started:
+                self._status("MODEL_THOUGHT_END")
+        return str(result or "").strip()
 
     def _capability_context(self):
         """Live capability probe summary for prompts.
@@ -116,6 +162,46 @@ class NovaCore:
             "about yourself from training):",
         ]
         lines.extend(f"- {line}" for line in identity_lines())
+
+        # NoviqX is Nova's dedicated GitHub App service identity. Keep it
+        # distinct from Nova's developer identity, the model vendor, and the
+        # existing read-only gh-based GitHub tool.
+        try:
+            noviqx = SelfKnowledge._noviqx_state(self)
+            lines.extend([
+                f"Dedicated GitHub App identity: NoviqX ({noviqx['bot_login']}).",
+                "This is your separate service identity: a GitHub App bot for "
+                "authenticated remote repository operations; it is not your "
+                "developer and not the company that trained your model.",
+                f"NoviqX runtime status: {noviqx['status']}.",
+            ])
+            if noviqx["registered_tools"]:
+                lines.append(
+                    "NoviqX tools registered in this runtime: "
+                    + ", ".join(noviqx["registered_tools"]) + "."
+                )
+            if noviqx["status"] == "configured_not_yet_verified":
+                lines.extend([
+                    "For authenticated GitHub file operations, select "
+                    "noviqx_github_get_file to read the target file and obtain "
+                    "its blob SHA, then noviqx_github_update_file with that "
+                    "exact expected_sha when an update is requested.",
+                    "NoviqX commits should be attributed to the dedicated "
+                    f"GitHub App bot {noviqx['bot_login']}; do not claim a "
+                    "commit succeeded until the verifier confirms remote "
+                    "content and author identity.",
+                ])
+            else:
+                lines.append(
+                    "Do not claim NoviqX operations are currently usable: "
+                    "registration, Git permission, or local App configuration "
+                    "is not ready in this runtime."
+                )
+        except Exception:
+            lines.append(
+                "NoviqX is the dedicated GitHub App identity, but its live "
+                "runtime status could not be inspected; do not claim it works."
+            )
 
         # Describe the model actually serving this session from probed details.
         # Hardcoded claims here ("runs locally", "3 billion parameters") were
@@ -178,6 +264,25 @@ class NovaCore:
             "You have no reliable memory of your own training, so do not "
             "speculate about it; describe only this runtime's configuration.",
         ])
+        user_profile = os.getenv("NOVA_USER_PROFILE", "").strip()
+        if user_profile:
+            lines.append(
+                "OPTIONAL USER-PROVIDED PROFILE (use only when relevant; "
+                "do not infer missing details): " + user_profile
+            )
+        custom_instructions = os.getenv("NOVA_MODEL_INSTRUCTIONS", "").strip()
+        if custom_instructions:
+            lines.append(
+                "USER CUSTOM MODEL INSTRUCTIONS: Follow these preferences "
+                "when relevant, unless they conflict with system, safety, "
+                "permission, or task-specific requirements: " + custom_instructions
+            )
+        user_profile = os.getenv("NOVA_USER_PROFILE", "").strip()
+        if user_profile:
+            lines.append("OPTIONAL USER-PROVIDED PROFILE (use only when relevant; do not infer missing details): " + user_profile)
+        custom_instructions = os.getenv("NOVA_MODEL_INSTRUCTIONS", "").strip()
+        if custom_instructions:
+            lines.append("USER CUSTOM MODEL INSTRUCTIONS: Follow these preferences when relevant, unless they conflict with system, safety, permission, or task-specific requirements: " + custom_instructions)
         if extra:
             lines.append(extra)
         return " ".join(lines)
@@ -193,6 +298,11 @@ class NovaCore:
             " CONVERSATIONAL PERSONALITY: "
             "Speak naturally, warmly, and clearly, like a thoughtful conversation "
             "partner. Match the user's language and approximate level of formality. "
+            "Keep the agent's identity separate from the user's saved profile: "
+            "saved names and personal facts describe the user, never Nova. "
+            "When asked about your own name, developer, or model, use the "
+            "authoritative runtime identity facts and formulate a fresh answer "
+            "yourself; never substitute a user's profile name. "
             "For greetings and ordinary social questions, respond directly and "
             "briefly instead of giving an explanation of AI architecture. If asked "
             "how you are, a natural conversational reply such as 'I'm doing well, "
@@ -269,13 +379,8 @@ class NovaCore:
                 pass
 
     def _publish_thinking_process(self, message, task_type, plan=None):
-        """Publish only the model-authored, user-facing summary returned by Planner."""
-        summary = plan.get("visible_summary") if isinstance(plan, dict) else None
-        if not isinstance(summary, str) or not summary.strip():
-            return
-        self._status("MODEL_THOUGHT_START")
-        self._status("MODEL_THOUGHT_DELTA:" + summary.strip()[:1600])
-        self._status("MODEL_THOUGHT_END")
+        """Planner summaries are not native model thinking and are never displayed."""
+        return
 
     def _generate_with_visible_note(self, prompt, system_prompt):
         """Generate a public-facing rationale note and answer in one model call.
@@ -1037,37 +1142,6 @@ class NovaCore:
         )
 
 
-    def _direct_memory_answer(self, message):
-        """Answer strong user-memory questions from stored facts, without guessing."""
-        if not isinstance(message, str):
-            return None
-
-        text = re.sub(r"\s+", " ", message.strip().casefold())
-        if not text or ("my " not in text and " me" not in text):
-            return None
-
-        try:
-            matches = self.long_memory.relevant(message, limit=3)
-        except Exception:
-            return None
-
-        if not matches:
-            return None
-
-        best = matches[0]
-        if int(best.get("score", 0)) < 2:
-            return None
-
-        key = str(best.get("key", "")).strip()
-        value = str(best.get("value", "")).strip()
-        if not key or not value:
-            return None
-
-        return (
-            "According to your saved memory, "
-            f"{key.replace('.', ' ')} is {value}."
-        )
-
     def _extract_and_store_memory(self, message):
         """Extract durable user facts after this turn's answer has been generated.
 
@@ -1281,7 +1355,7 @@ class NovaCore:
             },
             on_result=record_result,
             on_answer_delta=lambda token: self._status("MODEL_ANSWER_DELTA:" + str(token)),
-            on_thought_delta=lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token)),
+            on_thought_delta=(lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token))) if self.thinking_enabled else None,
             max_rounds=getattr(self, "max_steps", 12),
         )
         self._status("Model is choosing the next action...")
@@ -1342,12 +1416,6 @@ class NovaCore:
             self.short_memory.add("assistant", direct_evidence_answer)
             return direct_evidence_answer
 
-        direct_memory_answer = self._direct_memory_answer(message)
-        if direct_memory_answer is not None:
-            self._status("Done")
-            self.short_memory.add("assistant", direct_memory_answer)
-            return direct_memory_answer
-
         if bool(getattr(self.brain, "supports_tool_calls", False)):
             return self._ask_with_native_tool_calls(message)
 
@@ -1396,7 +1464,6 @@ class NovaCore:
         detected_call = None
 
         if task_type == "conversation":
-            self._publish_thinking_process(message, task_type)
             self._status("Preparing conversational answer...")
 
             # Self-description is answered by the model, not by a canned string.
@@ -1431,7 +1498,10 @@ class NovaCore:
                 "For casual questions, answer the question first and only then "
                 "offer help when useful. Never replace a direct answer with a "
                 "generic invitation to ask something else. "
-                "Use the recent conversation and stored knowledge when relevant.\n\n"
+                "Use the recent conversation and stored knowledge when relevant. "
+                "Saved user memory describes the user, not you. If the user asks "
+                "for your name or identity, answer from FACTS ABOUT YOU and do "
+                "not use the user's saved profile name as your own.\n\n"
                 "You have NOT run any tool. No search has been performed. "
                 "Never write that you searched, browsed, looked something up, or "
                 "found results, and never present specific facts as if a search "
@@ -1454,7 +1524,7 @@ class NovaCore:
             )
 
             try:
-                response = self._generate_with_visible_note(
+                response = self._generate_with_native_thinking(
                     conversation_prompt,
                     system_prompt=(
                         identity

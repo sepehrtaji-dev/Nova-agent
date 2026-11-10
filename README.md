@@ -157,7 +157,7 @@ The current implementation stores settings in the Nova settings JSON file, inclu
 
 ## Tools and permissions
 
-The default manifest currently defines **10 tools**:
+The default manifest currently defines **12 tools**:
 
 | Tool | Capability | What it does |
 |---|---|---|
@@ -170,6 +170,8 @@ The default manifest currently defines **10 tools**:
 | terminal | pc | Run one supported non-interactive program with arguments |
 | git | git | Perform supported local Git operations |
 | github | git | Read-only GitHub inspection through the authenticated gh CLI |
+| noviqx_github_get_file | git | Read a remote GitHub file using the dedicated NoviqX App identity |
+| noviqx_github_update_file | git | Update a remote GitHub file with stale-write protection and independent verification |
 | desktop | pc | Optional GUI and desktop actions |
 
 A tool being present in the manifest does not guarantee that it loads successfully. Optional dependencies, platform support, authentication, and runtime conditions can affect availability. Check **/tools** or **/self** in a running session.

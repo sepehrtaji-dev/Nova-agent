@@ -34,7 +34,8 @@ class EffortAwareBrain:
         if not callable(method):
             raise NotImplementedError("The configured model backend does not support native tool calls.")
         from model.remote import OpenAICompatibleBrain
-        if isinstance(self.brain, OpenAICompatibleBrain):
+        from model.anthropic import AnthropicBrain
+        if isinstance(self.brain, (OpenAICompatibleBrain, AnthropicBrain)):
             return method(
                 messages=messages,
                 tools=tools,
@@ -62,7 +63,8 @@ class EffortAwareBrain:
         method = getattr(self.brain, "generate_tool_turn_stream", None)
         if callable(method):
             from model.remote import OpenAICompatibleBrain
-            if isinstance(self.brain, OpenAICompatibleBrain):
+            from model.anthropic import AnthropicBrain
+            if isinstance(self.brain, (OpenAICompatibleBrain, AnthropicBrain)):
                 return method(
                     messages=messages,
                     tools=tools,
@@ -94,13 +96,15 @@ class EffortAwareBrain:
 
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
         from model.remote import OpenAICompatibleBrain
-        if isinstance(self.brain, OpenAICompatibleBrain):
+        from model.anthropic import AnthropicBrain
+        if isinstance(self.brain, (OpenAICompatibleBrain, AnthropicBrain)):
             return self.brain.generate(prompt, system_prompt=system_prompt, json_mode=json_mode, options=self._remote_options(options))
         return self.brain.generate(prompt, system_prompt=system_prompt, json_mode=json_mode, options=options,
             think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
 
-    def generate_stream(self, prompt, on_token, system_prompt=None, json_mode=False, options=None):
+    def generate_stream(self, prompt, on_token, system_prompt=None, json_mode=False, options=None, on_thought_delta=None):
         from model.remote import OpenAICompatibleBrain
+        from model.anthropic import AnthropicBrain
         stream = getattr(self.brain, "generate_stream", None)
         if not callable(stream):
             result = self.generate(prompt, system_prompt=system_prompt, json_mode=json_mode, options=options)
@@ -108,6 +112,15 @@ class EffortAwareBrain:
                 on_token(result)
             return result
         if isinstance(self.brain, OpenAICompatibleBrain):
+            return stream(
+                prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
+                options=self._remote_options(options), on_thought_delta=on_thought_delta,
+            )
+        if isinstance(self.brain, AnthropicBrain):
             return stream(prompt, on_token, system_prompt=system_prompt, json_mode=json_mode, options=self._remote_options(options))
-        return stream(prompt, on_token, system_prompt=system_prompt, json_mode=json_mode, options=options,
-            think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
+        return stream(
+            prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
+            options=options,
+            think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"),
+            on_thought_delta=on_thought_delta,
+        )

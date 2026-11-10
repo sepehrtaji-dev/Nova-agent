@@ -1,9 +1,11 @@
+import json
 import mimetypes
 import math
 import os
 import re
 import sys
 import threading
+import uuid
 from datetime import datetime
 
 from config.runtime import load_capability_definitions, load_default_access
@@ -16,7 +18,7 @@ from config.model_settings import (
 )
 
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QAction, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QAction, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -43,19 +46,20 @@ from PySide6.QtWidgets import (
     QWidget,
     QSplitter,
     QToolButton,
+    QWidgetAction,
 )
 
 from agent.core import NovaCore
 from utils.math_parser import format_response_math
 from storage.chat_store import ChatStore
 
-BG_MAIN = "#0d1117"
-BG_PANEL = "#161b22"
-BG_INPUT = "#21262d"
-BORDER = "#30363d"
-TEXT = "#c9d1d9"
-TEXT_MUTED = "#8b949e"
-ACCENT = "#58a6ff"
+BG_MAIN = "#0b0f14"
+BG_PANEL = "#111821"
+BG_INPUT = "#17212c"
+BORDER = "#263342"
+TEXT = "#e6edf3"
+TEXT_MUTED = "#9aa9b8"
+ACCENT = "#82aaff"
 
 EFFORT_LEVELS = ("off", "low", "medium", "high", "max", "novacode")
 EFFORT_LABELS = ("Off", "Low", "Medium", "High", "Max", "NovaCode")
@@ -112,6 +116,22 @@ def render_markdown_text(text):
     return render_markdown(format_response_math(str(text or "")))
 
 
+def nova_logo_path():
+    """Return the optional Nova brand asset path."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "nova-logo.png")
+
+
+def load_nova_logo(size):
+    """Load and smoothly scale the user-provided Nova logo asset."""
+    path = nova_logo_path()
+    if not os.path.isfile(path):
+        return QPixmap()
+    source = QPixmap(path)
+    if source.isNull():
+        return QPixmap()
+    return source.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
 def make_avatar(letter="N", size=32):
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
@@ -120,9 +140,45 @@ def make_avatar(letter="N", size=32):
     painter.setBrush(QColor(BG_INPUT))
     painter.setPen(Qt.NoPen)
     painter.drawEllipse(0, 0, size, size)
-    painter.setPen(QColor(TEXT))
-    painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    if letter == "N":
+        logo = load_nova_logo(max(16, int(size * 0.88)))
+        if not logo.isNull():
+            painter.drawPixmap(
+                (size - logo.width()) // 2,
+                (size - logo.height()) // 2,
+                logo,
+            )
+        else:
+            painter.setPen(QColor(TEXT))
+            painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    elif letter == "Y":
+        try:
+            profile = load_settings()
+            avatar_path = str(profile.get("profile_avatar", "") or "")
+            if not avatar_path:
+                avatar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "default-user-avatar.svg")
+            source = QPixmap(avatar_path)
+            if not source.isNull():
+                painter.save()
+                clip = QPainterPath()
+                clip.addEllipse(0, 0, size, size)
+                painter.setClipPath(clip)
+                scaled = source.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                painter.drawPixmap((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
+                painter.restore()
+            else:
+                painter.setPen(QColor(TEXT))
+                painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+                painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+        except Exception:
+            painter.setPen(QColor(TEXT))
+            painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
+    else:
+        painter.setPen(QColor(TEXT))
+        painter.setFont(QFont("Segoe UI", max(10, size // 2), QFont.Bold))
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, letter)
     painter.end()
     return pixmap
 
@@ -203,7 +259,7 @@ class CodeBlock(QFrame):
 
 
 class MarkdownLabel(QTextBrowser):
-    def __init__(self, text, parent=None):
+    def __init__(self, text, font_size=14, parent=None):
         super().__init__(parent)
         self.setOpenExternalLinks(True)
         self.setFrameShape(QFrame.NoFrame)
@@ -214,7 +270,7 @@ class MarkdownLabel(QTextBrowser):
         self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         
         body_style = f"""
-        body {{ font-family: 'Segoe UI', sans-serif; font-size: 14px; color: {TEXT}; line-height: 1.5; }}
+        body {{ font-family: 'Segoe UI', sans-serif; font-size: {int(font_size)}px; color: {TEXT}; line-height: 1.55; }}
         h1, h2, h3 {{ color: {TEXT}; margin: 12px 0 6px 0; }}
         h1 {{ font-size: 20px; }} h2 {{ font-size: 18px; }} h3 {{ font-size: 16px; }}
         strong {{ color: #ffffff; }}
@@ -252,7 +308,7 @@ class MarkdownLabel(QTextBrowser):
         self.update_height()
 
 
-def add_markdown_content(layout, text):
+def add_markdown_content(layout, text, font_size=14):
     for kind, value, language in split_markdown_blocks(text):
         if kind == "code":
             layout.addWidget(CodeBlock(value, language))
@@ -261,7 +317,7 @@ def add_markdown_content(layout, text):
             continue
         
         html = render_markdown_text(value)
-        label = MarkdownLabel(html)
+        label = MarkdownLabel(html, font_size=font_size)
         layout.addWidget(label)
 
 
@@ -286,27 +342,27 @@ class AgentWorker(QObject):
 
 class StreamingMessageWidget(QFrame):
     """Plain-text assistant draft updated as model deltas arrive."""
-    def __init__(self, parent=None):
+    def __init__(self, font_size=16, parent=None):
         super().__init__(parent)
         self.setObjectName("streamingMessage")
         self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(0, 0, 0, 29)
+        layout.setSpacing(17)
         avatar = QLabel()
-        avatar.setFixedSize(32, 32)
+        avatar.setFixedSize(34, 34)
         avatar.setPixmap(make_avatar("N", 32))
         avatar.setAlignment(Qt.AlignTop)
         avatar.setStyleSheet("border: none; background: transparent;")
         layout.addWidget(avatar, 0, Qt.AlignTop)
         body = QVBoxLayout()
         name = QLabel("Nova")
-        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 600; border: none; background: transparent;")
+        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 700; border: none; background: transparent;")
         body.addWidget(name)
         self.editor = QPlainTextEdit()
         self.editor.setReadOnly(True)
         self.editor.setFrameShape(QFrame.NoFrame)
-        self.editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: none; color: {TEXT}; font-size: 14px; padding: 0; }}")
+        self.editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: none; color: {TEXT}; font-size: {int(font_size)}px; padding: 0; }}")
         self.editor.setMinimumHeight(28)
         self.editor.setMaximumHeight(360)
         body.addWidget(self.editor)
@@ -339,7 +395,7 @@ class ComposerEdit(QPlainTextEdit):
         lines = max(1, int(round(self.document().size().height())))
         margins = int(self.document().documentMargin() * 2)
         wanted = lines * self.fontMetrics().lineSpacing() + margins + 8
-        self.setFixedHeight(max(44, min(self.MAX_HEIGHT, wanted)))
+        self.setFixedHeight(max(38, min(self.MAX_HEIGHT, wanted)))
         self.setVerticalScrollBarPolicy(
             Qt.ScrollBarAsNeeded if wanted > self.MAX_HEIGHT else Qt.ScrollBarAlwaysOff
         )
@@ -448,32 +504,30 @@ class ThinkingPanel(QFrame):
 
 
 class MessageWidget(QFrame):
-    def __init__(self, role, text, attachments=None, parent=None):
+    def __init__(self, role, text, attachments=None, font_size=16, parent=None):
         super().__init__(parent)
-        self.setObjectName("messageWidget")
-        self.setStyleSheet("QFrame#messageWidget { background: transparent; border: none; }")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 24)
-        layout.setSpacing(16)
-
+        is_user = role == "user"
+        self.setObjectName("userMessageRow" if is_user else "assistantMessageRow")
+        self.setStyleSheet("""
+            QFrame#userMessageRow, QFrame#assistantMessageRow { background: transparent; border: none; }
+            QFrame#userBubble { background: #151f2b; border: 1px solid #2b3b4e; border-radius: 15px; }
+        """)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 20)
+        row.setSpacing(12)
         avatar = QLabel()
         avatar.setFixedSize(32, 32)
-        avatar.setPixmap(make_avatar("Y" if role == "user" else "N", 32))
+        avatar.setPixmap(make_avatar("Y" if is_user else "N", 32))
         avatar.setAlignment(Qt.AlignTop)
         avatar.setStyleSheet("border: none; background: transparent;")
-        layout.addWidget(avatar, 0, Qt.AlignTop)
-
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(6)
-
-        name = QLabel("You" if role == "user" else "Nova")
-        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 600; border: none; background: transparent;")
+        name = QLabel("You" if is_user else "Nova")
+        name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 650; border: none; background: transparent;")
         content.addWidget(name)
-
-        add_markdown_content(content, text if text else ("Attached files" if attachments else " "))
-
-        if role == "user" and attachments:
+        add_markdown_content(content, text if text else ("Attached files" if attachments else " "), font_size=font_size if not is_user else 14)
+        if is_user and attachments:
             badges = QHBoxLayout()
             badges.setContentsMargins(0, 4, 0, 0)
             badges.setSpacing(8)
@@ -484,71 +538,97 @@ class MessageWidget(QFrame):
                 except OSError:
                     size_label = "Unavailable"
                 badge = QLabel(f"{filename}  ·  {size_label}")
-                badge.setStyleSheet(f"color: {TEXT}; background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 8px; font-size: 11px;")
+                badge.setStyleSheet(f"color: {TEXT}; background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 7px; padding: 5px 9px; font-size: 11px;")
                 badge.setToolTip(path)
                 badges.addWidget(badge)
             badges.addStretch(1)
             content.addLayout(badges)
-
-        layout.addLayout(content, 1)
+        if is_user:
+            bubble = QFrame()
+            bubble.setObjectName("userBubble")
+            bubble.setMaximumWidth(780)
+            bubble_layout = QVBoxLayout(bubble)
+            bubble_layout.setContentsMargins(15, 11, 15, 11)
+            bubble_layout.setSpacing(0)
+            bubble_layout.addLayout(content)
+            row.addStretch(1)
+            row.addWidget(bubble, 0, Qt.AlignRight | Qt.AlignTop)
+            row.addWidget(avatar, 0, Qt.AlignTop)
+        else:
+            row.addWidget(avatar, 0, Qt.AlignTop)
+            row.addLayout(content, 1)
 
 
 class EffortSlider(QSlider):
-    """Horizontal effort slider with a subtle animated halo at maximum effort."""
+    """Six-stop slider with a softly animated halo around the active level."""
+
+    LEVEL_COLORS = ("#8b949e", "#79c0ff", "#58a6ff", "#a78bfa", "#c084fc", "#f0abfc")
 
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self._phase = 0.0
         self._pulse_timer = QTimer(self)
-        self._pulse_timer.setInterval(35)
+        self._pulse_timer.setInterval(40)
         self._pulse_timer.timeout.connect(self._advance_pulse)
-        self.valueChanged.connect(self._sync_pulse)
-        self._sync_pulse(self.value())
-
-    def _sync_pulse(self, value):
-        if value == self.maximum():
-            if not self._pulse_timer.isActive():
-                self._pulse_timer.start()
-        else:
-            self._pulse_timer.stop()
-        self.update()
+        self._pulse_timer.start()
 
     def _advance_pulse(self):
-        self._phase = (self._phase + 0.075) % (2 * math.pi)
+        self._phase = (self._phase + 0.055) % (2 * math.pi)
         self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self.value() != self.maximum():
-            return
-
         option = QStyleOptionSlider()
         self.initStyleOption(option)
-        handle = self.style().subControlRect(
-            QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self
-        )
-        center = handle.center()
-        pulse = (math.sin(self._phase) + 1.0) / 2.0
-        radius = 13.0 + pulse * 4.0
-
+        groove = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderGroove, self)
+        handle = self.style().subControlRect(QStyle.CC_Slider, option, QStyle.SC_SliderHandle, self)
+        if self.maximum() <= self.minimum():
+            return
+        left = groove.left() + handle.width() / 2
+        right = groove.right() - handle.width() / 2
+        y = groove.center().y()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        gradient = QRadialGradient(center, radius)
-        gradient.setColorAt(0.0, QColor(168, 85, 247, int(42 + pulse * 34)))
-        gradient.setColorAt(0.48, QColor(88, 166, 255, int(24 + pulse * 22)))
-        gradient.setColorAt(1.0, QColor(88, 166, 255, 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(gradient)
-        painter.drawEllipse(center, radius, radius)
-
-        # Two tiny orbiting sparks make the max state feel active without
-        # changing the slider's geometry or interfering with mouse input.
-        for offset, color in ((0.0, QColor(190, 130, 255)), (math.pi, QColor(110, 205, 255))):
-            angle = self._phase + offset
-            x = center.x() + math.cos(angle) * 11.0
-            y = center.y() + math.sin(angle) * 7.0
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(x, y), 1.5, 1.5)
+        for index, color_hex in enumerate(self.LEVEL_COLORS):
+            x = left + (right - left) * index / (self.maximum() - self.minimum())
+            color = QColor(color_hex)
+            if index == self.value():
+                pulse = (math.sin(self._phase) + 1.0) / 2.0
+                painter.setPen(Qt.NoPen)
+                if index == self.maximum():
+                    center = QPointF(x, y)
+                    radius = 17 + pulse * 5
+                    glow = QRadialGradient(center, radius)
+                    glow.setColorAt(0.0, QColor(190, 150, 255, 125))
+                    glow.setColorAt(0.42, QColor(130, 110, 255, 62))
+                    glow.setColorAt(1.0, QColor(130, 110, 255, 0))
+                    painter.setBrush(glow)
+                    painter.drawEllipse(center, radius, radius)
+                    painter.setBrush(Qt.NoBrush)
+                    painter.setPen(QPen(QColor(190, 160, 255, 170 + int(pulse * 70)), 1.4))
+                    painter.drawEllipse(center, 8 + pulse * 2.5, 8 + pulse * 2.5)
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor("#e8d8ff"))
+                    painter.drawEllipse(center, 3.8, 3.8)
+                    for spark in range(4):
+                        angle = self._phase * 1.25 + spark * (math.pi / 2)
+                        orbit = 12 + pulse * 2
+                        sx = x + math.cos(angle) * orbit
+                        sy = y + math.sin(angle) * orbit
+                        painter.setBrush(QColor("#c7a5ff"))
+                        painter.drawEllipse(QPointF(sx, sy), 1.5, 1.5)
+                else:
+                    halo = QColor(color)
+                    halo.setAlpha(int(45 + pulse * 55))
+                    painter.setBrush(halo)
+                    painter.drawEllipse(QPointF(x, y), 7 + pulse * 3, 7 + pulse * 3)
+                    painter.setBrush(color)
+                    painter.drawEllipse(QPointF(x, y), 3.2, 3.2)
+            else:
+                color.setAlpha(150)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(color)
+                painter.drawEllipse(QPointF(x, y), 2.0, 2.0)
         painter.end()
 
 
@@ -558,49 +638,49 @@ class EffortSelector(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("QWidget { background: transparent; border: none; }")
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        label = QLabel("Effort")
-        label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
-        layout.addWidget(label)
+        layout.setSpacing(4)
 
         self._slider = EffortSlider()
-        self._slider.setStyleSheet(f"""
-            QSlider {{ border: none; background: transparent; }}
-            QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: {TEXT_MUTED}; width: 12px; margin: -4px 0; border-radius: 6px; }}
-            QSlider::handle:horizontal:hover {{ background: {TEXT}; }}
-            QSlider::sub-page:horizontal {{ background: {TEXT_MUTED}; border-radius: 2px; }}
-        """)
         self._slider.setRange(0, len(EFFORT_LEVELS) - 1)
         self._slider.setValue(2)
-        self._slider.setFixedWidth(100)
+        self._slider.setTickPosition(QSlider.TicksBelow)
+        self._slider.setTickInterval(1)
+        # Reserve breathing room around the animated NovaCode halo. The
+        # handle sits inside this padded track, so its glow/sparks aren't
+        # clipped by QSlider's paint boundary at the final stop.
+        self._slider.setFixedWidth(340)
+        self._slider.setFixedHeight(52)
+        self._slider.setStyleSheet(f"""
+            QSlider {{ border: none; background: transparent; padding: 0 20px; }}
+            QSlider::groove:horizontal {{ height: 3px; background: #41454b; border-radius: 2px; }}
+            QSlider::sub-page:horizontal {{ background: #777b84; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: #e8e8eb; border: 2px solid #777b84; width: 12px; height: 12px; margin: -6px 0; border-radius: 7px; }}
+            QSlider::handle:horizontal:hover {{ border-color: #ffffff; }}
+            QSlider::add-page:horizontal {{ background: #41454b; }}
+        """)
         self._slider.valueChanged.connect(self._changed)
         layout.addWidget(self._slider)
 
-        self._value = QLabel(EFFORT_LABELS[2])
-        self._value.setMinimumWidth(68)
-        self._value.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._value)
+        labels = QHBoxLayout()
+        # Match the slider's handle-center travel: the handle cannot reach
+        # the widget edges, so labels need the same inset to sit under each stop.
+        labels.setContentsMargins(29, 0, 29, 0)
+        labels.setSpacing(0)
+        for label_text in ("Off", "Low", "Med", "High", "Max", "Nova"):
+            label = QLabel(label_text)
+            label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent; border: none;")
+            labels.addWidget(label, 1)
+        layout.addLayout(labels)
         self._set_aura(2)
 
     def _set_aura(self, index):
-        colors = ("#8b949e", "#79c0ff", "#58a6ff", "#a78bfa", "#c084fc", "#f0abfc")
-        color = colors[index]
-        self._value.setText(EFFORT_LABELS[index])
-        self._value.setStyleSheet(
-            f"color: {color}; font-size: 12px; font-weight: 700; "
-            "border: none; background: transparent;"
-        )
-        self._slider.setStyleSheet(f"""
-            QSlider {{ border: none; background: transparent; }}
-            QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: {color}; width: 12px; margin: -4px 0; border-radius: 6px; }}
-            QSlider::handle:horizontal:hover {{ background: #ffffff; }}
-            QSlider::sub-page:horizontal {{ background: {color}; border-radius: 2px; }}
-        """)
+        colors = EffortSlider.LEVEL_COLORS
+        self._slider.setProperty("activeLevel", index)
+        self._slider.update()
 
     def _changed(self, index):
         self._set_aura(index)
@@ -617,36 +697,126 @@ class EffortSelector(QWidget):
             self._slider.blockSignals(False)
             self._set_aura(index)
 
+
+class RemoteModelDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Add remote model')
+        self.setModal(True)
+        self.resize(480, 470)
+        self.setStyleSheet(f'QDialog {{ background: {BG_MAIN}; color: {TEXT}; }} QLabel {{ color: {TEXT}; }} QLineEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 9px; }} QPushButton {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 8px 12px; }}')
+        layout = QVBoxLayout(self)
+        self.name = QLineEdit(); self.name.setPlaceholderText('Display name, e.g. Claude Sonnet')
+        self.openai = QRadioButton('OpenAI-compatible API')
+        self.anthropic = QRadioButton('Anthropic Claude API')
+        self.openai.setChecked(True)
+        self.base = QLineEdit('https://api.openai.com/v1')
+        self.model = QLineEdit(); self.model.setPlaceholderText('Model name / model ID')
+        self.key = QLineEdit(); self.key.setEchoMode(QLineEdit.Password); self.key.setPlaceholderText('API key')
+        self.reveal = QToolButton(); self.reveal.setText('Show'); self.reveal.setCheckable(True)
+        self.reveal.toggled.connect(lambda value: (self.key.setEchoMode(QLineEdit.Normal if value else QLineEdit.Password), self.reveal.setText('Hide' if value else 'Show')))
+        key_row = QHBoxLayout(); key_row.addWidget(self.key, 1); key_row.addWidget(self.reveal)
+        for label, widget in [('Model provider', self.openai), ('', self.anthropic), ('Profile name', self.name), ('Base URL', self.base), ('Model name', self.model)]:
+            if label: layout.addWidget(QLabel(label))
+            layout.addWidget(widget)
+        layout.addWidget(QLabel('API key')); layout.addLayout(key_row)
+        self.anthropic.toggled.connect(self._provider_changed)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._save); buttons.rejected.connect(self.reject)
+        layout.addStretch(1); layout.addWidget(buttons)
+    def _provider_changed(self, checked):
+        if checked:
+            self.base.setText('https://api.anthropic.com')
+            self.model.setPlaceholderText('e.g. claude-sonnet-4-20250514')
+        else:
+            self.base.setText('https://api.openai.com/v1')
+            self.model.setPlaceholderText('e.g. gpt-4o-mini')
+    def _save(self):
+        if not self.name.text().strip() or not self.model.text().strip() or not self.key.text().strip():
+            QMessageBox.warning(self, 'Missing information', 'Name, model, and API key are required.')
+            return
+        self.accept()
+    def values(self):
+        return {'name': self.name.text().strip(), 'provider': 'anthropic' if self.anthropic.isChecked() else 'openai', 'base_url': self.base.text().strip(), 'model': self.model.text().strip(), 'api_key': self.key.text().strip()}
+
 class ModelSettingsDialog(QDialog):
     def __init__(self, settings, installed_models, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Model settings")
         self.setModal(True)
-        self.setMinimumWidth(520)
-        self.setStyleSheet(f"QDialog {{ background-color: {BG_MAIN}; color: {TEXT}; }}")
+        self.setObjectName("settingsDialog")
+        available = self.screen().availableGeometry() if self.screen() else QApplication.primaryScreen().availableGeometry()
+        dialog_width = min(820, max(560, available.width() - 64))
+        dialog_height = min(900, max(420, available.height() - 64))
+        self.setMinimumSize(min(560, dialog_width), min(420, dialog_height))
+        self.setMaximumSize(dialog_width, dialog_height)
+        self.resize(dialog_width, dialog_height)
+        self.setStyleSheet(f"""
+            QDialog#settingsDialog {{ background: {BG_MAIN}; color: {TEXT}; }}
+            QLabel {{ color: {TEXT}; }}
+            QLineEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 10px 12px; min-height: 22px; selection-background-color: #304c70; }}
+            QLineEdit:focus {{ border: 1px solid {ACCENT}; }}
+            QRadioButton {{ color: {TEXT}; spacing: 9px; padding: 7px 2px; }}
+            QRadioButton::indicator {{ width: 16px; height: 16px; }}
+            QPushButton {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 9px 16px; min-width: 86px; }}
+            QPushButton:hover {{ background: #203044; border-color: #405a76; }}
+        """)
 
         self._settings = dict(settings)
         self._installed = list(installed_models or [])
         self._existing_key = str(settings.get("api_key", "") or "")
+        try:
+            self._remote_profiles = json.loads(settings.get("remote_models", "[]") or "[]")
+            if not isinstance(self._remote_profiles, list):
+                self._remote_profiles = []
+        except (TypeError, json.JSONDecodeError):
+            self._remote_profiles = []
+        self._active_remote_id = str(settings.get("active_remote_model_id", "") or "")
+        self._avatar_path = str(settings.get("profile_avatar", "") or "")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(12)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("settingsScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setStyleSheet(f"QScrollArea#settingsScrollArea {{ background: transparent; border: none; }} QScrollBar:vertical {{ background: {BG_MAIN}; width: 9px; margin: 4px 2px; }} QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 28px; }} QScrollBar::handle:vertical:hover {{ background: #40536a; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}")
+        content = QWidget()
+        content.setObjectName("settingsContent")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(28, 25, 28, 24)
+        layout.setSpacing(15)
+        scroll.setWidget(content)
+        root_layout.addWidget(scroll)
 
-        heading = QLabel("Choose how Nova reasons")
-        heading.setStyleSheet("font-size: 16px; font-weight: 700; border: none; background: transparent;")
+        brand = QLabel("NOVA  /  SETTINGS")
+        brand.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 2px;")
+        layout.addWidget(brand)
+        heading = QLabel("Model & connections")
+        heading.setStyleSheet("font-size: 23px; font-weight: 750; border: none; background: transparent;")
         layout.addWidget(heading)
 
-        note = QLabel("Local keeps everything on this computer. Remote sends your messages, file contents, and tool results to the provider you configure.")
+        note = QLabel("Local keeps everything on this computer. Remote sends your messages, file contents, tool results, and any profile or custom instructions you enable to the provider you configure.")
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {TEXT_MUTED}; border: none; background: transparent;")
+        note.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
         layout.addWidget(note)
 
-        self.local_radio = QRadioButton("Local model (Ollama)")
+        provider_title = QLabel("PROVIDER")
+        provider_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 10px;")
+        layout.addWidget(provider_title)
+        provider_rule = QFrame()
+        provider_rule.setFixedHeight(1)
+        provider_rule.setStyleSheet(f"background: {BORDER}; border: none;")
+        layout.addWidget(provider_rule)
+
+        self.local_radio = QRadioButton("Local model  ·  Ollama")
         layout.addWidget(self.local_radio)
 
         self.local_model = QLineEdit(str(settings.get("local_model", "") or ""))
-        self.local_model.setPlaceholderText("e.g. qwen2.5:3b (blank = auto-detect)")
+        self.local_model.setPlaceholderText("Model name, e.g. qwen2.5:3b (blank = auto-detect)")
         layout.addWidget(self.local_model)
 
         if self._installed:
@@ -655,7 +825,7 @@ class ModelSettingsDialog(QDialog):
             hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
             layout.addWidget(hint)
 
-        self.remote_radio = QRadioButton("Remote API (OpenAI-compatible)")
+        self.remote_radio = QRadioButton("Remote API  ·  OpenAI-compatible")
         layout.addWidget(self.remote_radio)
 
         self.api_base = QLineEdit(str(settings.get("api_base_url", "") or ""))
@@ -666,22 +836,108 @@ class ModelSettingsDialog(QDialog):
         self.api_model.setPlaceholderText("e.g. gpt-4o-mini, or a gateway model id")
         layout.addWidget(self._labelled("Model", self.api_model))
 
-        self.api_key = QLineEdit()
+        key_row = QHBoxLayout()
+        self.api_key = QLineEdit(self._existing_key)
         self.api_key.setEchoMode(QLineEdit.Password)
-        if self._existing_key:
-            self.api_key.setPlaceholderText(f"stored: {masked_key(self._existing_key)} — leave blank to keep")
-        else:
-            self.api_key.setPlaceholderText("API key")
-        layout.addWidget(self._labelled("API key", self.api_key))
+        self.api_key.setPlaceholderText("API key")
+        self.key_visibility = QToolButton()
+        self.key_visibility.setText("Show")
+        self.key_visibility.setCheckable(True)
+        self.key_visibility.toggled.connect(lambda visible: (self.api_key.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password), self.key_visibility.setText("Hide" if visible else "Show")))
+        key_row.addWidget(self.api_key, 1)
+        key_row.addWidget(self.key_visibility)
+        key_wrap = QWidget()
+        key_wrap.setLayout(key_row)
+        layout.addWidget(self._labelled("API key", key_wrap))
+
+        remote_title = QLabel("SAVED REMOTE MODELS")
+        remote_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 12px;")
+        layout.addWidget(remote_title)
+        self.remote_list = QListWidget()
+        self.remote_list.setMaximumHeight(100)
+        self.remote_list.setStyleSheet(f"QListWidget {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 8px; padding: 4px; }} QListWidget::item {{ padding: 7px; border-radius: 5px; }} QListWidget::item:selected {{ background: #26364b; }}")
+        for profile in self._remote_profiles:
+            if isinstance(profile, dict):
+                self.remote_list.addItem(str(profile.get("name", "Remote model")) + "  ·  " + str(profile.get("model", "")))
+                if str(profile.get("id", "")) == self._active_remote_id:
+                    self.remote_list.setCurrentRow(self.remote_list.count() - 1)
+        layout.addWidget(self.remote_list)
+        self.remote_list.itemClicked.connect(lambda _item: self.remote_radio.setChecked(True))
+        remote_actions = QHBoxLayout()
+        add_remote = QPushButton("+ Add New Model")
+        remove_remote = QPushButton("Remove Selected")
+        add_remote.clicked.connect(self._add_remote_model)
+        remove_remote.clicked.connect(self._remove_remote_model)
+        remote_actions.addWidget(add_remote)
+        remote_actions.addWidget(remove_remote)
+        layout.addLayout(remote_actions)
+        instructions_title = QLabel("MODEL INSTRUCTIONS")
+        instructions_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 12px;")
+        layout.addWidget(instructions_title)
+        self.model_instructions = QPlainTextEdit(str(settings.get("model_instructions", "") or ""))
+        self.model_instructions.setPlaceholderText("Tell Nova how you want it to respond and collaborate...")
+        self.model_instructions.setMaximumHeight(95)
+        self.model_instructions.setStyleSheet(f"QPlainTextEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 9px; }}")
+        layout.addWidget(self.model_instructions)
+        profile_title = QLabel("YOUR INFO")
+        profile_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 12px;")
+        layout.addWidget(profile_title)
+        self.profile_name = QLineEdit(str(settings.get("profile_name", "") or ""))
+        self.profile_name.setPlaceholderText("Name (optional)")
+        self.profile_age = QLineEdit(str(settings.get("profile_age", "") or ""))
+        self.profile_age.setPlaceholderText("Age (optional)")
+        self.profile_occupation = QLineEdit(str(settings.get("profile_occupation", "") or ""))
+        self.profile_occupation.setPlaceholderText("Work / study / role (optional)")
+        layout.addWidget(self._labelled("Name", self.profile_name))
+        layout.addWidget(self._labelled("Age", self.profile_age))
+        layout.addWidget(self._labelled("Occupation", self.profile_occupation))
+        avatar_row = QHBoxLayout()
+        self.avatar_label = QLabel(os.path.basename(self._avatar_path) if self._avatar_path else "Default user avatar")
+        self.avatar_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px;")
+        avatar_row.addWidget(self.avatar_label, 1)
+        avatar_button = QPushButton("Choose profile picture")
+        avatar_button.clicked.connect(self._choose_profile_avatar)
+        avatar_row.addWidget(avatar_button)
+        layout.addLayout(avatar_row)
+
+        font_title = QLabel("ASSISTANT TEXT SIZE")
+        font_title.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; padding-top: 10px;")
+        layout.addWidget(font_title)
+        font_rule = QFrame()
+        font_rule.setFixedHeight(1)
+        font_rule.setStyleSheet(f"background: {BORDER}; border: none;")
+        layout.addWidget(font_rule)
+        font_row = QHBoxLayout()
+        font_hint = QLabel("Nova response font")
+        font_hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
+        font_row.addWidget(font_hint)
+        font_row.addStretch(1)
+        self.font_value = QLabel(f'{settings.get("assistant_font_size", "16")} px')
+        self.font_value.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
+        font_row.addWidget(self.font_value)
+        layout.addLayout(font_row)
+        self.font_slider = QSlider(Qt.Horizontal)
+        self.font_slider.setRange(13, 20)
+        try:
+            self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "16")))))
+        except (TypeError, ValueError):
+            self.font_slider.setValue(15)
+        self.font_slider.setTickPosition(QSlider.TicksBelow)
+        self.font_slider.setTickInterval(1)
+        self.font_slider.valueChanged.connect(lambda value: self.font_value.setText(f"{value} px"))
+        self.font_slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }} QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }} QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -6px 0; border-radius: 7px; }}")
+        layout.addWidget(self.font_slider)
 
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent;")
+        self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent; padding: 5px 2px;")
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
+        buttons.setStyleSheet(f"QDialogButtonBox {{ border: none; }} QPushButton {{ min-width: 104px; min-height: 38px; }}")
+        layout.addStretch(1)
         layout.addWidget(buttons)
 
         if str(settings.get("provider", "local")).lower() == "remote":
@@ -716,14 +972,55 @@ class ModelSettingsDialog(QDialog):
 
     def values(self):
         typed_key = self.api_key.text().strip()
+        selected = self.remote_list.currentRow()
+        active_id = self._active_remote_id
+        if 0 <= selected < len(self._remote_profiles):
+            active_id = str(self._remote_profiles[selected].get("id", ""))
+        active_profile = self._remote_profiles[selected] if 0 <= selected < len(self._remote_profiles) else {}
         return {
             "provider": "remote" if self.remote_radio.isChecked() else "local",
             "local_model": self.local_model.text().strip(),
-            "api_base_url": self.api_base.text().strip(),
-            "api_model": self.api_model.text().strip(),
-            "api_key": typed_key or self._existing_key,
+            "api_base_url": str(active_profile.get("base_url") or self.api_base.text().strip()),
+            "api_model": str(active_profile.get("model") or self.api_model.text().strip()),
+            "api_key": str(active_profile.get("api_key") or typed_key or self._existing_key),
+            "assistant_font_size": str(self.font_slider.value()),
+            "remote_models": json.dumps(self._remote_profiles, ensure_ascii=False),
+            "active_remote_model_id": active_id,
+            "model_instructions": self.model_instructions.toPlainText().strip(),
+            "profile_name": self.profile_name.text().strip(),
+            "profile_age": self.profile_age.text().strip(),
+            "profile_occupation": self.profile_occupation.text().strip(),
+            "profile_avatar": self._avatar_path,
         }
 
+    def _choose_profile_avatar(self):
+        path, _ = QFileDialog.getOpenFileName(self, 'Choose profile picture', '', 'Images (*.png *.jpg *.jpeg *.webp *.bmp)')
+        if path:
+            self._avatar_path = os.path.abspath(path)
+            self.avatar_label.setText(os.path.basename(path))
+
+    def _add_remote_model(self):
+        dialog = RemoteModelDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            profile = dialog.values()
+            profile['id'] = uuid.uuid4().hex
+            self._remote_profiles.append(profile)
+            self.remote_list.addItem(profile['name'] + '  ·  ' + profile['model'])
+            self.remote_list.setCurrentRow(self.remote_list.count() - 1)
+            self.remote_radio.setChecked(True)
+            self._refresh()
+
+    def _remove_remote_model(self):
+        row = self.remote_list.currentRow()
+        if 0 <= row < len(self._remote_profiles):
+            self._remote_profiles.pop(row)
+            self.remote_list.takeItem(row)
+            if self.remote_list.count():
+                self.remote_list.setCurrentRow(0)
+            else:
+                self._active_remote_id = ""
+                self.remote_radio.setChecked(False)
+                self.local_radio.setChecked(True)
     def _on_save(self):
         values = self.values()
         if values["provider"] == "remote":
@@ -760,12 +1057,16 @@ class NovaWindow(QMainWindow):
         self.worker = None
         self.busy = False
         self.thinking_panel = None
+        self.thinking_enabled = False
         self.streaming_message = None
         self.attachments = []
 
         self.setWindowTitle("Nova")
-        self.setMinimumSize(900, 600)
-        self.resize(1100, 760)
+        logo = load_nova_logo(256)
+        if not logo.isNull():
+            self.setWindowIcon(QIcon(logo))
+        self.setMinimumSize(960, 640)
+        self.resize(1240, 820)
         
         self._build_ui()
         self._apply_theme()
@@ -807,32 +1108,63 @@ class NovaWindow(QMainWindow):
 
         # Sidebar
         sidebar = QFrame()
-        sidebar.setFixedWidth(260)
+        sidebar.setObjectName("sidebar")
+        sidebar.setMinimumWidth(236)
+        sidebar.setMaximumWidth(292)
+        sidebar.setStyleSheet(f"QFrame#sidebar {{ background: {BG_MAIN}; border-right: 1px solid {BORDER}; }}")
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(16, 20, 16, 16)
-        sidebar_layout.setSpacing(16)
+        sidebar_layout.setContentsMargins(18, 22, 16, 18)
+        sidebar_layout.setSpacing(13)
 
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(0, 0, 0, 0)
+        brand_row.setSpacing(11)
+        brand_mark = QLabel()
+        brand_mark.setAlignment(Qt.AlignCenter)
+        brand_mark.setFixedSize(34, 34)
+        brand_mark.setStyleSheet(f"background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 10px;")
+        brand_logo = load_nova_logo(30)
+        if not brand_logo.isNull():
+            brand_mark.setPixmap(brand_logo)
+        else:
+            brand_mark.setText("N")
+            brand_mark.setStyleSheet(f"background: {BG_INPUT}; color: {ACCENT}; border: 1px solid {BORDER}; border-radius: 10px; font-size: 17px; font-weight: 800;")
+        brand_row.addWidget(brand_mark)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(1)
         title = QLabel("Nova")
-        title.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {TEXT}; border: none; background: transparent;")
-        sidebar_layout.addWidget(title)
+        title.setStyleSheet(f"font-size: 17px; font-weight: 750; color: {TEXT}; border: none; background: transparent;")
+        subtitle = QLabel("LOCAL AI WORKSPACE")
+        subtitle.setStyleSheet(f"font-size: 9px; color: {TEXT_MUTED}; border: none; background: transparent;")
+        brand_text.addWidget(title)
+        brand_text.addWidget(subtitle)
+        brand_row.addLayout(brand_text)
+        brand_row.addStretch(1)
+        sidebar_layout.addLayout(brand_row)
 
         new_chat_btn = QPushButton("+ New Chat")
-        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 10px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BORDER}; }}")
+        new_chat_btn.setFixedHeight(42)
+        new_chat_btn.setStyleSheet(f"QPushButton {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 13px; color: {TEXT}; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: #1d2a38; border-color: #3a4d62; }} QPushButton:pressed {{ background: {BG_PANEL}; }}")
         new_chat_btn.setCursor(Qt.PointingHandCursor)
         new_chat_btn.clicked.connect(self._new_chat)
         sidebar_layout.addWidget(new_chat_btn)
 
         label_chats = QLabel("CHATS")
-        label_chats.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; font-weight: 700; margin-top: 8px; border: none; background: transparent;")
+        label_chats.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-top: 13px; border: none; background: transparent;")
         sidebar_layout.addWidget(label_chats)
 
         self.chat_list = QListWidget()
-        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 8px; border-radius: 6px; margin-bottom: 2px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: {BG_PANEL}; color: {TEXT}; border: 1px solid {BORDER}; }}")
+        self.chat_list.setFrameShape(QFrame.NoFrame)
+        self.chat_list.setSpacing(4)
+        self.chat_list.setTextElideMode(Qt.ElideRight)
+        self.chat_list.setUniformItemSizes(True)
+        self.chat_list.setStyleSheet(f"QListWidget {{ background: transparent; border: none; outline: none; }} QListWidget::item {{ color: {TEXT_MUTED}; padding: 0 11px; min-height: 38px; border: 1px solid transparent; border-radius: 8px; }} QListWidget::item:hover {{ background: {BG_INPUT}; color: {TEXT}; }} QListWidget::item:selected {{ background: #172433; color: {TEXT}; border: 1px solid #2b4057; }}")
         self.chat_list.itemClicked.connect(self._on_chat_selected)
         sidebar_layout.addWidget(self.chat_list, 1)
 
         settings_btn = QPushButton("⚙  Settings")
-        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; text-align: left; padding: 8px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; }}")
+        settings_btn.setFixedHeight(40)
+        settings_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid transparent; border-radius: 8px; text-align: left; padding: 0 10px; color: {TEXT_MUTED}; font-size: 13px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; border-color: {BORDER}; }}")
         settings_btn.setCursor(Qt.PointingHandCursor)
         settings_btn.clicked.connect(self._open_model_settings)
         sidebar_layout.addWidget(settings_btn)
@@ -846,50 +1178,35 @@ class NovaWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Header
-        header = QFrame()
-        header.setFixedHeight(64)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(24, 0, 24, 0)
-        
-        self.model_selector = QPushButton("Loading...")
-        self.model_selector.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 12px; color: {TEXT}; font-size: 13px; }} QPushButton:hover {{ background: {BG_INPUT}; }}")
-        self.model_selector.clicked.connect(self._show_model_menu)
-        header_layout.addWidget(self.model_selector)
-
-        self.effort_selector = EffortSelector()
-        self.effort_selector.set_value(self._effort)
-        self.effort_selector.changed.connect(self._on_effort_changed)
-        header_layout.addWidget(self.effort_selector)
-
-        header_layout.addStretch()
-
-        self.status_indicator = QLabel("●")
-        self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
-        header_layout.addWidget(self.status_indicator)
-
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; border: none; background: transparent;")
-        self.status_label.setMinimumWidth(72)
-        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        header_layout.addWidget(self.status_label)
-
+        # Keep status state for worker callbacks, but do not render the old
+        # top-bar indicator or "Ready" label in the new composer-first layout.
+        self.status_label = QLabel()
+        self.status_indicator = QLabel()
+        self.status_label.hide()
+        self.status_indicator.hide()
         self._status_phase = 0
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(420)
         self._status_timer.timeout.connect(self._animate_status)
 
-        main_layout.addWidget(header)
+        self.model_selector = QPushButton("Loading model…")
+        self.model_selector.setCursor(Qt.PointingHandCursor)
+        self.model_selector.setMinimumHeight(36)
+        self.model_selector.setIcon(make_icon("chevron_down", TEXT_MUTED, 13))
+        self.model_selector.setLayoutDirection(Qt.LeftToRight)
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT}; font-size: 12px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; }}")
+        self.model_selector.clicked.connect(self._show_model_menu)
 
         # Chat Area
         self.chat_scroll = QScrollArea()
-        self.chat_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.chat_scroll.setStyleSheet(f"QScrollArea {{ background: {BG_MAIN}; border: none; }}")
         self.chat_scroll.setWidgetResizable(True)
         self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet(f"background: {BG_MAIN};")
         self.chat_container_layout = QVBoxLayout(self.chat_container)
-        self.chat_container_layout.setContentsMargins(40, 24, 40, 24)
+        self.chat_container_layout.setContentsMargins(48, 30, 48, 34)
         self.chat_container_layout.setSpacing(0)
         self.chat_container_layout.addStretch()
         
@@ -901,19 +1218,43 @@ class NovaWindow(QMainWindow):
         composer_area.setObjectName("composerArea")
         composer_area.setStyleSheet(f"QFrame#composerArea {{ background: {BG_MAIN}; border-top: 1px solid {BORDER}; }}")
         composer_layout = QVBoxLayout(composer_area)
-        composer_layout.setContentsMargins(40, 16, 40, 24)
+        composer_layout.setContentsMargins(34, 10, 34, 14)
 
         self.composer_box = QFrame()
         self.composer_box.setObjectName("composerBox")
-        self.composer_box.setStyleSheet(f"QFrame#composerBox {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 12px; }}")
+        self.composer_box.setStyleSheet(f"QFrame#composerBox {{ background: {BG_PANEL}; border: 1px solid #304052; border-radius: 15px; }}")
         box_layout = QVBoxLayout(self.composer_box)
-        box_layout.setContentsMargins(12, 12, 12, 12)
-        box_layout.setSpacing(8)
+        box_layout.setContentsMargins(12, 8, 10, 8)
+        box_layout.setSpacing(4)
 
         self.input = ComposerEdit()
-        self.input.setPlaceholderText("Send a message...")
+        self.input.setPlaceholderText("Message Nova…")
         self.input.submitted.connect(self._send)
         box_layout.addWidget(self.input)
+
+        # Pending files appear as portrait cards in a horizontal carousel
+        # above the text editor, like a modern chat composer.
+        self.attachment_scroll = QScrollArea()
+        self.attachment_scroll.setObjectName("attachmentCarousel")
+        self.attachment_scroll.setWidgetResizable(True)
+        self.attachment_scroll.setFrameShape(QFrame.NoFrame)
+        self.attachment_scroll.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.attachment_scroll.viewport().setAutoFillBackground(False)
+        self.attachment_scroll.viewport().setStyleSheet("background: transparent; border: none;")
+        self.attachment_scroll.setFixedHeight(112)
+        self.attachment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.attachment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.attachment_scroll.setStyleSheet(f"QScrollArea#attachmentCarousel {{ background: transparent; border: none; }} QScrollBar:horizontal {{ height: 6px; background: transparent; }} QScrollBar::handle:horizontal {{ background: {BORDER}; border-radius: 3px; min-width: 24px; }} QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}")
+        self.attachment_preview = QWidget()
+        self.attachment_preview.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.attachment_preview.setAutoFillBackground(False)
+        self.attachment_preview.setStyleSheet("background: transparent; border: none;")
+        self.attachment_preview_layout = QHBoxLayout(self.attachment_preview)
+        self.attachment_preview_layout.setContentsMargins(1, 2, 1, 5)
+        self.attachment_preview_layout.setSpacing(8)
+        self.attachment_scroll.setWidget(self.attachment_preview)
+        self.attachment_scroll.hide()
+        box_layout.insertWidget(0, self.attachment_scroll)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -921,36 +1262,59 @@ class NovaWindow(QMainWindow):
         add_btn = QPushButton()
         add_btn.setStyleSheet(f"QPushButton {{ background: transparent; border: none; }} QPushButton:hover {{ background: {BG_INPUT}; border-radius: 6px; }}")
         add_btn.setIcon(make_icon("plus", TEXT_MUTED, 18))
-        add_btn.setFixedSize(28, 28)
+        add_btn.setFixedSize(30, 30)
+        add_btn.setToolTip("Attach files")
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
 
+        self.think_button = QPushButton("Think")
+        self.think_button.setCheckable(True)
+        self.think_button.setChecked(False)
+        self.think_button.setToolTip("Show the model's native thinking output")
+        self.think_button.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {TEXT_MUTED}; border: 1px solid {BORDER}; border-radius: 8px; padding: 0 11px; font-size: 11px; font-weight: 600; }}"
+            f"QPushButton:checked {{ background: {BG_INPUT}; color: {ACCENT}; border-color: {ACCENT}; }}"
+            f"QPushButton:disabled {{ color: {TEXT_MUTED}; border-color: {BORDER}; }}"
+        )
+        self.think_button.setFixedHeight(32)
+        controls.addWidget(self.think_button)
+
         controls.addStretch()
 
+        self.model_selector.setMinimumHeight(32)
+        self.model_selector.setMaximumWidth(330)
+        self.model_selector.setStyleSheet(f"QPushButton {{ background: transparent; border: 1px solid {BORDER}; border-radius: 8px; padding: 0 9px; color: {TEXT_MUTED}; font-size: 11px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; color: {TEXT}; }}")
+        controls.addWidget(self.model_selector)
+
         self.send_button = QPushButton()
-        self.send_button.setStyleSheet(f"QPushButton {{ background: {ACCENT}; border: none; border-radius: 6px; }} QPushButton:hover {{ background: #79c0ff; }} QPushButton:disabled {{ background: {BORDER}; }}")
-        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 16, 2.5))
-        self.send_button.setFixedSize(28, 28)
+        self.send_button.setStyleSheet(f"QPushButton {{ background: {ACCENT}; border: none; border-radius: 10px; }} QPushButton:hover {{ background: #a0bcff; }} QPushButton:pressed {{ background: #6f91e8; }} QPushButton:disabled {{ background: {BORDER}; }}")
+        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 17, 2.5))
+        self.send_button.setFixedSize(32, 32)
+        self.send_button.setToolTip("Send message")
         self.send_button.clicked.connect(self._send)
         controls.addWidget(self.send_button)
 
         box_layout.addLayout(controls)
+
         composer_layout.addWidget(self.composer_box)
         main_layout.addWidget(composer_area)
 
         splitter.addWidget(main_content)
-        splitter.setSizes([260, 840])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([272, 968])
 
     def _apply_theme(self):
         self.setStyleSheet(f"""
-            QMainWindow {{ background: {BG_MAIN}; }}
-            QSplitter::handle {{ background: {BORDER}; }}
-            QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-            QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 40px; }}
-            QScrollBar::handle:vertical:hover {{ background: {TEXT_MUTED}; }}
+            QMainWindow, QWidget {{ background: {BG_MAIN}; color: {TEXT}; }}
+            QSplitter::handle {{ background: {BORDER}; width: 1px; }}
+            QScrollBar:vertical {{ background: transparent; width: 9px; margin: 3px; }}
+            QScrollBar::handle:vertical {{ background: #344354; border-radius: 4px; min-height: 42px; }}
+            QScrollBar::handle:vertical:hover {{ background: #52677d; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-            QMenu {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px; }}
-            QMenu::item {{ padding: 8px 24px 8px 12px; border-radius: 4px; color: {TEXT}; font-size: 13px; }}
+            QToolTip {{ background: {BG_PANEL}; color: {TEXT}; border: 1px solid {BORDER}; padding: 6px 8px; }}
+            QMenu {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 5px; }}
+            QMenu::item {{ padding: 9px 26px 9px 13px; border-radius: 6px; color: {TEXT}; font-size: 13px; }}
             QMenu::item:selected {{ background: {BG_INPUT}; }}
         """)
 
@@ -959,7 +1323,7 @@ class NovaWindow(QMainWindow):
         model = str(getattr(brain, "model", "") or "model")
         remote = self._settings.get("provider") == "remote"
         provider = "API" if remote else "LOCAL"
-        self.model_selector.setText(f"◈  {model}  ·  {provider}")
+        self.model_selector.setText(f"◈  {model}  ·  {provider}   /   {EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)]}  ▾")
         provider_name = "Remote API" if remote else "Local Ollama"
         self.model_selector.setToolTip(
             f"Provider: {provider_name}\\nModel: {model}\\n"
@@ -1014,6 +1378,8 @@ class NovaWindow(QMainWindow):
         self.chat_list.clear()
         for chat in self.chat_store.list_chats():
             item = QListWidgetItem(chat["title"])
+            item.setToolTip(chat["title"])
+            item.setSizeHint(QSize(0, 40))
             item.setData(Qt.UserRole, chat["id"])
             self.chat_list.addItem(item)
             if chat["id"] == self.current_chat_id:
@@ -1060,9 +1426,9 @@ class NovaWindow(QMainWindow):
                 
         for item in messages:
             widget = MessageWidget(
-                item["role"], 
-                item["content"], 
-                attachments=item.get("attachments") or []
+                item["role"], item["content"],
+                attachments=item.get("attachments") or [],
+                font_size=int(self._settings.get("assistant_font_size", "16") or 16),
             )
             self.chat_container_layout.addWidget(widget)
             
@@ -1071,7 +1437,7 @@ class NovaWindow(QMainWindow):
 
     def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        widget = MessageWidget(role, text, attachments=attachments)
+        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "16") or 16))
         self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1090,7 +1456,7 @@ class NovaWindow(QMainWindow):
         if self.streaming_message is not None:
             return self.streaming_message
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        self.streaming_message = StreamingMessageWidget()
+        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "16") or 16))
         self.chat_container_layout.addWidget(self.streaming_message)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1106,10 +1472,11 @@ class NovaWindow(QMainWindow):
     def _scroll_chat_to_bottom(self):
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum()))
 
-    def _show_model_menu(self):
+    def _show_model_menu(self, anchor=None):
         if self.busy:
             return
         menu = QMenu(self)
+        menu.setMinimumWidth(390)
         remote = self._settings.get("provider") == "remote"
         
         installed = []
@@ -1127,15 +1494,51 @@ class NovaWindow(QMainWindow):
         if current and current not in installed:
             installed.insert(0, current)
 
+        title_action = menu.addSection("MODEL")
         for name in sorted(set(installed), key=str.lower):
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setChecked(not remote and name == current)
+            action = menu.addAction(("✓  " if (not remote and name == current) else "    ") + name)
             action.triggered.connect(lambda _, n=name: self._select_model(n))
 
         menu.addSeparator()
-        menu.addAction("API and model settings...").triggered.connect(self._open_model_settings)
-        menu.exec(self.model_selector.mapToGlobal(QPoint(0, self.model_selector.height())))
+        effort_action = QWidgetAction(menu)
+        effort_panel = QWidget(menu)
+        effort_panel.setAttribute(Qt.WA_TranslucentBackground, True)
+        effort_panel.setAutoFillBackground(False)
+        effort_panel.setStyleSheet("background: transparent; border: none;")
+        effort_layout = QVBoxLayout(effort_panel)
+        effort_layout.setContentsMargins(14, 8, 14, 12)
+        effort_layout.setSpacing(7)
+        effort_head = QHBoxLayout()
+        effort_title = QLabel("EFFORT")
+        effort_title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 800; letter-spacing: 1px;")
+        effort_head.addWidget(effort_title)
+        effort_head.addStretch(1)
+        current_effort = QLabel(EFFORT_LABELS[EFFORT_LEVELS.index(self._effort)])
+        current_effort.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
+        effort_head.addWidget(current_effort)
+        effort_layout.addLayout(effort_head)
+        popup_effort = EffortSelector()
+        popup_effort.set_value(self._effort)
+        popup_effort.changed.connect(self._on_effort_changed)
+        popup_effort.changed.connect(lambda value: current_effort.setText(EFFORT_LABELS[EFFORT_LEVELS.index(value)]))
+        popup_effort.changed.connect(lambda value: self.model_selector.setText(self.model_selector.text().rsplit("/", 1)[0].strip() + f"   /   {EFFORT_LABELS[EFFORT_LEVELS.index(value)]}  ▾"))
+        effort_layout.addWidget(popup_effort)
+        effort_action.setDefaultWidget(effort_panel)
+        menu.addAction(effort_action)
+        menu.addSeparator()
+        menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
+        anchor = anchor or self.model_selector
+        menu.ensurePolished()
+        menu.adjustSize()
+        anchor_top = anchor.mapToGlobal(QPoint(0, 0))
+        desired = QPoint(anchor_top.x(), anchor_top.y() - menu.sizeHint().height())
+        screen = QApplication.screenAt(anchor_top)
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = max(available.left(), min(desired.x(), available.right() - menu.sizeHint().width() + 1))
+            y = max(available.top(), desired.y())
+            desired = QPoint(x, y)
+        menu.exec(desired)
 
     def _select_model(self, name):
         if self.busy or not name:
@@ -1159,15 +1562,78 @@ class NovaWindow(QMainWindow):
             apply_to_environment(values)
             if self._rebuild_core():
                 self._refresh_model_labels()
+            self._render_current_chat()
 
     def _choose_attachments(self):
         if self.busy:
             return
         paths, _ = QFileDialog.getOpenFileNames(self, "Attach files", "", "All files (*)")
+        changed = False
         for path in paths:
             path = os.path.abspath(path)
             if path not in self.attachments:
                 self.attachments.append(path)
+                changed = True
+        if changed:
+            self._refresh_attachment_preview()
+
+    def _refresh_attachment_preview(self):
+        """Render removable file chips for files waiting to be sent."""
+        if not hasattr(self, "attachment_preview_layout"):
+            return
+        while self.attachment_preview_layout.count():
+            item = self.attachment_preview_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        self.attachment_scroll.setVisible(bool(self.attachments))
+        for index, path in enumerate(self.attachments):
+            card = QFrame()
+            card.setObjectName("attachmentCard")
+            card.setFixedSize(132, 96)
+            card.setStyleSheet(f"QFrame#attachmentCard {{ background: {BG_INPUT}; border: 1px solid {BORDER}; border-radius: 10px; }}")
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(9, 7, 8, 7)
+            layout.setSpacing(3)
+
+            top = QHBoxLayout()
+            top.setContentsMargins(0, 0, 0, 0)
+            file_icon = QLabel("▤")
+            file_icon.setStyleSheet(f"color: {ACCENT}; font-size: 17px; border: none; background: transparent;")
+            top.addWidget(file_icon)
+            top.addStretch(1)
+            remove = QToolButton()
+            remove.setText("×")
+            remove.setToolTip(f"Remove {os.path.basename(path)}")
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.setFixedSize(20, 20)
+            remove.setStyleSheet(f"QToolButton {{ color: {TEXT_MUTED}; background: transparent; border: none; font-size: 16px; }} QToolButton:hover {{ color: {TEXT}; background: {BORDER}; border-radius: 5px; }}")
+            remove.clicked.connect(lambda checked=False, item_path=path: self._remove_attachment(item_path))
+            top.addWidget(remove)
+            layout.addLayout(top)
+
+            filename = os.path.basename(path) or path
+            name = QLabel(filename)
+            name.setWordWrap(True)
+            name.setMaximumHeight(34)
+            name.setStyleSheet(f"color: {TEXT}; font-size: 10px; border: none; background: transparent;")
+            name.setToolTip(path)
+            layout.addWidget(name)
+            try:
+                size_text = format_bytes(os.path.getsize(path))
+            except OSError:
+                size_text = "Unavailable"
+            size = QLabel(size_text)
+            size.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; border: none; background: transparent;")
+            layout.addWidget(size)
+            self.attachment_preview_layout.addWidget(card)
+        self.attachment_preview_layout.addStretch(1)
+
+    def _remove_attachment(self, path):
+        if path in self.attachments:
+            self.attachments.remove(path)
+            self._refresh_attachment_preview()
 
     def _attachment_context(self, paths):
         parts = []
@@ -1195,6 +1661,7 @@ class NovaWindow(QMainWindow):
 
         self.input.clear()
         self.attachments.clear()
+        self._refresh_attachment_preview()
         self._add_message("user", user_text, attachments=attachments)
         self.chat_store.add_message(self.current_chat_id, "user", user_text, attachments=attachments, context=message)
         self._refresh_chat_history()
@@ -1207,9 +1674,14 @@ class NovaWindow(QMainWindow):
         self._animate_status()
 
         self._apply_effort(self._effort)
+        self.thinking_enabled = self.think_button.isChecked()
+        setter = getattr(self.core, "set_thinking_enabled", None)
+        if callable(setter):
+            setter(self.thinking_enabled)
+        self.think_button.setEnabled(False)
         self.thinking_panel = None
         self._discard_streaming_message()
-        if self._effort != "off":
+        if self.thinking_enabled:
             self.thinking_panel = self._insert_thinking_panel()
 
         self.worker = AgentWorker(self.core, message)
@@ -1247,11 +1719,20 @@ class NovaWindow(QMainWindow):
         self.status_label.setText(message[:28])
         self.status_label.setToolTip(message)
 
+    def _separate_thinking_panel_from_reply(self):
+        """Add breathing room between the native-thinking card and Nova's reply."""
+        if not self.thinking_panel:
+            return
+        self.thinking_panel.finish()
+        self.thinking_panel = None
+        # The final layout item is the stretch spacer. Insert a real layout
+        # gap immediately before it so the next assistant message is separated.
+        index = max(0, self.chat_container_layout.count() - 1)
+        self.chat_container_layout.insertSpacing(index, 18)
+
     def _on_finished(self, response):
         self._discard_streaming_message()
-        if self.thinking_panel:
-            self.thinking_panel.finish()
-            self.thinking_panel = None
+        self._separate_thinking_panel_from_reply()
         self._add_message("nova", str(response))
         self.chat_store.add_message(self.current_chat_id, "assistant", str(response))
         self._refresh_chat_history()
@@ -1259,9 +1740,7 @@ class NovaWindow(QMainWindow):
 
     def _on_failed(self, error):
         self._discard_streaming_message()
-        if self.thinking_panel:
-            self.thinking_panel.finish()
-            self.thinking_panel = None
+        self._separate_thinking_panel_from_reply()
         text = f"I hit an internal error.\n\nError: {error}"
         self._add_message("nova", text)
         self.chat_store.add_message(self.current_chat_id, "assistant", text)
@@ -1272,6 +1751,7 @@ class NovaWindow(QMainWindow):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.think_button.setEnabled(True)
         self._status_timer.stop()
         self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
         self.status_label.setText("Ready")

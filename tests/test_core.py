@@ -680,7 +680,6 @@ class CoreTests(unittest.TestCase):
         }
         core._direct_self_diagnostics_answer = lambda message: None
         core._direct_evidence_answer = lambda message: None
-        core._direct_memory_answer = lambda message: None
         core._extract_and_store_memory = lambda message: None
         core._identity_system_prompt = lambda extra="": "Nova identity"
         core._build_final_prompt = lambda **kwargs: "Final response prompt"
@@ -960,7 +959,6 @@ class CoreTests(unittest.TestCase):
         }
         core._direct_self_diagnostics_answer = lambda message: None
         core._direct_evidence_answer = lambda message: None
-        core._direct_memory_answer = lambda message: None
         core._identity_system_prompt = lambda extra="": "Nova test identity"
         core._long_memory_context = lambda message: "NO_PRIOR_MEMORY"
         core._conversation_context = lambda max_chars=12000: "EMPTY_CONVERSATION"
@@ -1056,6 +1054,39 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(core.tools.calls, [])
         self.assertIn("help explain", response.lower())
+
+    def test_model_authors_identity_answer_without_canned_memory_reply(self):
+        class ProfileMemory:
+            def relevant(self, query, limit=5):
+                return [{"key": "profile.name", "value": "Sepehr Taji", "score": 5}]
+
+            def remember(self, category, key, value):
+                return None
+
+        class IdentityBrain:
+            def __init__(self):
+                self.calls = []
+
+            def generate(self, prompt, system_prompt=None, json_mode=False):
+                self.calls.append((prompt, system_prompt))
+                return "I'm Nova, the AI agent running in this app."
+
+        brain = IdentityBrain()
+        core = self._make_conversation_core(brain)
+        core.long_memory = ProfileMemory()
+        # Restore the real prompt-context methods: the shared test fixture
+        # intentionally stubs these for unrelated conversation tests.
+        core._long_memory_context = NovaCore._long_memory_context.__get__(core, NovaCore)
+        core._identity_system_prompt = NovaCore._identity_system_prompt.__get__(core, NovaCore)
+
+        response = core.ask("What is your name?")
+
+        self.assertEqual(response, "I'm Nova, the AI agent running in this app.")
+        self.assertEqual(len(brain.calls), 1)
+        prompt, system_prompt = brain.calls[0]
+        self.assertIn('"value":"Sepehr Taji"', prompt)
+        self.assertIn("saved profile name as your own", prompt + system_prompt)
+        self.assertNotIn("According to your saved memory", response)
 
     def test_memory_extraction_runs_after_the_current_conversation_response(self):
         events = []
@@ -1396,7 +1427,6 @@ class CoreTests(unittest.TestCase):
         core.execution_state = {"last_plan": None, "verified_tools": [], "last_verified": None}
         core._direct_self_diagnostics_answer = lambda message: None
         core._direct_evidence_answer = lambda message: None
-        core._direct_memory_answer = lambda message: None
         core._extract_and_store_memory = lambda message: None
         core._identity_system_prompt = lambda extra="": "Nova identity"
         core._build_final_prompt = lambda **kwargs: "Final response prompt"

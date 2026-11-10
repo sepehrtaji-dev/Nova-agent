@@ -444,7 +444,8 @@ class OllamaBrain:
         return content.strip()
 
     def generate_stream(
-        self, prompt, on_token, system_prompt=None, json_mode=False, options=None, think=None
+        self, prompt, on_token, system_prompt=None, json_mode=False, options=None,
+        think=None, on_thought_delta=None,
     ):
         """Stream generated text chunks to on_token and return the full text."""
         system = system_prompt or SYSTEM_PROMPT
@@ -488,6 +489,10 @@ class OllamaBrain:
             if isinstance(part, dict):
                 message = part.get("message") or {}
                 token = message.get("content", "") if isinstance(message, dict) else ""
+                thought = (
+                    message.get("thinking", message.get("think", ""))
+                    if isinstance(message, dict) else ""
+                )
             else:
                 message = getattr(part, "message", None)
                 token = (
@@ -495,6 +500,13 @@ class OllamaBrain:
                     if isinstance(message, dict)
                     else getattr(message, "content", "")
                 )
+                thought = (
+                    message.get("thinking", getattr(message, "think", ""))
+                    if isinstance(message, dict)
+                    else getattr(message, "thinking", getattr(message, "think", ""))
+                )
+            if thought and callable(on_thought_delta):
+                on_thought_delta(thought if isinstance(thought, str) else str(thought))
             if not token:
                 continue
             if not isinstance(token, str):
