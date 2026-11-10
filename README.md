@@ -13,6 +13,7 @@ Nova is an **agent application**, not a newly trained foundation model. You choo
 [![Remote API](https://img.shields.io/badge/Remote%20models-OpenAI--compatible-6B5B95)](#model-providers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/sepehrtaji-dev/Nova-agent/actions/workflows/agent-tests.yml/badge.svg)](https://github.com/sepehrtaji-dev/Nova-agent/actions/workflows/agent-tests.yml)
+[![Release](https://img.shields.io/github/v/release/sepehrtaji-dev/Nova-agent)](https://github.com/sepehrtaji-dev/Nova-agent/releases/latest)
 
 > **Status: active development / experimental.** Features and safety boundaries can change. Nova can execute programs and modify files when those capabilities are enabled. Read the security notes before using it on important data.
 
@@ -24,6 +25,8 @@ Nova is an **agent application**, not a newly trained foundation model. You choo
 - [Model providers](#model-providers)
 - [Task execution flow](#task-execution-flow)
 - [Tools and permissions](#tools-and-permissions)
+- [NoviqX GitHub App](#noviqx-github-app)
+- [NoviqX MCP server](docs/noviqx-mcp.md)
 - [Memory system](#memory-system)
 - [Interfaces](#interfaces)
 - [Downloads & SmartScreen](#downloads--smartscreen)
@@ -37,6 +40,7 @@ Nova is an **agent application**, not a newly trained foundation model. You choo
 - [Docker](#docker)
 - [Security and privacy](#security-and-privacy)
 - [Roadmap](#roadmap)
+- [Changelog](CHANGELOG.md)
 - [License](#license)
 
 ## What Nova can do
@@ -52,6 +56,7 @@ Nova's actual capabilities depend on the tools that load, enabled permissions, o
 - **Inspect itself:** report runtime components, model metadata when available, tools, permissions, and diagnostics.
 - **Switch model backends:** run a local Ollama model or connect to an OpenAI-compatible API.
 - **Use different interfaces:** Textual terminal UI, prompt_toolkit CLI, legacy Rich UI, and an optional PySide6 desktop GUI.
+- **Edit GitHub as your own App:** the NoviqX integration commits through a GitHub App you own (with a first-run setup wizard), and its tools are also exposed through a local MCP server for other MCP clients.
 
 Nova does not guarantee that every model will plan or use tools correctly. Smaller models may need more retries or produce invalid tool arguments. Review important operations.
 
@@ -70,6 +75,7 @@ Nova separates the language model from the Python application that controls tool
 | Permission layer | Control which capability groups are enabled |
 | Verifier | Check tool outcomes against observable state |
 | Memory services | Maintain conversation and persisted memory |
+| NoviqX integration | GitHub App identity (JWT → installation token), repository file tools, and a local MCP server |
 | Diagnostics / introspection | Report observable runtime and model information |
 
 The model decides whether to answer directly or request one or more tools. For providers that support native function calling, Nova uses a tool-call loop: it sends the live registry schemas, executes each validated call locally, returns the result in the provider's tool-message format, and asks the model what to do next. Nova executes multiple calls from one model turn serially to preserve predictable ordering. The model does **not** grant itself permissions or manufacture successful tool results. Nova's Python code enforces session permissions, validates arguments, executes handlers, and attaches verifier evidence before returning the result to the model.
@@ -257,6 +263,17 @@ The agent is trained to **always read the file first** (to obtain its blob SHA) 
 - The settings file is `0600` and never contains the `.pem` content itself — only its path
 - The wizard's connection test exercises the exact same code path the agent uses at runtime, so a passing test means the agent can talk to GitHub
 
+#### Standalone MCP server
+
+The NoviqX integration also ships a local **MCP server** (stdio) that exposes the same GitHub operations to any MCP-capable client — Nova or another agent entirely:
+
+```bash
+python -m pip install -r requirements-noviqx.txt
+python -m integrations.noviqx.mcp_server
+```
+
+Set the same three `NOVIQX_*` variables, then point your MCP client at the command above. Full walkthrough: [docs/noviqx-mcp.md](docs/noviqx-mcp.md).
+
 ## Memory system
 
 Nova uses separate memory components for different kinds of context.
@@ -270,6 +287,8 @@ Nova uses separate memory components for different kinds of context.
 | Memory extractor | Selects candidate long-term facts from conversation using the configured model |
 
 Episodic memory stores concise task/tool outcome summaries rather than raw tool inputs and full raw tool outputs. Records are bounded and can have statuses such as **confirmed**, **failed**, and **unverifiable**. Secret-like strings are filtered before episodic summaries are saved, but this is a safeguard, not a guarantee.
+
+Short-term memory is sent to the model as **real alternating user/assistant chat turns** (newest-first, capped at 12 messages / 6,000 characters) rather than a flattened transcript inside the context block. This keeps each provider's native multi-turn format intact and anchors follow-up references like "this" or "it" to the previous topic.
 
 Memory is local application data. Do not ask Nova to store passwords, API keys, access tokens, private keys, or other secrets. Do not commit runtime memory files.
 
@@ -316,8 +335,14 @@ Core dependencies in **requirements.txt**:
 - rich
 - textual
 - prompt_toolkit
+- Markdown
+- bleach
+- pymdown-extensions
+- PyJWT[crypto] (NoviqX GitHub App signing)
 
 Optional dependencies in **requirements-optional.txt** include PySide6, desktop automation, OCR, image processing, and local image-generation packages. Some extras require separate system software or model files. For example, pytesseract also needs the Tesseract OCR application.
+
+**requirements-noviqx.txt** installs the MCP SDK (`mcp`) needed only for the standalone NoviqX MCP server.
 
 ## Quick start
 
@@ -390,6 +415,8 @@ python main.py
 
 The default launch opens the Textual terminal interface. See [Interfaces](#interfaces) for alternatives.
 
+Desktop GUI: `python App.py` (requires `requirements-optional.txt`). On first launch, if NoviqX isn't configured yet, the setup wizard appears automatically.
+
 ## Configuration
 
 | Variable | Default / behaviour | Purpose |
@@ -409,6 +436,9 @@ The default launch opens the Textual terminal interface. See [Interfaces](#inter
 | NOVA_TOOL_MANIFEST | config/tools.json | Override tool manifest |
 | NOVA_EPISODIC_MEMORY_PATH | memory/episodic.json | Override episodic-memory storage |
 | NOVA_IMAGE_MODEL_PATH | Not set | Optional local image model path |
+| NOVIQX_APP_ID | Not set | NoviqX GitHub App ID (overrides the settings file) |
+| NOVIQX_INSTALLATION_ID | Not set | NoviqX App installation ID |
+| NOVIQX_PRIVATE_KEY_PATH | Not set | Path to the App's `.pem` private key |
 
 Docker Compose supplies its own default model (qwen2.5:3b) and context/output settings. Environment variables can override those values.
 
@@ -465,6 +495,7 @@ Nova-agent/
 ├── agent/                       # Agent orchestration and decision workflow
 │   ├── core.py                  # NovaCore: connects agent services
 │   ├── router.py                # Parses and routes model-selected tool calls
+│   ├── tool_loop.py             # Native tool-calling conversation loop
 │   ├── planner.py               # Creates and updates task plans
 │   ├── verifier.py              # Verifies observable tool outcomes
 │   ├── self_knowledge.py        # Nova's self-knowledge component
@@ -492,6 +523,14 @@ Nova-agent/
 │   ├── desktop.py               # Optional desktop automation
 │   └── ...                      # Tool-specific helpers
 │
+├── integrations/                # External-service integrations
+│   └── noviqx/                  # NoviqX GitHub App (bring-your-own-App)
+│       ├── auth.py              # JWT → installation-token auth chain
+│       ├── github_api.py        # Repository read/update with SHA locking
+│       ├── mcp_server.py        # Local stdio MCP server
+│       ├── registry_tools.py    # Agent-side tool handlers
+│       └── settings.py          # Credential store (mode 0600)
+│
 ├── memory/                      # Memory and persistence
 │   ├── manager.py               # Long-term memory manager
 │   ├── extractor.py             # Candidate fact extraction
@@ -507,19 +546,29 @@ Nova-agent/
 ├── ui/
 │   ├── launcher.py              # Selects terminal interface
 │   ├── textual_app.py           # Default Textual UI
-│   └── prompt_cli.py            # prompt_toolkit interface
+│   ├── prompt_cli.py            # prompt_toolkit interface
+│   ├── figma_desktop.py         # PySide6 desktop shell
+│   ├── markdown_renderer.py     # Safe Markdown rendering for the GUI
+│   └── noviqx_setup_wizard.py   # First-run NoviqX setup wizard
 │
 ├── utils/                       # Shared helpers and utilities
+├── scripts/                     # Integration and maintenance scripts
+│   └── noviqx_smoke_test.py     # Real end-to-end NoviqX pipeline test
+├── docs/                        # Feature deep-dives (tool loop, NoviqX MCP, remote providers)
+├── assets/                      # Nova logo and UI assets
 ├── tests/                       # Unit and regression tests
 ├── sandbox/                     # Sandbox-related code
 ├── projects/                    # Runtime workspace (normally Git-ignored)
 ├── App.py                       # Optional PySide6 desktop GUI
 ├── main.py                      # Terminal UI launch entry point
-├── requirements.txt              # Core dependencies
+├── requirements.txt             # Core dependencies
+├── requirements-noviqx.txt      # MCP SDK for the standalone server
 ├── requirements-optional.txt    # Optional integrations
+├── version.txt                  # Current version
+├── CHANGELOG.md                 # Release-by-release changes
 ├── Dockerfile                   # Container image
 ├── docker-compose.yml           # Nova + Ollama Compose setup
-├── .github/workflows/           # GitHub Actions CI
+├── .github/workflows/           # CI + Windows EXE release builds
 ├── LICENSE
 └── README.md
 ```
@@ -552,25 +601,27 @@ GitHub Actions currently:
 
 1. Checks out the repository.
 2. Sets up Python 3.11.
-3. Compiles Python packages and entry points.
-4. Installs core dependencies.
-5. Smoke-tests Textual and prompt_toolkit imports.
-6. Runs the unit/regression test suite.
+3. Compiles all Python sources, including **integrations/noviqx**.
+4. Installs core dependencies, the NoviqX MCP SDK, and PySide6 (plus Qt runtime libraries on Linux).
+5. Smoke-tests the PySide6 desktop shell offscreen and both terminal UI imports.
+6. Runs the unit/regression test suite via `unittest discover`.
 7. Builds the Docker image if earlier steps pass.
+
+A separate workflow (**build-exe.yml**) builds the Windows **Nova.exe** with PyInstaller on every release tag and attaches it — together with a `SHA256SUMS.txt` checksum file — to the GitHub Release.
 
 Tests use controlled test doubles for many model and tool paths. A green test run does not mean every provider, desktop action, or real-world integration has been exercised.
 
 ## Repository snapshot
 
-These figures are a source-repository snapshot from the review on **30 October 2026**. They exclude runtime memory, downloaded models, virtual environments, and user workspace files.
+These figures are a source-repository snapshot from the review on **11 November 2026** (v2.3). They exclude runtime memory, downloaded models, virtual environments, and user workspace files.
 
 | Metric | Snapshot |
 |---|---:|
-| Tracked files | 86 |
-| Python files | 75 |
-| Test files | 26 |
-| Tracked file content | ~871 KB |
-| Tools in default manifest | 8 |
+| Tracked files | 132 |
+| Python files | 113 |
+| Test files | 47 |
+| Tracked file content | ~2.9 MB |
+| Tools in default manifest | 12 |
 | Default capability groups | 3 (web, git, pc) |
 | Model backends | 2 (Ollama and OpenAI-compatible API) |
 | Terminal interfaces | 3 |
@@ -578,11 +629,9 @@ These figures are a source-repository snapshot from the review on **30 October 2
 
 ### Latest reviewed changes and CI
 
-The latest reviewed main-branch commit at the time of this snapshot was **9518b521** — “Selfknowledge improvement” (18 October 2026). It included updates to self-knowledge, core integration, model handling, and tests, plus a large added Apptest.py file.
+The latest release is **v2.3** (November 2026). It brought the agentic native tool loop, the NoviqX GitHub App integration (MCP server + first-run setup wizard), conversation history passed as real chat turns (the short-term-memory / pronoun fix), math-parser corrections, and automated Windows **Nova.exe** release builds with published SHA256 checksums. `CHANGELOG.md` documents the details.
 
-The last reviewed GitHub Actions run for that commit executed **273 tests: 268 passed, 1 failed, and 4 were skipped**. The failure was **test_legitimate_paths_are_not_over_blocked** in **tests/test_filesystem_security.py**: a Windows-style path (C:/projects/nova/main.py) was incorrectly treated as a protected path on the Linux CI runner.
-
-Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the current run state. CI status may have changed after this snapshot.
+The current regression suite runs **432 passed, 4 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
 
 ## Docker
 
@@ -653,6 +702,7 @@ Development is ongoing. Current areas of focus include:
 - Improving provider configuration and credential handling.
 - Expanding regression tests for real-world tool behaviour.
 - Improving desktop and terminal user experience.
+- Windows code signing and installer packaging for Nova.exe.
 
 This roadmap describes areas of work, not features guaranteed to be complete.
 
