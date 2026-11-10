@@ -3,6 +3,7 @@ import os
 import json
 import shlex
 import shutil
+import signal
 import ntpath
 
 # Windows cmd.exe builtins: they exist only inside the shell, so shell=False
@@ -327,22 +328,54 @@ class TerminalTool:
                         "found on PATH."
                     )
 
-            run_kwargs = {
-                "shell": False,
+            # Use Popen with a process group so a timeout can kill grandchildren
+            # too. subprocess.run(timeout=...) only kills the direct child; a
+            # grandchild inheriting the stdout pipe then blocks communicate()
+            # forever and the tool hangs past its deadline.
+            popen_kwargs = {
                 "cwd": cwd,
-                "capture_output": True,
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
                 "text": True,
-                "timeout": 20,
             }
+            if os.name != "nt":
+                popen_kwargs["start_new_session"] = True
 
             if stdin_data is None:
-                run_kwargs["stdin"] = subprocess.DEVNULL
+                popen_kwargs["stdin"] = subprocess.DEVNULL
             else:
-                run_kwargs["input"] = stdin_data
+                popen_kwargs["stdin"] = subprocess.PIPE
 
-            result = subprocess.run(
-                cmd_args,
-                **run_kwargs
+            process = subprocess.Popen(cmd_args, **popen_kwargs)
+            try:
+                stdout, stderr = process.communicate(
+                    input=stdin_data, timeout=20
+                )
+            except subprocess.TimeoutExpired:
+                try:
+                    if os.name != "nt":
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except OSError:
+                    pass
+                # Drain the pipes so the killed process group cannot block us.
+                try:
+                    process.communicate(timeout=5)
+                except Exception:
+                    pass
+                return (
+                    "STATUS: ERROR\n"
+                    "Terminal command timed out after 20 seconds.\n"
+                    "If the program is interactive, provide test input "
+                    "through the terminal input field instead of waiting "
+                    "for interactive user input."
+                )
+
+            result = subprocess.CompletedProcess(
+                cmd_args, process.returncode,
+                stdout=stdout if stdout is not None else "",
+                stderr=stderr if stderr is not None else "",
             )
 
             output_parts = [
@@ -379,15 +412,6 @@ class TerminalTool:
                 )
 
             return "\n".join(output_parts)
-
-        except subprocess.TimeoutExpired:
-            return (
-                "STATUS: ERROR\n"
-                "Terminal command timed out after 20 seconds.\n"
-                "If the program is interactive, provide test input "
-                "through the terminal input field instead of waiting "
-                "for interactive user input."
-            )
 
         except Exception as e:
             return (
