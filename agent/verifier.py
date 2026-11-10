@@ -234,7 +234,12 @@ class Verifier:
                     evidence=str(exc),
                     message=f"Could not read written file for verification: {actual_path}",
                 )
-            if not self._same_path(actual, expected):
+            # Compare CONTENT with content equality. _same_path is a filesystem
+            # path helper (normcase + realpath) and must never be used here: it
+            # resolves both sides against the filesystem, so unrelated content
+            # that happens to name an existing path — or any case difference on
+            # Windows — would falsely verify as CONFIRMED.
+            if actual != expected:
                 return VerificationResult(
                     status="failed",
                     evidence=f"Expected {len(expected)} chars, found {len(actual)} chars.",

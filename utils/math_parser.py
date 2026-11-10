@@ -20,9 +20,20 @@ _SYMBOLS = {
 
 _SUPER_MAP = str.maketrans(
     "0123456789+-=()abcdefghijklmnopqrstuvwxyz",
-    "⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁼⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
+    "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᑫʳˢᵗᵘᵛʷˣʸᶻ",
 )
-_SUB_MAP = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₋₊₌₍₎")
+_SUB_MAP = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
+
+_ROOT_GLYPHS = {2: "√", 3: "∛", 4: "∜"}
+
+# LaTeX commands the rewriter understands. Only these (or explicit math
+# delimiters) switch math mode on — a bare "\\" + letters would otherwise
+# corrupt ordinary text such as Windows paths ("C:\temp\alpha_dir").
+_KNOWN_COMMANDS = sorted(
+    {key[1:] for key in _SYMBOLS} | {"frac", "sqrt", "text", "mathrm", "left", "right"},
+    key=len,
+    reverse=True,
+)
 
 def _group(text, start):
     if start >= len(text) or text[start] != "{":
@@ -45,7 +56,14 @@ def parse_math(text):
         return text
     had_explicit_math = bool(
         re.search(
-            r"(?:\$|\\(?:[A-Za-z]+|[,{}\[\]()]|left|right))",
+            # Explicit delimiters: $...$, \(...\), \[...\], spacing commands.
+            r"\$|\\(?:\(|\)|\[|\]|,|;)",
+            text,
+        )
+        or re.search(
+            # Or a KNOWN LaTeX command not followed by a letter/underscore, so
+            # "\alpha_dir" inside a Windows path never triggers math mode.
+            r"\\(?:" + "|".join(re.escape(name) for name in _KNOWN_COMMANDS) + r")(?![A-Za-z_])",
             text,
         )
     )
@@ -69,28 +87,46 @@ def parse_math(text):
         pos = end_num
         while pos < len(value) and value[pos].isspace():
             pos += 1
-        denominator, end_den = _group(value, pos) if pos < len(value) else (None, pos)
+        if pos < len(value) and value[pos] == "{":
+            denominator, end_den = _group(value, pos)
+        elif pos < len(value) and value[pos].isalnum():
+            # Single-token denominator: "\\frac{a}b" is valid LaTeX.
+            denominator, end_den = value[pos], pos + 1
+        else:
+            denominator, end_den = None, pos
         if denominator is None:
             break
         value = value[:match.start()] + "(" + _fragment(numerator) + ")⁄(" + _fragment(denominator) + ")" + value[end_den:]
 
-    sqrt = re.compile(r"\\sqrt\s*(\{)")
+    sqrt = re.compile(r"\\sqrt\s*(\[[^\[\]]*\])?\s*(\{)")
     while True:
         match = sqrt.search(value)
         if not match:
             break
-        inner, end = _group(value, match.start(1))
+        inner, end = _group(value, match.start(2))
         if inner is None:
             break
-        value = value[:match.start()] + "√(" + _fragment(inner) + ")" + value[end:]
+        degree = (match.group(1) or "").strip("[]").strip()
+        glyph = _ROOT_GLYPHS.get(degree, "√")
+        if glyph == "√" and degree:
+            glyph = f"√[{degree}]"
+        value = value[:match.start()] + glyph + "(" + _fragment(inner) + ")" + value[end:]
 
     def script(match):
         marker = match.group(1)
         body = match.group(2)
+        raw_body = body
         if body.startswith("{") and body.endswith("}"):
             body = body[1:-1]
         body = re.sub(r"\s+", "", body)
-        return body.translate(_SUPER_MAP if marker == "^" else _SUB_MAP)
+        table = _SUPER_MAP if marker == "^" else _SUB_MAP
+        translated = body.translate(table)
+        if translated == body:
+            # No glyphs exist for this body (e.g. subscript letters: _SUB_MAP
+            # only covers digits/operators). Keep the raw form instead of
+            # silently deleting the marker ("x_i" must not become "xi").
+            return marker + raw_body
+        return translated
 
     value = re.sub(r"([_^])(\{[^{}]*\}|[A-Za-z0-9+\-=()])", script, value)
     value = value.replace(r"\left", "").replace(r"\right", "")
@@ -108,5 +144,12 @@ def format_response_math(text):
     pattern = "(" + re.escape(tick * 3) + r"[\s\S]*?" + re.escape(tick * 3) + "|" + re.escape(tick) + r"[^" + re.escape(tick) + r"\n]*" + re.escape(tick) + ")"
     parts = re.split(pattern, text)
     for i in range(0, len(parts), 2):
-        parts[i] = parse_math(parts[i])
+        segment = parts[i]
+        # Whitespace around code spans is part of the prose; parse_math()
+        # strips its result, so re-attach the original leading/trailing
+        # whitespace of every text segment.
+        core = segment.strip()
+        lead = segment[:len(segment) - len(segment.lstrip())]
+        trail = segment[len(segment.rstrip()):]
+        parts[i] = lead + parse_math(core) + trail
     return "".join(parts)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tempfile
 from pathlib import Path
 
 SETTINGS_ENV = "NOVA_SETTINGS_FILE"
@@ -72,11 +73,25 @@ def save_settings(settings: dict) -> tuple[bool, str]:
     path = settings_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".tmp")
-        with temp.open("w", encoding="utf-8") as handle:
-            json.dump(merged, handle, indent=2)
-            handle.write("\n")
-        os.replace(temp, path)
+        # Use a unique, pre-restricted temp file. The previous fixed
+        # "settings.tmp" name wrote the API key with default (world-readable on
+        # some systems) permissions until the post-replace chmod ran, and two
+        # concurrent savers could os.replace a partially-written file.
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
+        )
+        _restrict(Path(temp_name))
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(merged, handle, indent=2)
+                handle.write("\n")
+            os.replace(temp_name, path)
+        except Exception:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+            raise
         _restrict(path)
         return True, f"Saved to {path}"
     except OSError as exc:

@@ -1275,6 +1275,10 @@ Schema:
                     if isinstance(old_step, dict)
                     and old_step.get("status") in {"completed", "failed"}
                 }
+                # Non-search steps normalize to None; without this discard,
+                # each completed non-search step inflated the union below and
+                # silently reduced the per-goal search budget.
+                prior_queries.discard(None)
                 planned_queries = {
                     self._normalized_search_query(
                         item.get("tool"), item.get("input")

@@ -108,7 +108,18 @@ class AnthropicBrain:
                                    "input": args if isinstance(args, dict) else {}})
                 result.append({"role": "assistant", "content": blocks})
             elif role in {"user", "assistant"}:
-                result.append({"role": role, "content": str(item.get("content") or "")})
+                text = str(item.get("content") or "")
+                if result and result[-1]["role"] == role:
+                    # The Anthropic Messages API requires strict user/assistant
+                    # alternation; two consecutive same-role messages return
+                    # HTTP 400. Merge into one message with multiple text blocks.
+                    if text:
+                        previous = result[-1]
+                        if isinstance(previous["content"], str):
+                            previous["content"] = [{"type": "text", "text": previous["content"]}]
+                        previous["content"].append({"type": "text", "text": text})
+                else:
+                    result.append({"role": role, "content": text})
         return result
 
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
