@@ -332,6 +332,11 @@ class OpenAICompatibleBrain:
                 detail = exc.read().decode("utf-8", "replace")[:500]
             except Exception:
                 pass
+            finally:
+                try:
+                    exc.close()
+                except Exception:
+                    pass
             raise RemoteBrainError(
                 f"Remote provider returned HTTP {exc.code}: {_scrub(detail, self.api_key)}",
                 transient=exc.code in (408, 409, 429, 500, 502, 503, 504),
@@ -339,6 +344,17 @@ class OpenAICompatibleBrain:
         except urllib.error.URLError as exc:
             self.last_error = _scrub(str(exc.reason), self.api_key)
             raise RemoteBrainError(f"Remote provider did not respond: {self.last_error}", transient=True) from exc
+        except (TimeoutError, OSError) as exc:
+            # A mid-stream stall surfaces as socket.timeout/TimeoutError, not
+            # URLError. Wrap it so callers see RemoteBrainError instead of a raw
+            # exception, and keep whatever was already streamed.
+            partial = "".join(text_parts)
+            self.last_error = _scrub(f"{type(exc).__name__}: {exc}", self.api_key)
+            raise RemoteBrainError(
+                f"Remote provider stream interrupted: {self.last_error}"
+                + (f" (partial response kept: {len(partial)} chars)" if partial else ""),
+                transient=True,
+            ) from exc
 
         calls = []
         for index in sorted(tool_parts):
@@ -417,6 +433,7 @@ class OpenAICompatibleBrain:
         url = f"{self.base_url}/chat/completions"
 
         last_exc = None
+        was_rate_limited = False
         for attempt in range(self.max_retries + 1):
             request = urllib.request.Request(
                 url,
@@ -475,6 +492,7 @@ class OpenAICompatibleBrain:
                         f"HTTP 429 (rate limited). "
                         f"{_rate_limit_hint(detail)}"
                     )
+                    was_rate_limited = True
                     if attempt < self.max_retries:
                         time.sleep(retry_after)
                     last_exc = exc
@@ -491,6 +509,13 @@ class OpenAICompatibleBrain:
                     f"Remote provider returned a non-JSON response: {exc}"
                 ) from exc
 
+            except RemoteBrainError:
+                # _extract_content raises this for a 2xx response that carries an
+                # error body (or no choices). Re-raise it: it is the REAL failure,
+                # and falling into the generic handler below would silently retry
+                # the request and misreport it as "did not respond".
+                raise
+
             except Exception as exc:
                 self.last_error = _scrub(f"{type(exc).__name__}: {exc}", self.api_key)
                 last_exc = exc
@@ -502,7 +527,7 @@ class OpenAICompatibleBrain:
         # the fix is completely different and the old wording sent users looking
         # for a connectivity problem that did not exist.
         attempts = self.max_retries + 1
-        if "429" in str(self.last_error):
+        if was_rate_limited:
             raise RemoteBrainError(
                 f"Remote provider rate-limited this request ({attempts} attempts). "
                 f"{self.last_error}",
@@ -593,6 +618,11 @@ class OpenAICompatibleBrain:
                 detail = exc.read().decode("utf-8", "replace")[:500]
             except Exception:
                 pass
+            finally:
+                try:
+                    exc.close()
+                except Exception:
+                    pass
             detail = _scrub(detail, self.api_key)
             raise RemoteBrainError(
                 f"Remote provider returned HTTP {exc.code}: {detail}",
@@ -602,6 +632,17 @@ class OpenAICompatibleBrain:
             self.last_error = _scrub(str(exc.reason), self.api_key)
             raise RemoteBrainError(
                 f"Remote provider did not respond: {self.last_error}",
+                transient=True,
+            ) from exc
+        except (TimeoutError, OSError) as exc:
+            # A mid-stream stall surfaces as socket.timeout/TimeoutError, not
+            # URLError. Wrap it so callers see RemoteBrainError instead of a raw
+            # exception, and keep whatever was already streamed.
+            partial = "".join(chunks)
+            self.last_error = _scrub(f"{type(exc).__name__}: {exc}", self.api_key)
+            raise RemoteBrainError(
+                f"Remote provider stream interrupted: {self.last_error}"
+                + (f" (partial response kept: {len(partial)} chars)" if partial else ""),
                 transient=True,
             ) from exc
 

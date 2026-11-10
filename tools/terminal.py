@@ -3,6 +3,7 @@ import os
 import json
 import shlex
 import shutil
+import signal
 import ntpath
 
 # Windows cmd.exe builtins: they exist only inside the shell, so shell=False
@@ -21,6 +22,18 @@ _POSIX_ONLY = {
     "chown", "find", "xargs", "head", "tail", "wc", "sort", "uniq", "tee",
     "ln", "df", "du", "ps", "kill", "which", "bash", "sh", "env",
 }
+
+
+def _has_recursive_flag(token):
+    """True when a token is a recursive flag for rm ("-r", "-rf", "--recursive")."""
+    folded = token.casefold()
+    if folded == "--recursive":
+        return True
+    return (
+        folded.startswith("-")
+        and not folded.startswith("--")
+        and "r" in folded[1:]
+    )
 
 
 class TerminalTool:
@@ -75,32 +88,95 @@ class TerminalTool:
         if executable in shell_launchers:
             return True
 
+        # Processes that can spawn other programs from within their own
+        # language (awk's system(), find -exec, xargs) are shell launchers in
+        # disguise; this tool is not an OS sandbox, so refuse them.
+        if executable in {"awk", "gawk", "mawk", "nawk", "xargs"}:
+            return True
+        if executable == "find" and any(
+            token.casefold() in {"-exec", "-execdir", "-ok", "-okdir"}
+            for token in tokens[1:]
+        ):
+            return True
+
         # Inline interpreter modes can run arbitrary code without a script
         # path, so refuse them. Python's unittest and compileall modules remain
         # available for the project's normal verification workflow.
-        inline_flags = {
-            "python": {"-c", "--command"},
-            "python3": {"-c", "--command"},
-            "python3.11": {"-c", "--command"},
-            "python3.12": {"-c", "--command"},
-            "python3.13": {"-c", "--command"},
-            "python3.14": {"-c", "--command"},
-            "pypy": {"-c", "--command"},
-            "node": {"-e", "--eval", "-p", "--print"},
-            "ruby": {"-e", "--eval"},
-            "perl": {"-e"},
-            "php": {"-r"},
+        #
+        # Match interpreter FAMILIES by prefix instead of exact names: an
+        # exact-name blocklist is trivially bypassed by any unlisted version
+        # suffix (python3.10, python3.9, pypy3, nodejs, py.exe, ...).
+        interpreter_families = {
+            # family -> (short-flag letters that execute inline code, long flags)
+            "python": ("c", {"--command"}),
+            "pypy": ("c", {"--command"}),
+            "py": ("c", {"--command"}),
+            "node": ("ep", {"--eval", "--print"}),
+            "ruby": ("e", {"--eval"}),
+            "perl": ("e", {"--eval"}),
+            "php": ("r", {"--run"}),
         }
-        flags = inline_flags.get(executable, set())
-        if any(token.casefold() in flags for token in tokens[1:]):
-            return True
+        family = None
+        for name, config in interpreter_families.items():
+            if executable == name or (len(name) > 2 and executable.startswith(name)):
+                family = name
+                break
 
-        if executable in {"python", "python3", "python3.11", "python3.12", "python3.13", "python3.14", "pypy"}:
-            for index, token in enumerate(tokens[1:-1], start=1):
-                if token == "-m":
-                    module = tokens[index + 1].casefold()
+        if family is not None:
+            inline_chars, inline_long = interpreter_families[family]
+            for token in tokens[1:]:
+                folded = token.casefold()
+                if folded in inline_long:
+                    return True
+                # Catch combined short-flag clusters too ("python -ec 'code'").
+                if (
+                    folded.startswith("-")
+                    and not folded.startswith("--")
+                    and any(ch in inline_chars for ch in folded[1:])
+                ):
+                    return True
+
+        # Python -m whitelist; accepts both "-m module" and "-mmodule".
+        if family in {"python", "pypy", "py"}:
+            rest = tokens[1:]
+            for index, token in enumerate(rest):
+                folded = token.casefold()
+                if folded == "-m":
+                    if index + 1 >= len(rest):
+                        return True
+                    module = rest[index + 1].casefold()
                     if module not in {"unittest", "compileall", "pytest"}:
                         return True
+                elif folded.startswith("-m") and len(folded) > 2:
+                    if folded[2:] not in {"unittest", "compileall", "pytest"}:
+                        return True
+
+        # Structural destructive-command checks. Flag order and combined short
+        # flags ("rm -fr", "rm -r -f", "rm --recursive --force") must be caught
+        # no matter how they are written, which raw substring matching misses.
+        if executable == "rm" and any(
+            _has_recursive_flag(token) for token in tokens[1:]
+        ):
+            return True
+        if executable in {
+            "format", "diskpart", "shutdown", "takeown", "icacls",
+            "restart-computer", "stop-computer",
+        }:
+            return True
+        if executable == "cipher" and any(
+            token.casefold() in {"/w", "-w"} for token in tokens[1:]
+        ):
+            return True
+        if executable == "reg" and any(
+            token.casefold() == "delete" for token in tokens[1:]
+        ):
+            return True
+        if executable == "net" and any(
+            token.casefold() in {"user", "localgroup"} for token in tokens[1:]
+        ):
+            return True
+        if executable == "remove-item":
+            return True
 
         blocked = [
             "format ",
@@ -252,22 +328,54 @@ class TerminalTool:
                         "found on PATH."
                     )
 
-            run_kwargs = {
-                "shell": False,
+            # Use Popen with a process group so a timeout can kill grandchildren
+            # too. subprocess.run(timeout=...) only kills the direct child; a
+            # grandchild inheriting the stdout pipe then blocks communicate()
+            # forever and the tool hangs past its deadline.
+            popen_kwargs = {
                 "cwd": cwd,
-                "capture_output": True,
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
                 "text": True,
-                "timeout": 20,
             }
+            if os.name != "nt":
+                popen_kwargs["start_new_session"] = True
 
             if stdin_data is None:
-                run_kwargs["stdin"] = subprocess.DEVNULL
+                popen_kwargs["stdin"] = subprocess.DEVNULL
             else:
-                run_kwargs["input"] = stdin_data
+                popen_kwargs["stdin"] = subprocess.PIPE
 
-            result = subprocess.run(
-                cmd_args,
-                **run_kwargs
+            process = subprocess.Popen(cmd_args, **popen_kwargs)
+            try:
+                stdout, stderr = process.communicate(
+                    input=stdin_data, timeout=20
+                )
+            except subprocess.TimeoutExpired:
+                try:
+                    if os.name != "nt":
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except OSError:
+                    pass
+                # Drain the pipes so the killed process group cannot block us.
+                try:
+                    process.communicate(timeout=5)
+                except Exception:
+                    pass
+                return (
+                    "STATUS: ERROR\n"
+                    "Terminal command timed out after 20 seconds.\n"
+                    "If the program is interactive, provide test input "
+                    "through the terminal input field instead of waiting "
+                    "for interactive user input."
+                )
+
+            result = subprocess.CompletedProcess(
+                cmd_args, process.returncode,
+                stdout=stdout if stdout is not None else "",
+                stderr=stderr if stderr is not None else "",
             )
 
             output_parts = [
@@ -304,15 +412,6 @@ class TerminalTool:
                 )
 
             return "\n".join(output_parts)
-
-        except subprocess.TimeoutExpired:
-            return (
-                "STATUS: ERROR\n"
-                "Terminal command timed out after 20 seconds.\n"
-                "If the program is interactive, provide test input "
-                "through the terminal input field instead of waiting "
-                "for interactive user input."
-            )
 
         except Exception as e:
             return (

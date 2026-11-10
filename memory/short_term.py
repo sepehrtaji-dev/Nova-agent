@@ -34,7 +34,13 @@ class ShortTermMemory:
         chunks = []
         total = 0
 
-        for index, item in enumerate(self.messages, start=1):
+        # Walk NEWEST-FIRST so the budget always keeps the most recent turns.
+        # Iterating oldest-first filled the budget with the oldest messages and
+        # silently dropped the newest ones — exactly the context the prompt
+        # needs most.
+        total_messages = len(self.messages)
+        for offset, item in enumerate(reversed(self.messages)):
+            index = total_messages - offset
             role = str(item.get("role", "unknown"))
             content = str(item.get("content", ""))
             chunk = f"[{index}] {role}:\n{content}"
@@ -69,4 +75,5 @@ class ShortTermMemory:
                 chunks.append(truncated)
             break
 
+        chunks.reverse()
         return "\n\n".join(chunks) if chunks else "No previous conversation."

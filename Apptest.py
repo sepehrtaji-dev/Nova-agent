@@ -1217,7 +1217,8 @@ class NovaWindow(QMainWindow):
         try:
             import ollama
 
-            data = ollama.list()
+            # Short timeout: a hung Ollama server must not freeze the GUI event loop
+            data = ollama.Client(timeout=5).list()
             items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
             for item in items or []:
                 if isinstance(item, dict):
@@ -2234,6 +2235,16 @@ class NovaWindow(QMainWindow):
         self.thread.start()
 
     def _on_status(self, message):
+        message = str(message)
+        # Streaming protocol messages fire for EVERY token; turning each one
+        # into an activity item floods the panel with hundreds of raw
+        # "MODEL_ANSWER_DELTA:..." widgets per reply and freezes the UI.
+        if message.startswith(("MODEL_ANSWER_DELTA:", "MODEL_THOUGHT_DELTA:")):
+            return
+        if message in ("MODEL_ANSWER_RESET", "MODEL_THOUGHT_END", "MODEL_THOUGHT_START"):
+            return
+        if message.startswith("THINKING_UPDATE:"):
+            message = message[len("THINKING_UPDATE:"):].strip() or "Working"
         self.status_label.setText(message)
         self._add_activity(message)
         if getattr(self, "current_turn_status", None):

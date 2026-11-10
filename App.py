@@ -1489,7 +1489,8 @@ class NovaWindow(QMainWindow):
         installed = []
         try:
             import ollama
-            data = ollama.list()
+            # Short timeout: a hung Ollama server must not freeze the GUI event loop
+            data = ollama.Client(timeout=5).list()
             items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
             for item in items or []:
                 name = item.get("model") if isinstance(item, dict) else getattr(item, "model", None)

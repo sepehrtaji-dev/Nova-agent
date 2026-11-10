@@ -1273,8 +1273,13 @@ Return JSON only.
             if tool_decision:
 
                 if allowed_tools is not None and tool_decision.get("tool") not in set(allowed_tools):
+                    # Fall through to the function-call parsing, response
+                    # fallback and repair pass instead of returning None here:
+                    # an early return burned every retry round with no recovery
+                    # (mirrors the allowed_tools handling below).
                     tool_decision = None
-                return tool_decision
+                else:
+                    return tool_decision
 
             function_call = (
                 self._extract_function_call(
