@@ -17,6 +17,13 @@ from config.model_settings import (
     summarise as summarise_backend,
 )
 
+from integrations.noviqx.settings import (
+    is_configured as noviqx_is_configured,
+    load_settings as load_noviqx_settings,
+    masked_display as noviqx_masked_display,
+    save_settings as save_noviqx_settings,
+)
+
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QAction, QRadialGradient
 from PySide6.QtWidgets import (
@@ -1527,6 +1534,10 @@ class NovaWindow(QMainWindow):
         menu.addAction(effort_action)
         menu.addSeparator()
         menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
+        noviqx_label = "NoviqX GitHub App…" + (
+            "  ✓" if noviqx_is_configured() else "  (not set up)"
+        )
+        menu.addAction(noviqx_label).triggered.connect(self._open_noviqx_settings)
         anchor = anchor or self.model_selector
         menu.ensurePolished()
         menu.adjustSize()
@@ -1563,6 +1574,19 @@ class NovaWindow(QMainWindow):
             if self._rebuild_core():
                 self._refresh_model_labels()
             self._render_current_chat()
+
+    def _open_noviqx_settings(self):
+        """Re-open the NoviqX setup wizard from the Settings menu.
+
+        Always re-runs the connection test on save, so a user fixing a typo
+        (wrong App ID, regenerated .pem) gets immediate confirmation. The
+        wizard is opened with allow_dismiss=True for parity with first run,
+        though 'Never show this again' from here is effectively a no-op
+        because we are already in user-initiated mode.
+        """
+        from ui.noviqx_setup_wizard import NoviqXSetupWizard
+        wizard = NoviqXSetupWizard(self, allow_dismiss=True)
+        wizard.exec()
 
     def _choose_attachments(self):
         if self.busy:
@@ -1764,7 +1788,35 @@ def main():
     app.setFont(QFont("Segoe UI", 10))
     window = NovaWindow()
     window.show()
+    # Show the NoviqX setup wizard on first launch if needed. Defer one event
+    # loop tick so the main window paints first; the user sees Nova is alive
+    # before being asked to configure anything.
+    from integrations.noviqx.settings import should_show_wizard
+    if should_show_wizard():
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(150, lambda: _maybe_show_noviqx_wizard(window))
     sys.exit(app.exec())
+
+
+def _maybe_show_noviqx_wizard(parent):
+    """Open the NoviqX wizard non-modally if still needed at fire time.
+
+    The user may have configured credentials in another Nova instance between
+    the schedule and the fire — re-check `should_show_wizard()` before opening.
+    """
+    try:
+        from ui.noviqx_setup_wizard import NoviqXSetupWizard
+        from integrations.noviqx.settings import should_show_wizard
+        if not should_show_wizard():
+            return
+        wizard = NoviqXSetupWizard(parent, allow_dismiss=True)
+        wizard.exec()
+    except Exception:
+        # The wizard is a convenience; if Qt or the integration can't start,
+        # Nova must still be usable. The error is visible in the terminal.
+        import traceback
+        traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()

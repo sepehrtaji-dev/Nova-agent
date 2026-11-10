@@ -34,11 +34,26 @@ class GitHubAppAuth:
 
     def __init__(self, app_id=None, installation_id=None, private_key_path=None,
                  *, api_root=None, opener=None, clock=time.time):
-        self.app_id = str(app_id or os.getenv("NOVIQX_APP_ID", "")).strip()
-        self.installation_id = str(
-            installation_id or os.getenv("NOVIQX_INSTALLATION_ID", "")
-        ).strip()
-        configured_path = private_key_path or os.getenv("NOVIQX_PRIVATE_KEY_PATH", "")
+        # Resolution order (highest priority first):
+        #   1. explicit constructor args
+        #   2. environment variables (CI, server, power users)
+        #   3. the on-disk NoviqX settings file (written by the desktop wizard)
+        # The settings file holds only public identity references + a local .pem
+        # path. The .pem content is NEVER copied or persisted by this module.
+        from integrations.noviqx.settings import load_settings as _load_noviqx_settings
+        stored = _load_noviqx_settings()
+
+        def _resolve(explicit, env_name, settings_key):
+            if explicit:
+                return str(explicit).strip()
+            env_value = os.getenv(env_name, "").strip()
+            if env_value:
+                return env_value
+            return str(stored.get(settings_key, "") or "").strip()
+
+        self.app_id = _resolve(app_id, "NOVIQX_APP_ID", "app_id")
+        self.installation_id = _resolve(installation_id, "NOVIQX_INSTALLATION_ID", "installation_id")
+        configured_path = _resolve(private_key_path, "NOVIQX_PRIVATE_KEY_PATH", "private_key_path")
         self.private_key_path = Path(configured_path).expanduser() if configured_path else None
         self.api_root = (api_root or os.getenv("NOVIQX_API_URL") or self.API_ROOT).rstrip("/")
         self._opener = opener or urllib.request.urlopen
