@@ -1270,6 +1270,39 @@ class NovaCore:
             return rewritten.strip()
         return "Got it — thanks for telling me."
 
+    def _native_history(self, max_messages=12, max_chars=6000):
+        """Recent conversation as real alternating user/assistant messages.
+
+        The native tool loop sends these as proper chat turns instead of a
+        flattened transcript, so the model can resolve references like
+        "this" or "it" to the previous topic. The current user message is
+        excluded — ask() just appended it and the loop adds it as the live
+        turn itself. Newest turns win when the budget is exceeded.
+        """
+        stored = getattr(self.short_memory, "messages", None)
+        if not isinstance(stored, list) or len(stored) < 2:
+            return []
+        # Drop the current user message (last entry) before collecting.
+        candidates = stored[:-1]
+        picked = []
+        total = 0
+        for item in reversed(candidates):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            content = str(item.get("content", "") or "").strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            chunk = len(content) + len(role) + 8
+            if picked and total + chunk > max_chars:
+                break
+            if len(picked) >= max_messages:
+                break
+            picked.append({"role": role, "content": content})
+            total += chunk
+        picked.reverse()
+        return picked
+
     def _ask_with_native_tool_calls(self, message):
         """Use a model-driven tool/result loop when the backend supports it."""
         allowed = self._allowed_tools()
@@ -1291,7 +1324,10 @@ class NovaCore:
                 grounding = ""
                 guarded_identity = False
         context_parts = [
-            "RECENT CONVERSATION:\n" + self._conversation_context(max_chars=9000),
+            # Prior conversation is passed as REAL alternating messages
+            # (see ToolCallingLoop.run(history=...)) — chat models resolve
+            # pronouns like "this"/"it" far better from real turns than from
+            # a flattened transcript inside the user message.
             "LIVE TOOL REGISTRY AND SESSION PERMISSIONS:\n" + render_for_prompt(self),
             "RELEVANT KNOWLEDGE:\n" + str(self.knowledge.get_context(message)),
             "RELEVANT SAVED USER MEMORY:\n" + self._long_memory_context(message),
@@ -1312,7 +1348,10 @@ class NovaCore:
                 "a tool that is absent or disabled. If a required argument is "
                 "missing, ask the user instead of guessing. For ordinary chat, "
                 "answer directly without tools. Keep user-facing answers natural "
-                "and concise. Do not expose private reasoning."
+                "and concise. Do not expose private reasoning. The conversation "
+                "history appears as prior chat turns: resolve references such as "
+                "'this', 'it', or 'that topic' against those turns before "
+                "answering, and never ask the user to repeat what they already said."
             )
         ) + self._conversation_personality_prompt()
 
@@ -1358,6 +1397,7 @@ class NovaCore:
                 message,
                 system_prompt=system_prompt,
                 context="\n\n".join(context_parts),
+                history=self._native_history(),
             )
         except Exception as exc:
             logging.exception("Native tool loop failed")

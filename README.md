@@ -198,6 +198,64 @@ Use each tool's live input schema for exact path rules. The terminal tool is int
 
 The **github** tool uses the locally authenticated GitHub CLI and is read-only. It can inspect repositories, issues, pull requests, workflow runs, releases, and code search. It cannot create, modify, merge, or delete GitHub resources. Local Git operations are provided separately by the **git** tool.
 
+### NoviqX GitHub App
+
+The **noviqx_github_get_file** and **noviqx_github_update_file** tools let Nova read and edit GitHub repository files through a **GitHub App you own**, not via a personal access token. This is the recommended way to give an agent write access to repositories: the App scopes every action to a specific installation, every commit is authored by the App bot (not your user), and the App can be revoked or rotated independently of your account credentials.
+
+#### What you set up
+
+Each user creates **their own** GitHub App. Nova never shares, ships, or brokers a `.pem` between users. The three pieces you provide:
+
+- **App ID** — the numeric ID on your App's "General → About" page
+- **Installation ID** — the number at the end of the installation URL (`/settings/installations/<ID>`)
+- **Private key path** — where you saved the `.pem` GitHub generated for the App
+
+The `.pem` content is **never** read by Nova beyond the moment GitHubAppAuth signs a short-lived JWT (8-minute lifetime) to exchange for an installation access token. The path is stored in `~/.nova/noviqx.json` with mode `0600` (owner-only). The `.pem` itself stays wherever you put it.
+
+#### First-run wizard
+
+When you launch the desktop UI and NoviqX isn't configured yet, a setup wizard appears automatically. It walks you through:
+
+1. Creating a GitHub App (with the exact permission checklist: Contents + Pull requests = Read & write, Metadata = Read-only, Webhook = off)
+2. Entering your App ID, installation ID, and selecting the `.pem`
+3. **Testing the connection for real** (signs a JWT, exchanges for a token, reads one repository) before saving
+4. Optionally clicking **"Never show this again"** to suppress the prompt permanently
+
+You can re-open the wizard any time from **Settings → NoviqX GitHub App…** in the desktop UI.
+
+#### Manual setup
+
+If you prefer the terminal or are running Nova headlessly, set the same three values via environment variables (which take priority over the settings file):
+
+```bash
+export NOVIQX_APP_ID=1234567
+export NOVIQX_INSTALLATION_ID=9876543
+export NOVIQX_PRIVATE_KEY_PATH=/secure/path/to/your-app.private-key.pem
+```
+
+Run the bundled smoke test to verify the pipeline end-to-end against real GitHub:
+
+```bash
+python scripts/noviqx_smoke_test.py --repo owner/scratch-repo --write
+```
+
+#### How to use it
+
+Once configured, just ask Nova to do something with a repository. It will automatically pick the right tool:
+
+- *"Read README.md from owner/repo using the NoviqX GitHub App."* — exercises `noviqx_github_get_file`
+- *"Update the NOVIQX_SMOKE.md file in owner/repo to say 'verified'."* — exercises the full read-then-write loop with expected-SHA optimistic locking
+
+The agent is trained to **always read the file first** (to obtain its blob SHA) before writing. Stale-write protection rejects updates where the file changed between read and write, and Nova re-reads automatically.
+
+#### Security model
+
+- Your `.pem` never leaves the machine Nova is running on
+- Each user holds their own App; if one user misbehaves, GitHub suspends **their** App, not yours
+- All token lifetimes are short (≤10 min) and auto-refresh on 401
+- The settings file is `0600` and never contains the `.pem` content itself — only its path
+- The wizard's connection test exercises the exact same code path the agent uses at runtime, so a passing test means the agent can talk to GitHub
+
 ## Memory system
 
 Nova uses separate memory components for different kinds of context.
