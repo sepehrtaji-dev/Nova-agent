@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install PySide6-Essentials pillow pyinstaller
+          pip install PySide6-Essentials pillow pyinstaller tzdata
 
       - name: Convert logo to .ico
         shell: bash
@@ -62,6 +62,13 @@ jobs:
             App.py
           ls -la dist/
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nova-windows-exe
+          path: dist/Nova.exe
+          if-no-files-found: error
+
       - name: Attach Nova.exe to release
         if: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || inputs.tag != '' }}
         env:
@@ -70,16 +77,14 @@ jobs:
         shell: bash
         run: |
           TAG="${TAG_NAME}"
-          if [ -n "$TAG" ] && [ "$TAG" != "main" ]; then
+          case "$TAG" in
+            v*) ;;
+            *) TAG="v${TAG}" ;;
+          esac
+          echo "resolved tag: $TAG"
+          if [ -n "$TAG" ] && [ "$TAG" != "vmain" ]; then
             gh release upload "$TAG" dist/Nova.exe --clobber --repo "${{ github.repository }}"
             echo "attached Nova.exe to release $TAG"
           else
             echo "no tag to attach to, skipping"
           fi
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Nova-windows-exe
-          path: dist/Nova.exe
-          if-no-files-found: error
