@@ -78,7 +78,8 @@ jobs:
         shell: bash
         run: |
           pyi-archive_viewer -r -b dist/Nova.exe > build-toc.txt
-          grep -q "config/tools.json" build-toc.txt || { echo "FATAL: config/tools.json is NOT bundled"; exit 1; }
+          # Windows-built archives store data paths with backslashes.
+          grep -qE "config[\\/]tools\.json" build-toc.txt || { echo "FATAL: config/tools.json is NOT bundled"; exit 1; }
           for mod in tools.web tools.filesystem tools.terminal tools.git tools.github tools.desktop integrations.noviqx.registry_tools; do
             grep -q " ${mod}\$" build-toc.txt || { echo "FATAL: ${mod} is NOT bundled"; exit 1; }
           done
