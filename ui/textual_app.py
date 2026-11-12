@@ -345,6 +345,8 @@ class NovaTextualApp(App):
             return
         if message in ("MODEL_ANSWER_RESET", "MODEL_THOUGHT_END", "MODEL_THOUGHT_START"):
             return
+        if message.startswith("ACTIVITY:"):
+            message = message[len("ACTIVITY:"):].strip() or "Working"
         if message.startswith("THINKING_UPDATE:"):
             message = message[len("THINKING_UPDATE:"):].strip() or "Working"
         if message and message != self._last_event:

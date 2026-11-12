@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 
+from agent.activity import THINKING_ACTIVITY, format_activity
+
 
 class ToolLoopError(RuntimeError):
     """Raised when a model tool-call turn cannot be processed safely."""
@@ -153,10 +155,10 @@ class ToolCallingLoop:
             return {"ok": False, "error": f"Input validation failed: {reason or 'invalid input'}"}
 
         encoded = json.dumps(prepared, ensure_ascii=False)
-        self._status(f"Using {name}...")
-        metadata = getattr(self.tools, "tools", {}).get(name, {})
-        capability = metadata.get("capability") if isinstance(metadata, dict) else None
-        self._status(f"Executing {name}" + (f" ({capability})" if capability else ""))
+        # A single human-readable activity event drives the live status chip
+        # ("Searching the web…", "Reading the file…") instead of raw tool
+        # names flickering past.
+        self._status(format_activity(name))
         try:
             result = self.tools.execute(name, encoded)
         except Exception as exc:
@@ -225,7 +227,7 @@ class ToolCallingLoop:
         messages.append({"role": "user", "content": prompt})
 
         for round_index in range(self.max_rounds):
-            self._status(f"Choosing next action ({round_index + 1}/{self.max_rounds})...")
+            self._status(THINKING_ACTIVITY)
             response = self._generate_turn(messages, definitions, system_prompt)
             if not isinstance(response, dict):
                 raise ToolLoopError("The model provider returned an invalid tool-call response.")
@@ -265,7 +267,6 @@ class ToolCallingLoop:
             messages.append(assistant_message)
 
             for normalized, name, arguments, parse_error in parsed_calls:
-                self._status(f"THINKING_UPDATE:Selected {name}; validating its arguments and permissions.")
                 if parse_error:
                     result = {"ok": False, "error": parse_error}
                 else:
@@ -286,7 +287,7 @@ class ToolCallingLoop:
                     "name": name,
                     "content": json.dumps(result, ensure_ascii=False, default=str),
                 })
-                self._status(f"THINKING_UPDATE:Received the {name} result; checking whether more work is needed.")
+                self._status(THINKING_ACTIVITY)
 
         self._status("Tool-call limit reached; asking the model for a concise status.")
         messages.append({

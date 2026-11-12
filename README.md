@@ -54,6 +54,7 @@ Nova's actual capabilities depend on the tools that load, enabled permissions, o
 - **Verify actions:** distinguish confirmed, failed, and unverifiable operations.
 - **Use memory:** maintain conversation context, long-term facts, knowledge records, and summaries of previous tool outcomes.
 - **Inspect itself:** report runtime components, model metadata when available, tools, permissions, and diagnostics.
+- **Show what it is doing:** a live activity chip above the composer in the desktop GUI (and the terminal status line) names the current phase in human words — Thinking, Searching the web, Reading the file, Writing — instead of an opaque wait.
 - **Switch model backends:** run a local Ollama model, connect to an OpenAI-compatible API (OpenRouter, Groq, Together, vLLM, LM Studio, ...), or use Anthropic's native Messages API.
 - **Use different interfaces:** Textual terminal UI, prompt_toolkit CLI, legacy Rich UI, and an optional PySide6 desktop GUI.
 - **Edit GitHub as your own App:** the NoviqX integration commits through a GitHub App you own (with a first-run setup wizard), and its tools are also exposed through a local MCP server for other MCP clients.
@@ -646,7 +647,7 @@ These figures are a source-repository snapshot from the review on **12 November 
 
 The latest release is **v2.3** (November 2026). It brought the agentic native tool loop, the NoviqX GitHub App integration (MCP server + first-run setup wizard), conversation history passed as real chat turns (the short-term-memory / pronoun fix), math-parser corrections, and automated Windows **Nova.exe** release builds with published SHA256 checksums. `CHANGELOG.md` documents the details.
 
-The current regression suite runs **438 passed, 5 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Recent fixes include conversation staying alive when no tools are enabled (a missing manifest or disabled capability no longer mutes the assistant) and a timezone-safe memory-expiry test. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
+The current regression suite runs **447 passed, 5 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Recent fixes include conversation staying alive when no tools are enabled (a missing manifest or disabled capability no longer mutes the assistant), a timezone-safe memory-expiry test, and regression tests for the live tool-activity status events. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
 
 ## Docker
 

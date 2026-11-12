@@ -6,6 +6,7 @@ All notable changes to Nova are documented in this file.
 
 ### Added
 - **Agentic tool loop**: Nova now drives tools through a native tool-calling loop in the main UI (`agent/tool_loop.py`), chaining multiple tool calls autonomously.
+- **Live activity indicator**: a small chip above the message composer shows what Nova is doing right now in human words — Thinking, Searching the web, Reading the file, Writing — with a pulsing dot, instead of an opaque wait. Tool execution publishes `ACTIVITY:` events (`agent/activity.py` maps every registry tool to a readable phrase); the terminal UIs show the same phrases in their status line.
 - **NoviqX GitHub App integration (MCP)**: bring-your-own-App model — MCP server (`integrations/noviqx/mcp_server.py`), registry tools, RS256 JWT → installation-token auth chain with caching and auto-refresh on 401, and SHA-locked writes (read-before-write with optimistic locking).
 - **First-run setup wizard** (`ui/noviqx_setup_wizard.py`): 4 steps — intro, create-your-own-App instructions, credentials form with live validation, and a real connection test. Includes a "Never show this again" button and a Settings menu entry. Credentials persist in `~/.nova/noviqx.json` (mode 0600, stores only App ID / Installation ID / .pem path — the private key never leaves your disk).
 - **NoviqX smoke test** (`scripts/noviqx_smoke_test.py`): exercises the full real integration — JWT → installation token → repo metadata → SHA-locked write round-trip.
@@ -19,7 +20,7 @@ All notable changes to Nova are documented in this file.
 - **Security hardening** of tool execution (PR #48) and major logic fixes across agent core, model providers and memory (PR #49).
 
 ### Tests
-- 432 passing, 4 skipped — including 12 new NoviqX settings/security tests and 5 conversation-history regression tests.
+- 447 passing, 5 skipped — including 12 new NoviqX settings/security tests, 5 conversation-history regression tests, and 9 tool-activity status regression tests.
 
 ## 2.2 — 2026-11-08
 

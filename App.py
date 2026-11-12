@@ -1184,13 +1184,11 @@ class NovaWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Header
-        # Keep status state for worker callbacks, but do not render the old
-        # top-bar indicator or "Ready" label in the new composer-first layout.
-        self.status_label = QLabel()
-        self.status_indicator = QLabel()
-        self.status_label.hide()
-        self.status_indicator.hide()
+        # Live activity state: the chip itself is rendered in the composer
+        # area (created below); only the animation state lives here.
         self._status_phase = 0
+        self._activity_text = ""
+        self._answer_started = False
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(420)
         self._status_timer.timeout.connect(self._animate_status)
@@ -1302,6 +1300,25 @@ class NovaWindow(QMainWindow):
 
         box_layout.addLayout(controls)
 
+        # Tiny live activity chip above the input box: a pulsing dot plus the
+        # current phase in human words ("Thinking…", "Searching the web…",
+        # "Writing…") so the user always knows what Nova is doing.
+        self.status_row = QWidget()
+        self.status_row.setAttribute(Qt.WA_TranslucentBackground, True)
+        status_row_layout = QHBoxLayout(self.status_row)
+        status_row_layout.setContentsMargins(8, 2, 8, 2)
+        status_row_layout.setSpacing(7)
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setAlignment(Qt.AlignVCenter | Qt.AlignHCenter)
+        self.status_indicator.setStyleSheet(f"color: {ACCENT}; font-size: 8px; border: none; background: transparent;")
+        status_row_layout.addWidget(self.status_indicator)
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; font-weight: 600; border: none; background: transparent;")
+        status_row_layout.addWidget(self.status_label)
+        status_row_layout.addStretch()
+        self.status_row.hide()
+        composer_layout.addWidget(self.status_row)
+
         composer_layout.addWidget(self.composer_box)
         main_layout.addWidget(composer_area)
 
@@ -1365,10 +1382,13 @@ class NovaWindow(QMainWindow):
             return
         self._status_phase = (self._status_phase + 1) % 4
         colors = ("#58a6ff", "#79c0ff", "#a78bfa", "#79c0ff")
-        color = colors[self._status_phase]
         self.status_indicator.setStyleSheet(
-            f"color: {color}; font-size: 9px; border: none; background: transparent;"
+            f"color: {colors[self._status_phase]}; font-size: 8px; border: none; background: transparent;"
         )
+        # Animate the trailing dots so the chip visibly keeps working even
+        # when no new events arrive for a while.
+        base = self._activity_text or "Working"
+        self.status_label.setText(base + "." * (self._status_phase % 3 + 1))
 
     def _restore_core_memory(self, chat_id):
         messages = self.chat_store.get_messages(chat_id)
@@ -1693,9 +1713,8 @@ class NovaWindow(QMainWindow):
         self.busy = True
         self.input.setEnabled(False)
         self.send_button.setEnabled(False)
-        self.status_label.setText("Thinking")
-        self._status_timer.start()
-        self._animate_status()
+        self._answer_started = False
+        self._set_activity("Thinking")
 
         self._apply_effort(self._effort)
         self.thinking_enabled = self.think_button.isChecked()
@@ -1718,10 +1737,16 @@ class NovaWindow(QMainWindow):
     def _on_status(self, message):
         message = str(message)
         if message.startswith("MODEL_ANSWER_DELTA:"):
+            if not self._answer_started:
+                self._answer_started = True
+                self._set_activity("Writing")
             self._ensure_streaming_message().append_delta(message[len("MODEL_ANSWER_DELTA:"):])
             return
         if message == "MODEL_ANSWER_RESET":
             self._discard_streaming_message()
+            return
+        if message.startswith("MODEL_THOUGHT_START"):
+            self._set_activity("Thinking")
             return
         if message.startswith("MODEL_THOUGHT_DELTA:"):
             if self.thinking_panel:
@@ -1731,17 +1756,62 @@ class NovaWindow(QMainWindow):
             if self.thinking_panel:
                 self.thinking_panel.finish()
             return
+        if message.startswith("ACTIVITY:"):
+            self._set_activity(message[len("ACTIVITY:"):].strip() or "Working")
+            return
         if message.startswith("THINKING_UPDATE:"):
             # Execution/status events are not model reasoning. Keep them in the
             # status line; the Thinking panel is reserved for Ollama's native
             # message.thinking stream.
             detail = message[len("THINKING_UPDATE:"):].strip()
-            self.status_label.setText(detail[:28] or "Working")
-            self.status_label.setToolTip(detail)
+            phrase = self._friendly_activity(detail)
+            if phrase:
+                self._set_activity(phrase)
             return
+        phrase = self._friendly_activity(message)
+        if phrase:
+            self._set_activity(phrase)
 
-        self.status_label.setText(message[:28])
-        self.status_label.setToolTip(message)
+    def _set_activity(self, text):
+        """Show the current phase on the composer chip and keep it animating."""
+        if not self.busy:
+            # A queued event arrived after the request finished; never
+            # resurrect the hidden chip for stale activity.
+            return
+        text = (text or "").strip() or "Working"
+        self._activity_text = text
+        self.status_label.setText(text)
+        self.status_label.setToolTip(text)
+        self.status_row.show()
+        self._status_timer.start()
+        self._animate_status()
+
+    @staticmethod
+    def _friendly_activity(detail):
+        """Map legacy status phrases to a calm human activity label.
+
+        Returns an empty string when the message should not disturb the
+        current chip text (e.g. the phase-completion "Done" marker).
+        """
+        text = " ".join(str(detail or "").split())
+        if not text:
+            return ""
+        if text == "Done":
+            return ""
+        lowered = text.lower()
+        if lowered.startswith((
+            "thinking",
+            "choosing next action",
+            "model is choosing",
+            "re-evaluating",
+            "preparing",
+            "search limit reached",
+            "tool input preparation",
+            "stopping repeated",
+            "working",
+        )):
+            return "Thinking"
+        return text[:28]
 
     def _separate_thinking_panel_from_reply(self):
         """Add breathing room between the native-thinking card and Nova's reply."""
@@ -1777,9 +1847,9 @@ class NovaWindow(QMainWindow):
         self.send_button.setEnabled(True)
         self.think_button.setEnabled(True)
         self._status_timer.stop()
-        self.status_indicator.setStyleSheet("color: #3fb950; font-size: 9px; border: none; background: transparent;")
-        self.status_label.setText("Ready")
-        self.status_label.setToolTip("Nova is ready")
+        self._activity_text = ""
+        self._answer_started = False
+        self.status_row.hide()
         self.input.setFocus()
 
 

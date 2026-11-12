@@ -15,6 +15,7 @@ from memory.episodic import EpisodicMemory
 from agent.router import ToolRouter
 from agent.planner import Planner
 from agent.tool_loop import ToolCallingLoop
+from agent.activity import THINKING_ACTIVITY, format_activity
 from agent.verifier import Verifier
 from tools import load_tools
 from agent.diagnostics import RuntimeDiagnostics
@@ -1333,7 +1334,7 @@ class NovaCore:
         tool, and only genuinely tool-dependent requests need the
         explanation of what is off and how to enable it.
         """
-        self._status("Preparing conversational answer...")
+        self._status(THINKING_ACTIVITY)
         reason = self._no_tools_reason()
         prompt = (
             "You are Nova, a helpful AI agent running on the user's own "
@@ -1469,7 +1470,7 @@ class NovaCore:
             on_thought_delta=(lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token))) if self.thinking_enabled else None,
             max_rounds=getattr(self, "max_steps", 12),
         )
-        self._status("Model is choosing the next action...")
+        self._status(THINKING_ACTIVITY)
         try:
             response = loop.run(
                 message,
@@ -2227,9 +2228,7 @@ Nova must choose another useful action.
                 tool_key
             )
 
-            self._status(
-                f"Using {tool_name}..."
-            )
+            self._status(format_activity(tool_name))
             self._publish_thinking_update(
                 f"Executing {tool_name} with validated input."
             )
