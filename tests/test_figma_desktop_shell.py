@@ -4,6 +4,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import unittest
 
+import pytest
+
+pytest.importorskip(
+    "PySide6",
+    reason="PySide6 is an optional dependency (requirements-optional.txt)",
+)
+
 from PySide6.QtWidgets import QApplication, QFrame, QMainWindow, QPlainTextEdit, QPushButton, QWidget
 
 from ui.figma_desktop import FigmaDesktopShell
