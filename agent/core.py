@@ -3,9 +3,9 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 
-from model.ollama import OllamaBrain
-from model.provider import backend_kind, build_brain, describe_brain
+from model.provider import backend_kind, build_brain
 from model.effort import EffortAwareBrain
 from memory.manager import MemoryManager
 from memory.extractor import MemoryExtractor
@@ -22,8 +22,6 @@ from agent.self_reflection import SelfReflection
 from agent.self_knowledge import SelfKnowledge
 from agent.identity import (
     NOVA_DEVELOPER,
-    NOVA_REPOSITORY,
-    NOVA_VERSION,
     identity_lines,
 )
 
@@ -1303,14 +1301,94 @@ class NovaCore:
         picked.reverse()
         return picked
 
+    def _no_tools_reason(self):
+        """Explain why this session has no usable tools, for user-facing replies."""
+        if not self.tools.tools:
+            configured = os.getenv("NOVA_TOOL_MANIFEST", "").strip()
+            if configured:
+                manifest_desc = configured
+            else:
+                import tools as tools_pkg
+                manifest_desc = str(
+                    Path(tools_pkg.__file__).resolve().parents[1] / "config" / "tools.json"
+                )
+            return (
+                "No tools could be loaded from the tool manifest at "
+                f"{manifest_desc}. Check that the file exists and is valid "
+                "JSON, or set NOVA_TOOL_MANIFEST to a valid manifest path."
+            )
+        return (
+            "All tool capabilities (web, git, pc) are disabled for this "
+            "session. Enable them in the terminal interface with /web, /git, "
+            "and /pc, or restart with the default permissions."
+        )
+
+    def _ask_without_tools(self, message):
+        """Answer conversationally when this session has no usable tools.
+
+        A missing tool manifest or disabled capability groups used to mute
+        the assistant entirely: every message, even a greeting, got a canned
+        "No tools are enabled..." line without consulting the model. An empty
+        registry must not mute conversation — general chat works without any
+        tool, and only genuinely tool-dependent requests need the
+        explanation of what is off and how to enable it.
+        """
+        self._status("Preparing conversational answer...")
+        reason = self._no_tools_reason()
+        prompt = (
+            "You are Nova, a helpful AI agent running on the user's own "
+            "computer.\n\n"
+            f"User message: {message}\n\n"
+            f"Recent conversation:\n{self._conversation_context(max_chars=8000)}\n\n"
+            f"Relevant knowledge:\n{self.knowledge.get_context(message)}\n\n"
+            f"Relevant saved user memory:\n{self._long_memory_context(message)}\n\n"
+            "IMPORTANT: this session has no tools available. " + reason + "\n"
+            "Answer the user's message directly in natural prose from your "
+            "own knowledge, in the user's language. Greetings, identity "
+            "questions, and ordinary conversation need no mention of tools "
+            "at all. Only when the request genuinely requires acting on "
+            "files, running programs, Git, GitHub, or the web, say that the "
+            "tools are unavailable in this session and include the reason "
+            "above so the user knows how to fix it. Never claim you "
+            "searched, ran anything, read a file, or verified anything.\n\n"
+            "Unless the user explicitly asks for JSON, answer in plain prose "
+            "with no JSON, tool-call syntax, or internal data structures."
+        )
+        system_prompt = (
+            self._identity_system_prompt()
+            + self._conversation_personality_prompt()
+        )
+        try:
+            response = self._generate_with_native_thinking(
+                prompt, system_prompt=system_prompt
+            )
+        except Exception:
+            response = ""
+        if not isinstance(response, str) or not response.strip():
+            response = (
+                "I can still answer questions in this session, but no tools "
+                f"are available right now. {reason}"
+            )
+        try:
+            knowledge = getattr(self, "self_knowledge", None)
+            if knowledge is not None and knowledge.needs_grounding(message):
+                response = knowledge.review(message, response, self)
+        except Exception:
+            pass
+        response = self._rewrite_unrequested_json(message, response)
+        self._extract_and_store_memory(message)
+        self._status("Done")
+        self.short_memory.add("assistant", response)
+        return response
+
     def _ask_with_native_tool_calls(self, message):
         """Use a model-driven tool/result loop when the backend supports it."""
         allowed = self._allowed_tools()
         if not allowed:
-            answer = "No tools are enabled for this session, so I cannot perform that action."
-            self._status("Done")
-            self.short_memory.add("assistant", answer)
-            return answer
+            # An empty registry or disabled capabilities is not a reason to
+            # stop talking. Route through the conversational path, which can
+            # still answer and can explain the tool situation when needed.
+            return self._ask_without_tools(message)
 
         from agent.tool_awareness import render_for_prompt
         self_knowledge = getattr(self, "self_knowledge", None)
