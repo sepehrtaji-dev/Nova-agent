@@ -1,7 +1,6 @@
 import subprocess
 import os
 import json
-import sys
 import urllib.request
 import urllib.error
 import shutil

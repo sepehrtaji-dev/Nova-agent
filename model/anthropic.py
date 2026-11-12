@@ -40,7 +40,7 @@ class AnthropicBrain:
             method="POST", headers={
                 "content-type": "application/json", "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01", "accept": "application/json",
-                "user-agent": "NovaAgent/2.1",
+                "user-agent": "NovaAgent/2.3",
             })
         try:
             with urllib.request.urlopen(request, timeout=self.timeout,
