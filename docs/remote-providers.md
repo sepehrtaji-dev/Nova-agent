@@ -4,7 +4,7 @@ Nova can run on a local Ollama model or on a stronger model hosted by a remote
 provider. Everything else in the agent -- the router, planner, verifier, memory,
 and every tool -- is unchanged: only the reasoning backend is swapped.
 
-When a remote provider is configured, the remote model is told it is **Nova 2.0
+When a remote provider is configured, the remote model is told it is **Nova 2.3
 running inside the Nova desktop application on this user's computer**, and it is
 given this machine's live environment and tool registry. Its tool calls execute
 locally through Nova, so it behaves as the agent rather than as a generic hosted
@@ -18,9 +18,10 @@ leaving the machine.
 | Variable | Meaning | Default |
 |---|---|---|
 | `NOVA_PROVIDER` | `local`, `remote`, or `auto` | `local` |
+| `NOVA_API_PROVIDER` | Remote protocol: `openai` or `anthropic` | `openai` |
 | `NOVA_API_MODEL` | Model name to request | *(none)* |
 | `NOVA_API_KEY` | Provider API key | *(none)* |
-| `NOVA_API_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com/v1` |
+| `NOVA_API_BASE_URL` | API base URL | `https://api.openai.com/v1` (OpenAI-compatible) or `https://api.anthropic.com` (Anthropic) |
 | `NOVA_API_TIMEOUT` | Request timeout in seconds | `120` |
 
 `remote` requires a model, a key, and a base URL. `auto` uses remote when a key
@@ -46,6 +47,21 @@ set NOVA_API_BASE_URL=https://openrouter.ai/api/v1
 set NOVA_API_MODEL=anthropic/claude-sonnet-4
 set NOVA_API_KEY=sk-or-...
 ```
+
+### Example: Anthropic natively
+
+Claude is also available through Anthropic's own Messages API, without routing
+through an OpenAI-compatible gateway:
+
+```bash
+set NOVA_PROVIDER=remote
+set NOVA_API_PROVIDER=anthropic
+set NOVA_API_MODEL=claude-sonnet-4
+set NOVA_API_KEY=sk-ant-...
+```
+
+The adapter lives in `model/anthropic.py` and uses the same tool-call loop and
+the same privacy rules as the OpenAI-compatible client.
 
 ## Behaviour worth knowing
 

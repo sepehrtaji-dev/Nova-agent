@@ -14,7 +14,6 @@ Verification results:
 import json
 import logging
 import os
-import subprocess
 import re
 from urllib.parse import urlsplit
 

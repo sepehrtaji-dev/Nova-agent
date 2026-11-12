@@ -9,7 +9,6 @@ from config.model_settings import (
     apply_to_environment,
     load_settings,
     masked_key,
-    remote_ready,
     save_settings,
     summarise as summarise_backend,
 )
@@ -22,7 +21,6 @@ from PySide6.QtGui import (
     QIcon,
     QLinearGradient,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
     QRadialGradient,

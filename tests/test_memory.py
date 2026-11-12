@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from memory.embeddings import EmbeddingModel
 from memory.storage import MemoryStorage
@@ -67,7 +67,7 @@ class MemoryTests(unittest.TestCase):
                 freshness="volatile",
             )
             memory.data[-1]["expires_at"] = (
-                datetime.utcnow() - timedelta(days=1)
+                datetime.now(timezone.utc) - timedelta(days=1)
             ).isoformat()
             memory._save()
 

@@ -54,7 +54,7 @@ Nova's actual capabilities depend on the tools that load, enabled permissions, o
 - **Verify actions:** distinguish confirmed, failed, and unverifiable operations.
 - **Use memory:** maintain conversation context, long-term facts, knowledge records, and summaries of previous tool outcomes.
 - **Inspect itself:** report runtime components, model metadata when available, tools, permissions, and diagnostics.
-- **Switch model backends:** run a local Ollama model or connect to an OpenAI-compatible API.
+- **Switch model backends:** run a local Ollama model, connect to an OpenAI-compatible API (OpenRouter, Groq, Together, vLLM, LM Studio, ...), or use Anthropic's native Messages API.
 - **Use different interfaces:** Textual terminal UI, prompt_toolkit CLI, legacy Rich UI, and an optional PySide6 desktop GUI.
 - **Edit GitHub as your own App:** the NoviqX integration commits through a GitHub App you own (with a first-run setup wizard), and its tools are also exposed through a local MCP server for other MCP clients.
 
@@ -68,7 +68,7 @@ Nova separates the language model from the Python application that controls tool
 |---|---|
 | User interface | Accept requests and display responses, activity, and runtime status |
 | NovaCore | Coordinate tasks, memory, tools, permissions, and execution state |
-| Model provider | Generate responses through Ollama or an OpenAI-compatible API |
+| Model provider | Generate responses through Ollama, an OpenAI-compatible API, or Anthropic |
 | Planner | Propose and update task steps |
 | Tool router | Interpret model-selected tool calls and route them |
 | Tool registry | Store handlers, descriptions, schemas, capabilities, and verifier metadata |
@@ -108,7 +108,7 @@ A simple conversation may not need planning or tools.
 
 ## Model providers
 
-Both bundled providers implement a shared generation interface plus a native tool-call turn interface. This lets the same model-driven tool loop work with local Ollama models and OpenAI-compatible remote APIs.
+All three bundled providers implement a shared generation interface plus a native tool-call turn interface. This lets the same model-driven tool loop work with local Ollama models, OpenAI-compatible remote APIs, and Anthropic.
 
 ### Local: Ollama
 
@@ -145,6 +145,19 @@ Configure these environment variables:
 The remote client uses Python's standard library rather than requiring a vendor SDK. It supports JSON-mode requests where accepted by the provider, timeouts, retries for ordinary text generations, rate-limit handling, and API-key redaction in error text. Native tool-call turns use the provider's structured function-call protocol and are not automatically retried, because replaying an ambiguous timed-out call could duplicate a side effect.
 
 **Privacy difference:** with a remote provider, prompts, tool results, and file contents included in a request are sent to that provider. Nova's tools may still execute locally, but the reasoning model runs remotely. Review the provider's data policy before enabling remote mode.
+
+### Remote: Anthropic Messages API
+
+Claude is also available natively through Anthropic's own protocol, without routing through an OpenAI-compatible gateway:
+
+```bash
+export NOVA_PROVIDER=remote
+export NOVA_API_PROVIDER=anthropic
+export NOVA_API_MODEL=claude-sonnet-4
+export NOVA_API_KEY=sk-ant-...
+```
+
+`NOVA_API_PROVIDER` defaults to `openai`; set it to `anthropic` to switch protocol. The adapter lives in `model/anthropic.py`, uses the same tool-call loop, the same privacy rules, and the same retry semantics as the OpenAI-compatible client. On Windows, replace `export` with `set`.
 
 ### Provider selection
 
@@ -422,8 +435,9 @@ Desktop GUI: `python App.py` (requires `requirements-optional.txt`). On first la
 | Variable | Default / behaviour | Purpose |
 |---|---|---|
 | NOVA_PROVIDER | local | Select local, remote, or auto |
+| NOVA_API_PROVIDER | openai | Remote protocol: `openai` (chat-completions) or `anthropic` (Messages API) |
 | NOVA_MODEL | Auto-detect installed Ollama model if empty | Local model name |
-| NOVA_API_BASE_URL | https://api.openai.com/v1 | OpenAI-compatible API base URL |
+| NOVA_API_BASE_URL | https://api.openai.com/v1 | API base URL (Anthropic default: https://api.anthropic.com) |
 | NOVA_API_MODEL | Required for remote mode | Remote model identifier |
 | NOVA_API_KEY | Required for remote mode | Remote API credential |
 | NOVA_API_TIMEOUT | 120 seconds | Remote request timeout |
@@ -510,6 +524,7 @@ Nova-agent/
 │   ├── provider.py              # Selects the active backend
 │   ├── ollama.py                # Local Ollama implementation
 │   ├── remote.py                # OpenAI-compatible API implementation
+│   ├── anthropic.py             # Anthropic Messages API implementation
 │   └── ...                      # Shared prompts and model helpers
 │
 ├── tools/                       # Executable capabilities
@@ -613,17 +628,17 @@ Tests use controlled test doubles for many model and tool paths. A green test ru
 
 ## Repository snapshot
 
-These figures are a source-repository snapshot from the review on **11 November 2026** (v2.3). They exclude runtime memory, downloaded models, virtual environments, and user workspace files.
+These figures are a source-repository snapshot from the review on **12 November 2026** (v2.3). They exclude runtime memory, downloaded models, virtual environments, and user workspace files.
 
 | Metric | Snapshot |
 |---|---:|
-| Tracked files | 132 |
-| Python files | 113 |
-| Test files | 47 |
+| Tracked files | 133 |
+| Python files | 114 |
+| Test files | 48 |
 | Tracked file content | ~2.9 MB |
 | Tools in default manifest | 12 |
 | Default capability groups | 3 (web, git, pc) |
-| Model backends | 2 (Ollama and OpenAI-compatible API) |
+| Model backends | 3 (Ollama, OpenAI-compatible API, Anthropic) |
 | Terminal interfaces | 3 |
 | Optional desktop GUI | PySide6 |
 
@@ -631,7 +646,7 @@ These figures are a source-repository snapshot from the review on **11 November 
 
 The latest release is **v2.3** (November 2026). It brought the agentic native tool loop, the NoviqX GitHub App integration (MCP server + first-run setup wizard), conversation history passed as real chat turns (the short-term-memory / pronoun fix), math-parser corrections, and automated Windows **Nova.exe** release builds with published SHA256 checksums. `CHANGELOG.md` documents the details.
 
-The current regression suite runs **432 passed, 4 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
+The current regression suite runs **438 passed, 5 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Recent fixes include conversation staying alive when no tools are enabled (a missing manifest or disabled capability no longer mutes the assistant) and a timezone-safe memory-expiry test. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
 
 ## Docker
 

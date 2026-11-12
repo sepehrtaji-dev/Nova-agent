@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 
 from model.ollama import OllamaBrain
-from model.remote import OpenAICompatibleBrain, RemoteBrainError
+from model.remote import OpenAICompatibleBrain
 from model.anthropic import AnthropicBrain
 
 VALID_PROVIDERS = ("local", "remote", "auto")

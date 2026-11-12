@@ -1,5 +1,4 @@
 import json
-import mimetypes
 import math
 import os
 import re
@@ -25,7 +24,7 @@ from integrations.noviqx.settings import (
 )
 
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QAction, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
-import signal
 import threading
 from collections import deque
 from datetime import datetime
 from typing import Optional
 
 from rich import box
-from rich.align import Align
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.markdown import Markdown
@@ -20,10 +17,6 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
-from rich.style import Style
-from rich.segment import Segment
-from rich.layout import Layout
-from rich.columns import Columns
 from rich.padding import Padding
 from rich.control import Control, ControlType
 
