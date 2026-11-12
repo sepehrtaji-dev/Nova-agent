@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install PySide6-Essentials pillow pyinstaller tzdata
+          pip install PySide6-Essentials pillow pyautogui pyinstaller tzdata
 
       - name: Convert logo to .ico
         shell: bash
@@ -46,7 +46,16 @@ jobs:
             --name Nova \
             --icon assets/nova-logo.ico \
             --add-data "assets;assets" \
+            --add-data "config/tools.json;config" \
             --hidden-import PySide6.QtSvg \
+            --hidden-import tools.web \
+            --hidden-import tools.filesystem \
+            --hidden-import tools.terminal \
+            --hidden-import tools.git \
+            --hidden-import tools.github \
+            --hidden-import tools.desktop \
+            --hidden-import tools.image_gen \
+            --hidden-import integrations.noviqx.registry_tools \
             --collect-all textual \
             --collect-all markdown \
             --collect-all pymdownx \
@@ -61,6 +70,27 @@ jobs:
             --collect-submodules tools \
             App.py
           ls -la dist/
+
+      # Fail the build loudly if the bundle ever regresses: the manifest is a
+      # data file (lives in the CArchive) and the tool modules live in the
+      # embedded PYZ, so both are checked explicitly.
+      - name: Verify bundled tool manifest and modules
+        shell: bash
+        run: |
+          pyi-archive_viewer -r -b dist/Nova.exe > build-toc.txt
+          grep -q "config/tools.json" build-toc.txt || { echo "FATAL: config/tools.json is NOT bundled"; exit 1; }
+          for mod in tools.web tools.filesystem tools.terminal tools.git tools.github tools.desktop integrations.noviqx.registry_tools; do
+            grep -q " ${mod}\$" build-toc.txt || { echo "FATAL: ${mod} is NOT bundled"; exit 1; }
+          done
+          echo "tool manifest and all tool modules are bundled"
+
+      # Why the explicit list above: tools are instantiated through
+      # importlib.import_module() with names read from config/tools.json, so
+      # static analysis never sees them, and --collect-submodules silently
+      # no-ops for first-party packages. Without --add-data for the manifest
+      # and these hidden imports, the packaged app started with an empty tool
+      # registry and answered everything with "No tools are enabled for this
+      # session." pyautogui ships the desktop tool out of the box.
 
       # ── Code signing (optional) ──────────────────────────────────────────
       # Option A — Azure Artifact Signing (~$9.99/mo, instant SmartScreen trust):
