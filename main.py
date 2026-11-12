@@ -718,6 +718,10 @@ def run_agent(
             return
         if status_message in ("MODEL_ANSWER_RESET", "MODEL_THOUGHT_END", "MODEL_THOUGHT_START"):
             return
+        if status_message.startswith("ACTIVITY:"):
+            # Human-readable phase events from the tool loop ("Searching the
+            # web", "Reading the file"); strip the wire prefix for display.
+            status_message = status_message[len("ACTIVITY:"):].strip() or "Working"
         if status_message.startswith("THINKING_UPDATE:"):
             status_message = status_message[len("THINKING_UPDATE:"):].strip() or "Working"
 
