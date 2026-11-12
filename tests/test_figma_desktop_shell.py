@@ -4,12 +4,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import unittest
 
-import pytest
-
-pytest.importorskip(
-    "PySide6",
-    reason="PySide6 is an optional dependency (requirements-optional.txt)",
-)
+try:
+    import PySide6  # noqa: F401
+except ImportError:
+    # PySide6 ships via requirements-optional.txt. Skip the module for
+    # unittest runners too (CI has no pytest to call importorskip with):
+    # raising SkipTest at import time marks every test here as skipped.
+    raise unittest.SkipTest(
+        "PySide6 is an optional dependency (requirements-optional.txt)"
+    )
 
 from PySide6.QtWidgets import QApplication, QFrame, QMainWindow, QPlainTextEdit, QPushButton, QWidget
 
