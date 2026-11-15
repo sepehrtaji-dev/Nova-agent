@@ -73,6 +73,24 @@ def _tool_failure_message(exc):
             f"{proxy_hint}\n\n"
             f"Technical detail: {detail}"
         )
+    lowered = detail.lower()
+    connection_like = (
+        type(exc).__name__ in ("ConnectError", "ConnectionError")
+        or "10061" in detail
+        or "actively refused" in lowered
+        or "connection refused" in lowered
+        or "failed to connect" in lowered
+    )
+    if connection_like:
+        return (
+            "Nova couldn't reach the model server at all — the connection was refused. "
+            "If you use the local model, make sure Ollama is actually running (open the "
+            "Ollama app or run `ollama serve`) and try again. If this started right after "
+            "turning a VPN off, a leftover proxy setting can still black-hole localhost "
+            "traffic: clear the HTTP_PROXY/HTTPS_PROXY environment variables (values set "
+            "with Windows `setx` persist after the VPN exits) and start Nova again.\n\n"
+            f"Technical detail: {detail}"
+        )
     return (
         "I couldn't complete this request because the tool interaction "
         f"failed: {detail}"
