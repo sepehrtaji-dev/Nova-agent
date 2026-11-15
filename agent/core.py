@@ -50,11 +50,27 @@ def _tool_failure_message(exc):
     except Exception:
         transient = False
     if transient:
+        body = str(getattr(exc, "error", "") or "").strip()
+        proxy_hint = ""
+        if not body:
+            # Ollama itself always answers with a JSON body ("server busy,
+            # please try again"); an empty 503 body means something between
+            # Nova and Ollama produced the response — almost always a system
+            # proxy that cannot reach the loopback address.
+            proxy_hint = (
+                " The response came back with no body, which usually means a VPN "
+                "or system proxy intercepted the request to localhost instead of "
+                "Ollama answering. Nova exempts localhost from the system proxy "
+                "(NO_PROXY); if your proxy client cannot bypass loopback "
+                "addresses, add localhost/127.0.0.1 to its bypass list and "
+                "restart Nova."
+            )
         return (
             "The local model server (Ollama) is busy or still loading the model, "
             "and Nova's automatic retries did not clear it in time. "
             "Wait a few seconds and try again. If it keeps happening, check "
-            "`ollama ps` (is another request holding the model?) or restart Ollama.\n\n"
+            "`ollama ps` (is another request holding the model?) or restart Ollama."
+            f"{proxy_hint}\n\n"
             f"Technical detail: {detail}"
         )
     return (

@@ -8,10 +8,37 @@ import ollama
 # Ollama answers 503 while a model is still loading into memory or when every
 # runner is busy ("server busy, please try again"); 500/502/504 are equally
 # transient. They clear on their own after a short wait, so chat calls retry
-# with backoff instead of failing the whole turn.
+# with backoff instead of failing the whole turn. Cold model loads can take
+# tens of seconds, so the default budget is patient: 1+2+4+8+16 = 31s.
 RETRYABLE_STATUS_CODES = (500, 502, 503, 504)
-DEFAULT_RETRY_ATTEMPTS = 4
+DEFAULT_RETRY_ATTEMPTS = 6
 RETRY_BASE_DELAY_SECONDS = 1.0
+
+# Loopback hosts must never be sent through a system proxy: httpx honors
+# HTTP_PROXY/HTTPS_PROXY with no loopback exception (unlike the Go client
+# the Ollama CLI uses), so a proxy that cannot reach the machine's own
+# loopback answers Nova with a bare 503 and an empty body — even though
+# `ollama run` works fine in the same terminal.
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _ensure_loopback_bypasses_proxy():
+    """Exempt the local Ollama server from system proxies (NO_PROXY).
+
+    Remote providers keep using the proxy — only loopback hosts are added,
+    and entries the user already configured are preserved.
+    """
+    for name in ("NO_PROXY", "no_proxy"):
+        existing = os.environ.get(name, "")
+        entries = [entry.strip() for entry in existing.split(",") if entry.strip()]
+        missing = [host for host in LOOPBACK_HOSTS if host not in entries]
+        if missing:
+            os.environ[name] = ",".join(entries + missing)
+
+
+# httpx reads NO_PROXY when the Ollama client is constructed (lazily on the
+# first call), so patching the environment at import time is early enough.
+_ensure_loopback_bypasses_proxy()
 
 
 def _status_code_of(exc):
