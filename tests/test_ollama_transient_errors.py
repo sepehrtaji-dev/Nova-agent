@@ -6,6 +6,8 @@ tool loop and surfaced as "the tool interaction failed: ResponseError:
 (status code: 503)".
 """
 import os
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -239,6 +241,43 @@ class LoopbackProxyBypassTests(unittest.TestCase):
         self.assertIsNone(mounts.get("all://[::1]"))
 
 
+class LocalServerWithDeadProxyEndToEndTests(unittest.TestCase):
+    """Proves the whole chain in a fresh interpreter: with HTTP_PROXY aimed
+    at a dead port and no NO_PROXY, importing model.ollama and chatting with
+    a loopback server must succeed — the proxy must never be used for the
+    local server, in the plain and the streaming path alike."""
+
+    def test_local_chat_reaches_ollama_despite_dead_proxy_env(self):
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        child = os.path.join(os.path.dirname(os.path.abspath(__file__)), "e2e_proxy_bypass_child.py")
+        env = {
+            "HTTP_PROXY": "http://127.0.0.1:1",
+            "HTTPS_PROXY": "http://127.0.0.1:1",
+            "http_proxy": "http://127.0.0.1:1",
+            "HOME": os.environ.get("HOME", ""),
+            "LANG": "C.UTF-8",
+            "PYTHONIOENCODING": "utf-8",
+        }
+        env.pop("NO_PROXY", None)
+        env.pop("no_proxy", None)
+        proc = subprocess.run(
+            [sys.executable, child, repo],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=repo,
+        )
+        self.assertIn(
+            "E2E-OK", proc.stdout,
+            msg=f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+        self.assertIn(
+            "STREAM-OK", proc.stdout,
+            msg=f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+
+
 class FriendlyFailureMessageTests(unittest.TestCase):
     def test_transient_5xx_gets_a_targeted_explanation(self):
         from agent.core import _tool_failure_message
@@ -263,6 +302,26 @@ class FriendlyFailureMessageTests(unittest.TestCase):
         self.assertIn("ollama ps", message)
         self.assertNotIn("no body", message)
         self.assertNotIn("VPN", message)
+
+    def test_connection_refused_gets_a_targeted_explanation(self):
+        # Raw httpx ConnectError — the streaming path does not wrap it —
+        # with the classic Windows refused error from a dead proxy port.
+        import httpx
+        from agent.core import _tool_failure_message
+        message = _tool_failure_message(httpx.ConnectError(
+            "[WinError 10061] No connection could be made because the target "
+            "machine actively refused it"))
+        self.assertIn("connection was refused", message)
+        self.assertIn("ollama serve", message)
+        self.assertIn("setx", message)
+
+    def test_ollama_connection_error_gets_the_same_explanation(self):
+        from agent.core import _tool_failure_message
+        message = _tool_failure_message(ConnectionError(
+            "Failed to connect to Ollama. Please check that Ollama is "
+            "downloaded, running and accessible. https://ollama.com/download"))
+        self.assertIn("connection was refused", message)
+        self.assertIn("Ollama is actually running", message)
 
     def test_other_failures_keep_the_original_wording(self):
         from agent.core import _tool_failure_message

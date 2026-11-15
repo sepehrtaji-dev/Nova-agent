@@ -2,23 +2,15 @@ import json
 import os
 import time
 
-import ollama
 
-
-# Ollama answers 503 while a model is still loading into memory or when every
-# runner is busy ("server busy, please try again"); 500/502/504 are equally
-# transient. They clear on their own after a short wait, so chat calls retry
-# with backoff instead of failing the whole turn. Cold model loads can take
-# tens of seconds, so the default budget is patient: 1+2+4+8+16 = 31s.
-RETRYABLE_STATUS_CODES = (500, 502, 503, 504)
-DEFAULT_RETRY_ATTEMPTS = 6
-RETRY_BASE_DELAY_SECONDS = 1.0
-
-# Loopback hosts must never be sent through a system proxy: httpx honors
-# HTTP_PROXY/HTTPS_PROXY with no loopback exception (unlike the Go client
-# the Ollama CLI uses), so a proxy that cannot reach the machine's own
-# loopback answers Nova with a bare 503 and an empty body — even though
-# `ollama run` works fine in the same terminal.
+# Loopback hosts must never be sent through a system proxy: the ollama
+# client is built on httpx, which honors HTTP_PROXY/HTTPS_PROXY with no
+# loopback exception (unlike the Go client the Ollama CLI uses), so a
+# VPN/proxy tool routes even http://localhost:11434 through itself. A proxy
+# that cannot reach the machine's own loopback answers Nova with a bare 503
+# and an empty body (VPN on) or refuses the connection at the dead proxy
+# port (VPN off with stale env vars) — while `ollama run` works fine in the
+# same terminal.
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
@@ -36,9 +28,33 @@ def _ensure_loopback_bypasses_proxy():
             os.environ[name] = ",".join(entries + missing)
 
 
-# httpx reads NO_PROXY when the Ollama client is constructed (lazily on the
-# first call), so patching the environment at import time is early enough.
+# MUST run before importing ollama: the ollama package constructs its
+# default httpx client eagerly at import time, baking the proxy mounts from
+# the current environment into the client; patching NO_PROXY after that
+# import has no effect on requests (verified: with HTTP_PROXY set, a fresh
+# `import ollama` yields a client whose mounts route http:// through the
+# proxy).
 _ensure_loopback_bypasses_proxy()
+
+import ollama  # noqa: E402  (deliberately after the NO_PROXY patch above)
+
+
+# Belt and braces: if anything imported ollama before this module ran (the
+# default client was already built with proxy-routed mounts), drop it so it
+# is rebuilt lazily under the patched environment. With lazy construction
+# this is a no-op.
+if getattr(ollama, "_client", None) is not None:
+    ollama._client = None
+
+
+# Ollama answers 503 while a model is still loading into memory or when every
+# runner is busy ("server busy, please try again"); 500/502/504 are equally
+# transient. They clear on their own after a short wait, so chat calls retry
+# with backoff instead of failing the whole turn. Cold model loads can take
+# tens of seconds, so the default budget is patient: 1+2+4+8+16 = 31s.
+RETRYABLE_STATUS_CODES = (500, 502, 503, 504)
+DEFAULT_RETRY_ATTEMPTS = 6
+RETRY_BASE_DELAY_SECONDS = 1.0
 
 
 def _status_code_of(exc):
