@@ -5,6 +5,7 @@ busy; before the retry/backoff fix that single response aborted the whole
 tool loop and surfaced as "the tool interaction failed: ResponseError:
 (status code: 503)".
 """
+import os
 import unittest
 from unittest.mock import patch
 
@@ -197,6 +198,47 @@ class ToolTurnRetryTests(unittest.TestCase):
         fake_time.sleep.assert_called_once_with(1.0)
 
 
+class LoopbackProxyBypassTests(unittest.TestCase):
+    """httpx routes http://localhost through HTTP_PROXY with no loopback
+    exception, so a system proxy can answer Nova's local requests with a
+    bare 503 while `ollama run` (Go client) works in the same terminal."""
+
+    def test_loopback_hosts_merged_into_no_proxy(self):
+        from model.ollama import _ensure_loopback_bypasses_proxy
+        env = {
+            "HTTP_PROXY": "http://127.0.0.1:10809",
+            "NO_PROXY": "internal.corp.example",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            _ensure_loopback_bypasses_proxy()
+            self.assertEqual(
+                os.environ["NO_PROXY"],
+                "internal.corp.example,localhost,127.0.0.1,::1",
+            )
+            # The user's own entries are preserved and both casings patched.
+            self.assertEqual(os.environ["no_proxy"], "localhost,127.0.0.1,::1")
+
+    def test_bypass_is_idempotent(self):
+        from model.ollama import _ensure_loopback_bypasses_proxy
+        env = {"NO_PROXY": "localhost,127.0.0.1,::1"}
+        with patch.dict(os.environ, env, clear=True):
+            _ensure_loopback_bypasses_proxy()
+            _ensure_loopback_bypasses_proxy()
+            self.assertEqual(os.environ["NO_PROXY"], "localhost,127.0.0.1,::1")
+
+    def test_httpx_sends_loopback_direct_but_proxies_the_rest(self):
+        from httpx._utils import get_environment_proxies
+        from model.ollama import _ensure_loopback_bypasses_proxy
+        env = {"HTTP_PROXY": "http://127.0.0.1:10809"}
+        with patch.dict(os.environ, env, clear=True):
+            _ensure_loopback_bypasses_proxy()
+            mounts = get_environment_proxies()
+        self.assertEqual(mounts.get("http://"), "http://127.0.0.1:10809")
+        self.assertIsNone(mounts.get("all://localhost"))
+        self.assertIsNone(mounts.get("all://127.0.0.1"))
+        self.assertIsNone(mounts.get("all://[::1]"))
+
+
 class FriendlyFailureMessageTests(unittest.TestCase):
     def test_transient_5xx_gets_a_targeted_explanation(self):
         from agent.core import _tool_failure_message
@@ -205,6 +247,22 @@ class FriendlyFailureMessageTests(unittest.TestCase):
         self.assertIn("busy or still loading", message)
         self.assertIn("ollama ps", message)
         self.assertIn("status code: 503", message)
+
+    def test_empty_body_503_warns_about_the_system_proxy(self):
+        # Ollama always answers with a JSON body; an empty one means a
+        # middlebox (VPN / system proxy) produced the 503.
+        from agent.core import _tool_failure_message
+        message = _tool_failure_message(ResponseError("", 503))
+        self.assertIn("no body", message)
+        self.assertIn("proxy", message)
+        self.assertIn("NO_PROXY", message)
+
+    def test_real_ollama_body_keeps_the_message_focused_on_the_server(self):
+        from agent.core import _tool_failure_message
+        message = _tool_failure_message(ResponseError("server busy, please try again", 503))
+        self.assertIn("ollama ps", message)
+        self.assertNotIn("no body", message)
+        self.assertNotIn("VPN", message)
 
     def test_other_failures_keep_the_original_wording(self):
         from agent.core import _tool_failure_message
