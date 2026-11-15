@@ -118,6 +118,7 @@ The local provider uses the Ollama Python client and an Ollama server.
 - Configure the model with **NOVA_MODEL**.
 - If no model name is configured, Nova attempts to discover an installed Ollama model.
 - Context and output budgets are configurable.
+- Transient server errors are retried automatically: while a model is still loading or every runner is busy, Ollama answers **503**, and Nova retries with a short backoff (1s, 2s, 4s) before giving up. Tune the number of attempts with **NOVA_OLLAMA_RETRIES** (default 4). Failures past the last retry produce a clear explanation and a `ollama ps` hint instead of a raw error dump.
 - Model metadata can be queried from Ollama when available.
 - When Ollama runs on the same computer, inference can remain on that computer.
 
@@ -647,7 +648,7 @@ These figures are a source-repository snapshot from the review on **12 November 
 
 The latest release is **v2.3** (November 2026). It brought the agentic native tool loop, the NoviqX GitHub App integration (MCP server + first-run setup wizard), conversation history passed as real chat turns (the short-term-memory / pronoun fix), math-parser corrections, and automated Windows **Nova.exe** release builds with published SHA256 checksums. `CHANGELOG.md` documents the details.
 
-The current regression suite runs **447 passed, 5 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Recent fixes include conversation staying alive when no tools are enabled (a missing manifest or disabled capability no longer mutes the assistant), a timezone-safe memory-expiry test, and regression tests for the live tool-activity status events. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
+The current regression suite runs **460 passed, 5 skipped** on Linux; CI additionally smoke-tests the PySide6 desktop shell offscreen and builds the Docker image. Recent fixes include conversation staying alive when no tools are enabled (a missing manifest or disabled capability no longer mutes the assistant), automatic retries for transient Ollama 5xx replies (local models answering 503 while loading or busy), a timezone-safe memory-expiry test, and regression tests for the live tool-activity status events. Check the [GitHub Actions page](https://github.com/sepehrtaji-dev/Nova-agent/actions) for the live state.
 
 ## Docker
 
