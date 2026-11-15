@@ -13,6 +13,7 @@ All notable changes to Nova are documented in this file.
 - **Conversation history as real chat turns**: short-term history is now sent to the model as proper alternating user/assistant messages (12-message / 6,000-character budget, tool entries excluded) instead of a flattened transcript inside the context block.
 
 ### Fixed
+- **Local (Ollama) 503 failures**: with a local model, tool conversations could abort with "the tool interaction failed: ResponseError (status code: 503)" whenever Ollama was still loading the model or its runner was busy. Ollama chat calls now retry transient 5xx errors with backoff (1s → 2s → 4s; configurable via `NOVA_OLLAMA_RETRIES`, default 4 attempts) across all four brain paths (plain, streamed, tool-turn, streamed tool-turn), streaming turns only retry before the first token so nothing is duplicated on screen. If the server still does not recover, Nova explains the cause and suggests `ollama ps` instead of dumping the raw error.
 - **Short-term memory / pronoun resolution**: after discussing a topic (e.g. the Greek letter Sigma), follow-up questions like "does *this* have applications in AI?" failed to bind "this" to the previous topic. Fixed by passing history as real chat turns and instructing the model to resolve references against them.
 - **Wizard layout**: old widgets stayed visible from step 3 onward because `deleteLater()` is deferred; widgets are now detached immediately on step change.
 - **Math parser**: superscript minus rendered as a plus (`e⁺ˣ` instead of `e⁻ˣ`), and inline code lost a following space (`` `\sigma(x)`and `` instead of `` `\sigma(x)` and ``).
@@ -20,7 +21,7 @@ All notable changes to Nova are documented in this file.
 - **Security hardening** of tool execution (PR #48) and major logic fixes across agent core, model providers and memory (PR #49).
 
 ### Tests
-- 447 passing, 5 skipped — including 12 new NoviqX settings/security tests, 5 conversation-history regression tests, and 9 tool-activity status regression tests.
+- 460 passing, 5 skipped — including 12 new NoviqX settings/security tests, 5 conversation-history regression tests, 9 tool-activity status regression tests, and 13 Ollama transient-503 retry tests.
 
 ## 2.2 — 2026-11-08
 

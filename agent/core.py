@@ -36,6 +36,33 @@ def _parse_max_steps(value, default=12, maximum=100):
     return min(max(parsed, 1), maximum)
 
 
+def _tool_failure_message(exc):
+    """Human-readable apology for a failed model/tool exchange.
+
+    Transient Ollama 5xx errors deserve a targeted explanation (server busy
+    or still loading) plus what to do about it, instead of a raw
+    "ResponseError: (status code: 503)" dump.
+    """
+    detail = f"{type(exc).__name__}: {exc}"
+    try:
+        from model.ollama import is_transient_server_error
+        transient = is_transient_server_error(exc)
+    except Exception:
+        transient = False
+    if transient:
+        return (
+            "The local model server (Ollama) is busy or still loading the model, "
+            "and Nova's automatic retries did not clear it in time. "
+            "Wait a few seconds and try again. If it keeps happening, check "
+            "`ollama ps` (is another request holding the model?) or restart Ollama.\n\n"
+            f"Technical detail: {detail}"
+        )
+    return (
+        "I couldn't complete this request because the tool interaction "
+        f"failed: {detail}"
+    )
+
+
 class NovaCore:
 
     def __init__(self, status_callback=None):
@@ -1480,10 +1507,7 @@ class NovaCore:
             )
         except Exception as exc:
             logging.exception("Native tool loop failed")
-            response = (
-                "I couldn't complete this request because the tool interaction "
-                f"failed: {type(exc).__name__}: {exc}"
-            )
+            response = _tool_failure_message(exc)
 
         if guarded_identity and self_knowledge is not None:
             try:

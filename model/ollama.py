@@ -1,7 +1,64 @@
 import json
 import os
+import time
 
 import ollama
+
+
+# Ollama answers 503 while a model is still loading into memory or when every
+# runner is busy ("server busy, please try again"); 500/502/504 are equally
+# transient. They clear on their own after a short wait, so chat calls retry
+# with backoff instead of failing the whole turn.
+RETRYABLE_STATUS_CODES = (500, 502, 503, 504)
+DEFAULT_RETRY_ATTEMPTS = 4
+RETRY_BASE_DELAY_SECONDS = 1.0
+
+
+def _status_code_of(exc):
+    """Best-effort HTTP status code from an Ollama client exception."""
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    text = str(exc)
+    for code in RETRYABLE_STATUS_CODES:
+        if f"status code: {code}" in text:
+            return code
+    return None
+
+
+def is_transient_server_error(exc):
+    """True for Ollama 5xx replies that are worth retrying (loading/busy)."""
+    return _status_code_of(exc) in RETRYABLE_STATUS_CODES
+
+
+def _retry_attempts():
+    try:
+        return max(1, int(os.getenv("NOVA_OLLAMA_RETRIES", str(DEFAULT_RETRY_ATTEMPTS))))
+    except (TypeError, ValueError):
+        return DEFAULT_RETRY_ATTEMPTS
+
+
+def chat_with_retries(kwargs, attempts=None, base_delay=RETRY_BASE_DELAY_SECONDS):
+    """Call ollama.chat, retrying transient 5xx errors with backoff.
+
+    A 503 usually means the model is loading or the runner is busy; waiting
+    briefly (1s, 2s, 4s, ...) and retrying is exactly what the Ollama error
+    message recommends. Non-transient failures (404 unknown model, 400 bad
+    request) re-raise immediately so callers see the real problem.
+    """
+    total = max(1, int(attempts if attempts is not None else _retry_attempts()))
+    for attempt in range(total):
+        try:
+            return ollama.chat(**kwargs)
+        except Exception as exc:
+            if attempt + 1 >= total or not is_transient_server_error(exc):
+                raise
+            wait = base_delay * (2 ** attempt)
+            print(
+                f"[NOVA] Ollama server not ready ({type(exc).__name__}: {exc}); "
+                f"retrying in {wait:g}s (attempt {attempt + 2}/{total})..."
+            )
+            time.sleep(wait)
 
 
 SYSTEM_PROMPT = (
@@ -189,7 +246,7 @@ class OllamaBrain:
             think = True
         if think is not None:
             kwargs["think"] = think
-        response = ollama.chat(**kwargs)
+        response = chat_with_retries(kwargs)
         if isinstance(response, dict):
             message = response.get("message") or {}
             content = message.get("content", "") if isinstance(message, dict) else ""
@@ -275,31 +332,54 @@ class OllamaBrain:
         content_parts = []
         thinking_parts = []
         calls = []
-        for part in ollama.chat(**kwargs):
-            if isinstance(part, dict):
-                message = part.get("message") or {}
-                token = message.get("content", "") if isinstance(message, dict) else ""
-                thought = message.get("thinking", "") if isinstance(message, dict) else ""
-                chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
-            else:
-                message = getattr(part, "message", None)
-                token = self._field(message, "content", "") or ""
-                thought = self._field(message, "thinking", "") or ""
-                chunk_calls = self._field(message, "tool_calls", []) or []
-            if thought:
-                thought = thought if isinstance(thought, str) else str(thought)
-                thinking_parts.append(thought)
-                if callable(on_thought_delta):
-                    on_thought_delta(thought)
-            if token:
-                token = token if isinstance(token, str) else str(token)
-                content_parts.append(token)
-                if callable(on_token):
-                    on_token(token)
-            if chunk_calls:
-                # Ollama streams one complete tool call per chunk; accumulate
-                # instead of overwriting, or every call but the last is lost.
-                calls.extend(list(chunk_calls))
+        total_attempts = _retry_attempts()
+        for attempt in range(total_attempts):
+            emitted = False
+            try:
+                for part in ollama.chat(**kwargs):
+                    if isinstance(part, dict):
+                        message = part.get("message") or {}
+                        token = message.get("content", "") if isinstance(message, dict) else ""
+                        thought = message.get("thinking", "") if isinstance(message, dict) else ""
+                        chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+                    else:
+                        message = getattr(part, "message", None)
+                        token = self._field(message, "content", "") or ""
+                        thought = self._field(message, "thinking", "") or ""
+                        chunk_calls = self._field(message, "tool_calls", []) or []
+                    if thought:
+                        thought = thought if isinstance(thought, str) else str(thought)
+                        thinking_parts.append(thought)
+                        emitted = True
+                        if callable(on_thought_delta):
+                            on_thought_delta(thought)
+                    if token:
+                        token = token if isinstance(token, str) else str(token)
+                        content_parts.append(token)
+                        emitted = True
+                        if callable(on_token):
+                            on_token(token)
+                    if chunk_calls:
+                        # Ollama streams one complete tool call per chunk; accumulate
+                        # instead of overwriting, or every call but the last is lost.
+                        calls.extend(list(chunk_calls))
+                break
+            except Exception as exc:
+                # Retrying after tokens already reached the UI would duplicate
+                # output; only pre-first-chunk failures (the server rejected
+                # the request before producing anything) are safe to replay.
+                if (
+                    emitted
+                    or attempt + 1 >= total_attempts
+                    or not is_transient_server_error(exc)
+                ):
+                    raise
+                wait = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                print(
+                    f"[NOVA] Ollama server not ready ({type(exc).__name__}: {exc}); "
+                    f"retrying in {wait:g}s (attempt {attempt + 2}/{total_attempts})..."
+                )
+                time.sleep(wait)
         return {
             "content": "".join(content_parts),
             "thinking": "".join(thinking_parts),
@@ -348,7 +428,7 @@ class OllamaBrain:
             kwargs["format"] = "json"
 
         try:
-            response = ollama.chat(**kwargs)
+            response = chat_with_retries(kwargs)
         except Exception as exc:
             error_text = str(exc).lower()
             if "token repeat limit reached" not in error_text:
@@ -367,7 +447,7 @@ class OllamaBrain:
             print("[NOVA] Ollama repeat-limit hit; retrying with a compact deterministic profile...")
 
             try:
-                response = ollama.chat(**kwargs)
+                response = chat_with_retries(kwargs)
             except Exception as retry_error:
                 print(f"[NOVA] Ollama retry error: {type(retry_error).__name__}: {retry_error}")
                 raise
@@ -419,7 +499,7 @@ class OllamaBrain:
                 f"[NOVA] Ollama output reached {current_budget} tokens; "
                 f"retrying once with {retry_budget} tokens."
             )
-            response = ollama.chat(**retry_kwargs)
+            response = chat_with_retries(retry_kwargs)
             if isinstance(response, dict):
                 message = response.get("message", {})
                 content = message.get("content", "") if isinstance(message, dict) else ""
@@ -487,35 +567,58 @@ class OllamaBrain:
             kwargs["format"] = "json"
 
         chunks = []
-        for part in ollama.chat(**kwargs):
-            if isinstance(part, dict):
-                message = part.get("message") or {}
-                token = message.get("content", "") if isinstance(message, dict) else ""
-                thought = (
-                    message.get("thinking", message.get("think", ""))
-                    if isinstance(message, dict) else ""
+        total_attempts = _retry_attempts()
+        for attempt in range(total_attempts):
+            emitted = False
+            try:
+                for part in ollama.chat(**kwargs):
+                    if isinstance(part, dict):
+                        message = part.get("message") or {}
+                        token = message.get("content", "") if isinstance(message, dict) else ""
+                        thought = (
+                            message.get("thinking", message.get("think", ""))
+                            if isinstance(message, dict) else ""
+                        )
+                    else:
+                        message = getattr(part, "message", None)
+                        token = (
+                            message.get("content", "")
+                            if isinstance(message, dict)
+                            else getattr(message, "content", "")
+                        )
+                        thought = (
+                            message.get("thinking", getattr(message, "think", ""))
+                            if isinstance(message, dict)
+                            else getattr(message, "thinking", getattr(message, "think", ""))
+                        )
+                    if thought and callable(on_thought_delta):
+                        emitted = True
+                        on_thought_delta(thought if isinstance(thought, str) else str(thought))
+                    if not token:
+                        continue
+                    if not isinstance(token, str):
+                        token = str(token)
+                    chunks.append(token)
+                    emitted = True
+                    if callable(on_token):
+                        on_token(token)
+                break
+            except Exception as exc:
+                # Retrying after tokens already reached the UI would duplicate
+                # output; only pre-first-chunk failures (the server rejected
+                # the request before producing anything) are safe to replay.
+                if (
+                    emitted
+                    or attempt + 1 >= total_attempts
+                    or not is_transient_server_error(exc)
+                ):
+                    raise
+                wait = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                print(
+                    f"[NOVA] Ollama server not ready ({type(exc).__name__}: {exc}); "
+                    f"retrying in {wait:g}s (attempt {attempt + 2}/{total_attempts})..."
                 )
-            else:
-                message = getattr(part, "message", None)
-                token = (
-                    message.get("content", "")
-                    if isinstance(message, dict)
-                    else getattr(message, "content", "")
-                )
-                thought = (
-                    message.get("thinking", getattr(message, "think", ""))
-                    if isinstance(message, dict)
-                    else getattr(message, "thinking", getattr(message, "think", ""))
-                )
-            if thought and callable(on_thought_delta):
-                on_thought_delta(thought if isinstance(thought, str) else str(thought))
-            if not token:
-                continue
-            if not isinstance(token, str):
-                token = str(token)
-            chunks.append(token)
-            if callable(on_token):
-                on_token(token)
+                time.sleep(wait)
 
         return "".join(chunks)
 
