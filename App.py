@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime
 
@@ -475,33 +476,64 @@ class RemoteModelDiscoveryWorker(QThread):
 
 
 class AgentWorker(QThread):
-    """Run one agent turn outside the GUI thread with cooperative cancellation."""
+    """Run one agent turn outside the GUI thread with cooperative cancellation.
+
+    Token callbacks can arrive hundreds of times per second. Coalesce them on
+    the worker thread before crossing the Qt queued-signal boundary, otherwise
+    the GUI event queue and QTextDocument layout work can fall behind generation.
+    """
     status = Signal(str)
     completed = Signal(str)
     failed = Signal(str)
     cancelled = Signal()
+    _DELTA_PREFIXES = ("MODEL_ANSWER_DELTA:", "MODEL_THOUGHT_DELTA:")
 
     def __init__(self, core, message, parent=None):
         super().__init__(parent)
         self.core = core
         self.message = message
         self.cancel_event = threading.Event()
+        self._pending_deltas = []
+        self._last_delta_flush = 0.0
+        self._delta_interval = 1.0 / 30.0
 
     def request_stop(self):
         self.cancel_event.set()
 
+    def _flush_deltas(self):
+        pending, self._pending_deltas = self._pending_deltas, []
+        self._last_delta_flush = time.monotonic()
+        for prefix, value in pending:
+            self.status.emit(prefix + value)
+
+    def _queue_status(self, message):
+        message = str(message)
+        for prefix in self._DELTA_PREFIXES:
+            if message.startswith(prefix):
+                value = message[len(prefix):]
+                if value:
+                    self._pending_deltas.append((prefix, value))
+                if time.monotonic() - self._last_delta_flush >= self._delta_interval:
+                    self._flush_deltas()
+                return
+        self._flush_deltas()
+        self.status.emit(message)
+
     def run(self):
         self.core.cancel_event = self.cancel_event
-        self.core.status_callback = self.status.emit
+        self.core.status_callback = self._queue_status
         try:
             result = self.core.ask(self.message)
+            self._flush_deltas()
             if self.cancel_event.is_set():
                 self.cancelled.emit()
             else:
                 self.completed.emit(str(result))
         except GenerationCancelled:
+            self._flush_deltas()
             self.cancelled.emit()
         except Exception as exc:
+            self._flush_deltas()
             if self.cancel_event.is_set():
                 self.cancelled.emit()
             else:
@@ -1519,7 +1551,7 @@ class NovaWindow(QMainWindow):
             QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 28px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
             QTabBar::tab:selected {{ color: {TEXT}; background: {BG_INPUT}; border-color: #405a76; }}
             QTabBar::tab:hover:!selected {{ color: {TEXT}; background: #17212c; }}
-            QTabBar::close-button {{ subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; }}
+            QTabBar::close-button {{ subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; margin-right: 8px; }}
             QTabBar::close-button:hover {{ background: #3a4654; border-radius: 7px; }}
         """)
         self.agent_tab_bar = self.agent_tabs.tabBar()
