@@ -2011,7 +2011,7 @@ class NovaCore:
                             state = getattr(self, "execution_state", None)
                             if isinstance(state, dict):
                                 state["last_plan"] = plan
-            self._publish_task_plan(plan)
+                                self._publish_task_plan(plan)
                             tool_history.append(
                                 "Goal verification found remaining work: "
                                 + str(goal_check.get("reason", ""))
@@ -2516,7 +2516,7 @@ Nova must choose another useful action.
                 state = getattr(self, "execution_state", None)
                 if isinstance(state, dict):
                     state["last_plan"] = plan
-            self._publish_task_plan(plan)
+                    self._publish_task_plan(plan)
 
                 workspace_revision += 1
                 last_tool_error = None
@@ -2552,7 +2552,7 @@ Nova must choose another useful action.
                         state = getattr(self, "execution_state", None)
                         if isinstance(state, dict):
                             state["last_plan"] = plan
-            self._publish_task_plan(plan)
+                            self._publish_task_plan(plan)
                         tool_history.append(
                             "Goal verification found remaining work: "
                             + str(goal_check.get("reason", ""))
@@ -2619,7 +2619,7 @@ Nova must choose another useful action.
                 state = getattr(self, "execution_state", None)
                 if isinstance(state, dict):
                     state["last_plan"] = plan
-            self._publish_task_plan(plan)
+                    self._publish_task_plan(plan)
 
             last_tool_error = (
                 f"{tool_name}: {verification.message}\n"
