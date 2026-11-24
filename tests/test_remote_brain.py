@@ -242,6 +242,34 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertNotIn("PRIVATE INTERNAL TRACE", "".join(thoughts))
         self.assertEqual(result["content"], "Ready.")
 
+    def test_remote_stream_stops_when_cancellation_event_is_set(self):
+        class CancellableResponse:
+            def __init__(self):
+                self.lines = iter([
+                    ('data: ' + json.dumps({"choices": [{"delta": {"content": "partial"}}]}) + "\n").encode("utf-8"),
+                    b"data: [DONE]\n",
+                ])
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def readline(self):
+                return next(self.lines, b"")
+
+        event = threading.Event()
+        def stop_after_first_token(_token):
+            event.set()
+
+        from agent.cancellation import GenerationCancelled
+        with mock.patch("model.remote.urllib.request.urlopen", return_value=CancellableResponse()):
+            with self.assertRaises(GenerationCancelled):
+                self.brain.generate_tool_turn_stream(
+                    messages=[{"role": "user", "content": "hello"}],
+                    tools=[],
+                    on_token=stop_after_first_token,
+                    cancel_event=event,
+                )
+
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
         sent = CAPTURED[-1]
