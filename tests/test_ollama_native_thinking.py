@@ -57,7 +57,7 @@ class OllamaNativeThinkingTests(unittest.TestCase):
             )
         self.assertEqual(result, "Final answer.")
         self.assertEqual(answers, ["Final answer."])
-        self.assertEqual(thoughts, ["The model is checking the request. "])
+        self.assertEqual(thoughts, ["The model is checking the request."])
 
 
     def test_streams_native_thinking_separately_from_answer(self):
