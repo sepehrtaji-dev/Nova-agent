@@ -4,11 +4,12 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QTabWidget
+from PySide6.QtGui import QPixmap
 from PySide6.QtGui import QTextOption
 from unittest import mock
 import json
 
-from App import EffortSlider, MarkdownLabel, ModelSettingsDialog, RemoteModelDiscoveryWorker, TaskPlanWidget
+from App import EffortSlider, MarkdownLabel, ModelSettingsDialog, NovaWindow, RemoteModelDiscoveryWorker, TaskPlanWidget
 
 
 class AppUIComponentTests(unittest.TestCase):
@@ -75,6 +76,87 @@ class AppUIComponentTests(unittest.TestCase):
         self.assertGreaterEqual(slider.visualValue, 0.0)
         slider.hide()
         slider.deleteLater()
+
+    def test_agent_tabs_keep_independent_core_and_chat_sessions(self):
+        class Memory:
+            def __init__(self):
+                self.messages = []
+                self.limit = 24
+
+        class Brain:
+            model = "fake-local-model"
+
+        class FakeCore:
+            def __init__(self):
+                self.brain = Brain()
+                self.short_memory = Memory()
+                self.execution_state = {}
+                self.access = {"pc": True, "web": False}
+                self.effort = "medium"
+
+            def set_access(self, **access):
+                self.access = dict(access)
+
+            def get_access(self):
+                return dict(self.access)
+
+            def set_effort(self, value):
+                self.effort = value
+
+            def set_thinking_enabled(self, _enabled):
+                pass
+
+            def ask(self, _message):
+                return "ok"
+
+        class FakeStore:
+            def __init__(self):
+                self.chats = [{"id": "chat-1", "title": "First chat"}]
+
+            def list_chats(self):
+                return list(self.chats)
+
+            def create_chat(self):
+                chat_id = f"chat-{len(self.chats) + 1}"
+                self.chats.append({"id": chat_id, "title": f"Chat {len(self.chats) + 1}"})
+                return chat_id
+
+            def get_messages(self, _chat_id):
+                return []
+
+        settings = {
+            "provider": "local",
+            "effort": "medium",
+            "remote_models": "[]",
+            "assistant_font_size": "16",
+        }
+        with (
+            mock.patch("App.load_settings", return_value=settings),
+            mock.patch("App.apply_to_environment"),
+            mock.patch("App.NovaCore", FakeCore),
+            mock.patch("App.ChatStore", FakeStore),
+            mock.patch("App.load_nova_logo", return_value=QPixmap()),
+            mock.patch.object(NovaWindow, "_start_model_discovery"),
+        ):
+            window = NovaWindow()
+            first_core = window.core
+            first_chat = window.current_chat_id
+            self.assertEqual(window.agent_tabs.count(), 1)
+            window._new_agent_tab()
+            self.assertEqual(window.agent_tabs.count(), 2)
+            self.assertIsNot(window.core, first_core)
+            second_core = window.core
+            second_chat = window.current_chat_id
+            self.assertNotEqual(first_chat, second_chat)
+            window.agent_tabs.setCurrentIndex(0)
+            self.assertIs(window.core, first_core)
+            self.assertEqual(window.current_chat_id, first_chat)
+            window.agent_tabs.setCurrentIndex(1)
+            self.assertIs(window.core, second_core)
+            self.assertEqual(window.current_chat_id, second_chat)
+            window._close_agent_tab(1)
+            self.assertEqual(window.agent_tabs.count(), 1)
+            window.close()
 
     def test_task_plan_panel_marks_only_completed_steps(self):
         panel = TaskPlanWidget()
