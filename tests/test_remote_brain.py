@@ -270,6 +270,17 @@ class RemoteBrainTests(unittest.TestCase):
                     cancel_event=event,
                 )
 
+    def test_private_reasoning_content_is_not_used_as_a_final_answer(self):
+        payload = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": None,
+                    "reasoning_content": "PRIVATE INTERNAL TRACE",
+                }
+            }]
+        })
+        self.assertEqual(OpenAICompatibleBrain._extract_content(payload), "")
+
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
         sent = CAPTURED[-1]
