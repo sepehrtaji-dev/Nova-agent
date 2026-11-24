@@ -378,11 +378,13 @@ class TaskPlanWidget(QFrame):
             color = "#7ee787" if done else "#ff7b72" if failed else ACCENT if marker == "●" else TEXT_MUTED
             title = str(step.get("description") or step.get("action") or step.get("tool") or f"Step {index}")
             label = QLabel(f"{marker}  {title}")
+            label.setTextFormat(Qt.PlainText)
             label.setWordWrap(True)
             label.setStyleSheet(f"color: {color if done or failed or marker == '●' else TEXT}; font-size: 11px; border: none; background: transparent;")
             self._steps.addWidget(label)
         if len(steps) > 6:
             more = QLabel(f"+ {len(steps) - 6} more steps")
+            more.setTextFormat(Qt.PlainText)
             more.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; border: none;")
             self._steps.addWidget(more)
         self._progress.setText(f"{completed} / {len(steps)} completed")
