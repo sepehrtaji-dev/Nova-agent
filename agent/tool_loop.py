@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from agent.activity import THINKING_ACTIVITY, format_activity
+from agent.cancellation import raise_if_cancelled
 
 
 class ToolLoopError(RuntimeError):
@@ -64,6 +65,7 @@ class ToolCallingLoop:
         on_answer_delta=None,
         on_thought_delta=None,
         max_rounds=12,
+        cancel_event=None,
     ):
         self.brain = brain
         self.tools = tools
@@ -76,6 +78,10 @@ class ToolCallingLoop:
         self.on_answer_delta = on_answer_delta
         self.on_thought_delta = on_thought_delta
         self.max_rounds = max(1, int(max_rounds or 12))
+        self.cancel_event = cancel_event
+
+    def _check_cancelled(self):
+        raise_if_cancelled(self.cancel_event)
 
     def _status(self, message):
         if callable(self.status):
@@ -158,11 +164,13 @@ class ToolCallingLoop:
         # A single human-readable activity event drives the live status chip
         # ("Searching the web…", "Reading the file…") instead of raw tool
         # names flickering past.
+        self._check_cancelled()
         self._status(format_activity(name))
         try:
             result = self.tools.execute(name, encoded)
         except Exception as exc:
             result = f"TOOL_EXECUTION_EXCEPTION: {type(exc).__name__}: {exc}"
+        self._check_cancelled()
         if not isinstance(result, str):
             result = str(result)
 
@@ -227,8 +235,10 @@ class ToolCallingLoop:
         messages.append({"role": "user", "content": prompt})
 
         for round_index in range(self.max_rounds):
+            self._check_cancelled()
             self._status(THINKING_ACTIVITY)
             response = self._generate_turn(messages, definitions, system_prompt)
+            self._check_cancelled()
             if not isinstance(response, dict):
                 raise ToolLoopError("The model provider returned an invalid tool-call response.")
 
