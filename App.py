@@ -440,6 +440,7 @@ class AgentWorker(QThread):
         finally:
             if getattr(self.core, "cancel_event", None) is self.cancel_event:
                 self.core.cancel_event = None
+                self.core.status_callback = None
 
 
 class StreamingMessageWidget(QFrame):
