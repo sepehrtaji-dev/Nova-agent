@@ -219,17 +219,19 @@ class RemoteBrainTests(unittest.TestCase):
                 return self
             def __exit__(self, *args):
                 return False
-            def __iter__(self):
+            def __init__(self):
                 events = [
                     {"choices": [{"delta": {"reasoning_summary": "The model is checking the request."}}]},
                     {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.summary", "summary": "It has enough context to answer."}]}}]},
                     {"choices": [{"delta": {"reasoning_content": "PRIVATE INTERNAL TRACE"}}]},
                     {"choices": [{"delta": {"content": "Ready."}}]},
                 ]
-                return iter([
+                self.lines = iter([
                     ("data: " + json.dumps(event) + "\n").encode("utf-8")
                     for event in events
                 ] + [b"data: [DONE]\n"])
+            def readline(self):
+                return next(self.lines, b"")
 
         thoughts = []
         with mock.patch("model.remote.urllib.request.urlopen", return_value=FakeResponse()):
