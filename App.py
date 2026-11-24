@@ -302,14 +302,22 @@ class MarkdownLabel(QTextBrowser):
         self.document().setDefaultStyleSheet(body_style)
         self.setHtml(text)
         
+        self._last_document_width = 0
         self.document().contentsChanged.connect(self.update_height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def update_height(self):
         width = max(1, self.viewport().width())
         self.document().setTextWidth(width)
+        self._last_document_width = width
         height = int(self.document().size().height() + 10)
         self.setFixedHeight(max(24, height))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = max(1, self.viewport().width())
+        if width != self._last_document_width:
+            self.update_height()
 
     def wheelEvent(self, event):
         # This browser is sized to its full document height and has no
