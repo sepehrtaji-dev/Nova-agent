@@ -650,7 +650,7 @@ class OpenAICompatibleBrain:
                     if not isinstance(delta, dict):
                         continue
                     # Never surface raw private reasoning tokens in the UI.
-                    thought = delta.get("reasoning_summary", "")
+                    thought = _extract_reasoning_summary(delta)
                     if thought and callable(on_thought_delta):
                         on_thought_delta(thought if isinstance(thought, str) else str(thought))
                     token = delta.get("content", "")
