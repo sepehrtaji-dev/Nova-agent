@@ -1265,6 +1265,7 @@ class NovaWindow(QMainWindow):
             "attachments": [],
         }]
         self._active_agent_index = 0
+        self._agent_tab_counter = 1
         self._changing_agent_tabs = False
 
         self.setWindowTitle("Nova")
@@ -1724,7 +1725,8 @@ class NovaWindow(QMainWindow):
         if hasattr(core, "set_effort"):
             core.set_effort(self._effort)
         chat_id = self.chat_store.create_chat()
-        title = f"Agent {len(self._agent_sessions) + 1}"
+        self._agent_tab_counter += 1
+        title = f"Agent {self._agent_tab_counter}"
         self._agent_sessions.append({
             "id": uuid.uuid4().hex,
             "title": title,
@@ -1940,7 +1942,7 @@ class NovaWindow(QMainWindow):
         
         installed = list(getattr(self, "_installed_models", []) or [])
         current = str(getattr(getattr(self.core, "brain", None), "model", "")).strip()
-        if current and current not in installed:
+        if current and not remote and current not in installed:
             installed.insert(0, current)
 
         search_action = QWidgetAction(menu)
@@ -1978,6 +1980,7 @@ class NovaWindow(QMainWindow):
                 for action, label in searchable_actions
             ]
         )
+        menu.aboutToShow.connect(search_box.setFocus)
 
         menu.addSeparator()
         effort_action = QWidgetAction(menu)
