@@ -465,10 +465,11 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertIn("nothing is sent", text)
 
 
-    def test_ollama_native_tool_turn_returns_native_thinking(self):
+    def test_ollama_native_tool_turn_returns_user_facing_summary(self):
         response = {"message": {
             "content": "The answer is 42.",
-            "thinking": "I should calculate this carefully.",
+            "thinking": "PRIVATE INTERNAL TRACE",
+            "thinking_summary": "The calculation is 6 multiplied by 7.",
             "tool_calls": [],
         }}
         with mock.patch("model.ollama.ollama.show", return_value={
@@ -479,7 +480,7 @@ class ProviderSelectionTests(unittest.TestCase):
                 messages=[{"role": "user", "content": "Calculate 6 times 7."}],
                 tools=[],
             )
-        self.assertEqual(result["thinking"], "I should calculate this carefully.")
+        self.assertEqual(result["thinking"], "The calculation is 6 multiplied by 7.")
         self.assertEqual(result["content"], "The answer is 42.")
         self.assertIs(chat.call_args.kwargs["think"], True)
 
