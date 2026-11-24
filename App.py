@@ -1906,6 +1906,9 @@ class NovaWindow(QMainWindow):
             self.chat_container_layout.addWidget(widget)
             
         self.chat_container_layout.addStretch()
+        plan = getattr(self.core, "execution_state", {}).get("last_plan")
+        if isinstance(plan, dict) and plan.get("steps"):
+            self._insert_task_plan_panel().set_plan(plan)
         self._scroll_chat_to_bottom()
 
     def _add_message(self, role, text, attachments=None):
@@ -2329,6 +2332,9 @@ class NovaWindow(QMainWindow):
         self.think_button.setEnabled(False)
         self.thinking_panel = None
         self._clear_task_plan_panel()
+        execution_state = getattr(self.core, "execution_state", None)
+        if isinstance(execution_state, dict):
+            execution_state["last_plan"] = None
         self._discard_streaming_message()
 
         self.worker = AgentWorker(self.core, message, self)
