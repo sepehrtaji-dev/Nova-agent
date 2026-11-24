@@ -55,6 +55,25 @@ _DEFAULT_SYSTEM_PROMPT = (
     "order and scope."
 )
 
+def _extract_reasoning_summary(delta):
+    """Return only explicitly provider-labelled, user-facing reasoning summaries."""
+    summary = delta.get("reasoning_summary", "")
+    if isinstance(summary, str) and summary.strip():
+        return summary
+    details = delta.get("reasoning_details", [])
+    if isinstance(details, list):
+        parts = [
+            str(item.get("summary", "")).strip()
+            for item in details
+            if isinstance(item, dict)
+            and str(item.get("type", "")).casefold() in {"reasoning.summary", "summary"}
+            and isinstance(item.get("summary"), str)
+            and item.get("summary", "").strip()
+        ]
+        return "\\n".join(parts)
+    return ""
+
+
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 # Read lazily: os.getenv at import time freezes the value, so a base URL set
@@ -328,7 +347,7 @@ class OpenAICompatibleBrain:
                         continue
                     # Only provider-declared user-facing summaries are shown.
                     # Raw reasoning_content/reasoning may contain private chain-of-thought.
-                    thought = delta.get("reasoning_summary", "")
+                    thought = _extract_reasoning_summary(delta)
                     if isinstance(thought, str) and thought:
                         thought_parts.append(thought)
                         if callable(on_thought_delta):
