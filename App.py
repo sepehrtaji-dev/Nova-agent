@@ -54,7 +54,6 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidgetAction,
     QTabWidget,
-    QTabBar,
 )
 
 from agent.core import NovaCore
@@ -1397,24 +1396,29 @@ class NovaWindow(QMainWindow):
         tabs_layout = QHBoxLayout(tabs_row)
         tabs_layout.setContentsMargins(14, 7, 14, 6)
         tabs_layout.setSpacing(8)
-        self.agent_tab_bar = QTabBar()
-        self.agent_tab_bar.setMovable(True)
-        self.agent_tab_bar.setTabsClosable(True)
-        self.agent_tab_bar.setExpanding(False)
-        self.agent_tab_bar.setDrawBase(False)
-        self.agent_tab_bar.setElideMode(Qt.ElideRight)
-        self.agent_tab_bar.setStyleSheet(f"""
+        self.agent_tabs = QTabWidget()
+        self.agent_tabs.setObjectName("agentTabs")
+        self.agent_tabs.setDocumentMode(True)
+        self.agent_tabs.setTabsClosable(True)
+        self.agent_tabs.setMovable(True)
+        self.agent_tabs.setFixedHeight(44)
+        self.agent_tabs.setStyleSheet(f"""
+            QTabWidget#agentTabs::pane {{ border: none; background: transparent; }}
             QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 28px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
             QTabBar::tab:selected {{ color: {TEXT}; background: {BG_INPUT}; border-color: #405a76; }}
             QTabBar::tab:hover:!selected {{ color: {TEXT}; background: #17212c; }}
             QTabBar::close-button {{ subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; }}
             QTabBar::close-button:hover {{ background: #3a4654; border-radius: 7px; }}
         """)
-        self.agent_tab_bar.addTab("Agent 1")
-        self.agent_tab_bar.currentChanged.connect(self._on_agent_tab_changed)
-        self.agent_tab_bar.tabCloseRequested.connect(self._close_agent_tab)
+        self.agent_tab_bar = self.agent_tabs.tabBar()
+        self.agent_tab_bar.setExpanding(False)
+        self.agent_tab_bar.setDrawBase(False)
+        self.agent_tab_bar.setElideMode(Qt.ElideRight)
+        self.agent_tabs.addTab(QWidget(), "Agent 1")
+        self.agent_tabs.currentChanged.connect(self._on_agent_tab_changed)
+        self.agent_tabs.tabCloseRequested.connect(self._close_agent_tab)
         self.agent_tab_bar.tabMoved.connect(self._on_agent_tab_moved)
-        tabs_layout.addWidget(self.agent_tab_bar, 1)
+        tabs_layout.addWidget(self.agent_tabs, 1)
         add_agent_tab = QPushButton("+")
         add_agent_tab.setFixedSize(28, 28)
         add_agent_tab.setToolTip("New agent tab")
@@ -1693,8 +1697,10 @@ class NovaWindow(QMainWindow):
             "attachments": [],
         })
         self._changing_agent_tabs = True
-        self.agent_tab_bar.addTab(title)
-        self.agent_tab_bar.setCurrentIndex(len(self._agent_sessions) - 1)
+        self.agent_tabs.blockSignals(True)
+        self.agent_tabs.addTab(QWidget(), title)
+        self.agent_tabs.setCurrentIndex(len(self._agent_sessions) - 1)
+        self.agent_tabs.blockSignals(False)
         self._changing_agent_tabs = False
         self._active_agent_index = len(self._agent_sessions) - 1
         self.core = core
@@ -1711,15 +1717,17 @@ class NovaWindow(QMainWindow):
             return
         self._sync_active_agent_session()
         self._changing_agent_tabs = True
+        self.agent_tabs.blockSignals(True)
         self.agent_tab_bar.blockSignals(True)
-        self.agent_tab_bar.removeTab(index)
+        self.agent_tabs.removeTab(index)
         self._agent_sessions.pop(index)
         if index < self._active_agent_index:
             self._active_agent_index -= 1
         elif index == self._active_agent_index:
             self._active_agent_index = min(index, len(self._agent_sessions) - 1)
-        self.agent_tab_bar.setCurrentIndex(self._active_agent_index)
+        self.agent_tabs.setCurrentIndex(self._active_agent_index)
         self.agent_tab_bar.blockSignals(False)
+        self.agent_tabs.blockSignals(False)
         self._changing_agent_tabs = False
         session = self._agent_sessions[self._active_agent_index]
         self.core = session["core"]
