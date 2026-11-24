@@ -9,7 +9,7 @@ from PySide6.QtGui import QTextOption
 from unittest import mock
 import json
 
-from App import EffortSlider, MarkdownLabel, ModelSettingsDialog, NovaWindow, RemoteModelDiscoveryWorker, TaskPlanWidget
+from App import AgentWorker, EffortSlider, MarkdownLabel, ModelSettingsDialog, NovaWindow, RemoteModelDiscoveryWorker, TaskPlanWidget
 
 
 class AppUIComponentTests(unittest.TestCase):
@@ -157,6 +157,17 @@ class AppUIComponentTests(unittest.TestCase):
             window._close_agent_tab(1)
             self.assertEqual(window.agent_tabs.count(), 1)
             window.close()
+
+    def test_agent_worker_coalesces_stream_deltas_before_qt_delivery(self):
+        worker = AgentWorker(object(), "test")
+        received = []
+        worker.status.connect(received.append)
+        worker._last_delta_flush = __import__("time").monotonic()
+        for token in ("one", " ", "two", " ", "three"):
+            worker._queue_status("MODEL_ANSWER_DELTA:" + token)
+        self.assertEqual(received, [])
+        worker._flush_deltas()
+        self.assertEqual(received, ["MODEL_ANSWER_DELTA:one two three"])
 
     def test_task_plan_panel_marks_only_completed_steps(self):
         panel = TaskPlanWidget()
