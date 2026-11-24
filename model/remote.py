@@ -206,7 +206,7 @@ class OpenAICompatibleBrain:
         )
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=min(self.timeout, 15.0), context=context) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
                 raw = response.read().decode("utf-8", "replace")
             data = json.loads(raw)
         except urllib.error.HTTPError as exc:
