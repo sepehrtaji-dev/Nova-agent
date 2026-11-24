@@ -1,6 +1,7 @@
 import unittest
 
 from agent.tool_loop import ToolCallingLoop, ToolLoopError
+from agent.cancellation import GenerationCancelled
 
 
 class StreamedNativeBrain:
@@ -93,6 +94,59 @@ class StreamedNativeLoopTests(unittest.TestCase):
         self.assertEqual(thought_events, ["The model is evaluating the greeting. "])
         self.assertFalse(any("Reviewing the request" in item for item in events))
         self.assertFalse(any("Preparing the final response" in item for item in events))
+
+    def test_cancelled_generation_stops_before_provider_call(self):
+        import threading
+        brain = StreamedNativeBrain([{"chunks": ["should not run"]}])
+        tools = ToolRegistry()
+        tools.tools = {
+            "read_file": {
+                "description": "Read a file",
+                "capability": "pc",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        }
+        event = threading.Event()
+        event.set()
+        loop = ToolCallingLoop(
+            brain=brain,
+            tools=tools,
+            verifier=None,
+            allowed_tools={"read_file"},
+            cancel_event=event,
+        )
+        with self.assertRaises(GenerationCancelled):
+            loop.run("stop", system_prompt="Nova")
+        self.assertEqual(brain.streamed, [])
+
+    def test_cancelled_generation_is_checked_between_model_rounds(self):
+        import threading
+        event = threading.Event()
+        class CancellingBrain(StreamedNativeBrain):
+            def generate_tool_turn_stream(self, **kwargs):
+                event.set()
+                return {"content": "", "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }]}
+        tools = ToolRegistry()
+        tools.tools = {
+            "read_file": {
+                "description": "Read a file",
+                "capability": "pc",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        }
+        loop = ToolCallingLoop(
+            brain=CancellingBrain([]),
+            tools=tools,
+            verifier=None,
+            allowed_tools={"read_file"},
+            cancel_event=event,
+        )
+        with self.assertRaises(GenerationCancelled):
+            loop.run("stop", system_prompt="Nova")
 
 
 if __name__ == "__main__":
