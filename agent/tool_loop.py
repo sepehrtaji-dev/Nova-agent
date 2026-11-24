@@ -93,13 +93,16 @@ class ToolCallingLoop:
     def _generate_turn(self, messages, definitions, system_prompt):
         stream_method = getattr(self.brain, "generate_tool_turn_stream", None)
         if callable(stream_method):
-            return stream_method(
-                messages=messages,
-                tools=definitions,
-                system_prompt=system_prompt,
-                on_token=self.on_answer_delta,
-                on_thought_delta=self.on_thought_delta,
-            )
+            stream_kwargs = {
+                "messages": messages,
+                "tools": definitions,
+                "system_prompt": system_prompt,
+                "on_token": self.on_answer_delta,
+                "on_thought_delta": self.on_thought_delta,
+            }
+            if getattr(self.brain, "supports_cancel_event", False):
+                stream_kwargs["cancel_event"] = self.cancel_event
+            return stream_method(**stream_kwargs)
         return self.brain.generate_tool_turn(
             messages=messages,
             tools=definitions,
