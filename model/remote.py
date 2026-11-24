@@ -273,6 +273,8 @@ class OpenAICompatibleBrain:
         on_token=None, on_thought_delta=None, cancel_event=None,
     ):
         """Stream an OpenAI-compatible native tool-call turn from SSE deltas."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
@@ -441,8 +443,6 @@ class OpenAICompatibleBrain:
 
     # -------------------------------------------------------------- generation
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
-        if cancel_event is not None and cancel_event.is_set():
-            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
@@ -588,6 +588,8 @@ class OpenAICompatibleBrain:
         on_thought_delta=None, cancel_event=None,
     ):
         """Stream OpenAI-compatible SSE deltas to on_token and return full text."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
