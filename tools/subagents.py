@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import threading
 
+from agent.cancellation import GenerationCancelled
+
 
 class SubagentTool:
     """Run a bounded, isolated child NovaCore for a self-contained subtask."""
@@ -37,8 +39,6 @@ class SubagentTool:
 
         try:
             from agent.core import NovaCore
-            from agent.cancellation import GenerationCancelled
-
             child = NovaCore()
             parent_access = payload.get("_parent_access")
             if isinstance(parent_access, dict):
