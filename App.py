@@ -503,8 +503,15 @@ class AgentWorker(QThread):
     def _flush_deltas(self):
         pending, self._pending_deltas = self._pending_deltas, []
         self._last_delta_flush = time.monotonic()
+        grouped = {}
+        order = []
         for prefix, value in pending:
-            self.status.emit(prefix + value)
+            if prefix not in grouped:
+                grouped[prefix] = []
+                order.append(prefix)
+            grouped[prefix].append(value)
+        for prefix in order:
+            self.status.emit(prefix + "".join(grouped[prefix]))
 
     def _queue_status(self, message):
         message = str(message)
