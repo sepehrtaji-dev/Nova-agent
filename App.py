@@ -2181,6 +2181,7 @@ class NovaWindow(QMainWindow):
             values = dialog.values()
             save_settings(values)
             self._settings.update(values)
+            self._remote_model_catalog = {}
             apply_to_environment(values)
             if self._rebuild_core():
                 self._refresh_model_labels()
