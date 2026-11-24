@@ -2194,6 +2194,7 @@ class NovaWindow(QMainWindow):
         self.worker.completed.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
         self.worker.cancelled.connect(self._on_cancelled)
+        self.worker.finished.connect(self._on_worker_thread_finished)
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread = self.worker
         self.worker.start()
@@ -2335,6 +2336,12 @@ class NovaWindow(QMainWindow):
         self._refresh_chat_history()
         self._finish_request()
 
+    def _on_worker_thread_finished(self):
+        worker = self.sender()
+        if self.worker is worker:
+            self.worker = None
+            self.thread = None
+
     def _finish_request(self):
         self.busy = False
         self.input.setEnabled(True)
@@ -2344,8 +2351,6 @@ class NovaWindow(QMainWindow):
         self.send_button.setFixedSize(32, 32)
         self.send_button.setToolTip("Send message")
         self.think_button.setEnabled(True)
-        self.worker = None
-        self.thread = None
         self._status_timer.stop()
         self._activity_text = ""
         self._answer_started = False
