@@ -23,7 +23,7 @@ from integrations.noviqx.settings import (
     save_settings as save_noviqx_settings,
 )
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
@@ -332,6 +332,26 @@ def add_markdown_content(layout, text, font_size=14):
         html = render_markdown_text(value)
         label = MarkdownLabel(html, font_size=font_size)
         layout.addWidget(label)
+
+
+class ModelDiscoveryWorker(QThread):
+    """Discover Ollama models without blocking the GUI event loop."""
+    models_ready = Signal(list)
+    discovery_failed = Signal(str)
+
+    def run(self):
+        try:
+            import ollama
+            data = ollama.Client(timeout=3).list()
+            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
+            names = []
+            for item in items or []:
+                name = item.get("model") or item.get("name") if isinstance(item, dict) else getattr(item, "model", None) or getattr(item, "name", None)
+                if name:
+                    names.append(str(name).strip())
+            self.models_ready.emit(sorted(set(filter(None, names)), key=str.casefold))
+        except Exception as exc:
+            self.discovery_failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 class AgentWorker(QThread):
@@ -1102,6 +1122,9 @@ class NovaWindow(QMainWindow):
         self._apply_theme()
         self._refresh_chat_history()
         self._render_current_chat()
+        self._installed_models = []
+        self._model_discovery_worker = None
+        self._start_model_discovery()
 
     def _create_core(self):
         try:
@@ -1133,11 +1156,13 @@ class NovaWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         splitter = QSplitter(Qt.Horizontal)
+        self.splitter = splitter
         splitter.setHandleWidth(1)
         main_layout.addWidget(splitter)
 
         # Sidebar
         sidebar = QFrame()
+        self.sidebar = sidebar
         sidebar.setObjectName("sidebar")
         sidebar.setMinimumWidth(236)
         sidebar.setMaximumWidth(292)
@@ -1294,6 +1319,16 @@ class NovaWindow(QMainWindow):
         add_btn.setToolTip("Attach files")
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
+
+        self.sidebar_toggle = QPushButton("☰")
+        self.sidebar_toggle.setFixedSize(30, 30)
+        self.sidebar_toggle.setToolTip("Hide or show the sidebar")
+        self.sidebar_toggle.setCursor(Qt.PointingHandCursor)
+        self.sidebar_toggle.setStyleSheet(f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 15px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; border-color: {BORDER}; }}")
+        self.sidebar_toggle.clicked.connect(self._toggle_sidebar)
+        controls.addWidget(self.sidebar_toggle)
+        self._sidebar_collapsed = False
+        self._sidebar_animation = None
 
         self.think_button = QPushButton("Think")
         self.think_button.setCheckable(True)
@@ -1522,6 +1557,47 @@ class NovaWindow(QMainWindow):
     def _scroll_chat_to_bottom(self):
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum()))
 
+    def _start_model_discovery(self):
+        worker = getattr(self, "_model_discovery_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = ModelDiscoveryWorker(self)
+        self._model_discovery_worker = worker
+        worker.models_ready.connect(self._on_models_discovered)
+        worker.discovery_failed.connect(lambda _error: None)
+        worker.finished.connect(lambda: setattr(self, "_model_discovery_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_models_discovered(self, models):
+        self._installed_models = list(models or [])
+        self._refresh_model_labels()
+
+    def _toggle_sidebar(self):
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        collapsing = self._sidebar_collapsed
+        self.sidebar.setMinimumWidth(0)
+        self.sidebar.setVisible(True)
+        if self._sidebar_animation is not None:
+            self._sidebar_animation.stop()
+        animation = QPropertyAnimation(self.sidebar, b"maximumWidth", self)
+        animation.setDuration(240)
+        animation.setEasingCurve(QEasingCurve.InOutCubic)
+        animation.setStartValue(self.sidebar.width())
+        animation.setEndValue(0 if collapsing else 272)
+        if not collapsing:
+            self.sidebar.setMaximumWidth(0)
+        def finish():
+            if collapsing:
+                self.sidebar.setVisible(False)
+                self.sidebar.setMaximumWidth(292)
+            else:
+                self.sidebar.setMinimumWidth(236)
+                self.sidebar.setMaximumWidth(292)
+        animation.finished.connect(finish)
+        self._sidebar_animation = animation
+        animation.start()
+
     def _show_model_menu(self, anchor=None):
         if self.busy:
             return
@@ -1529,18 +1605,7 @@ class NovaWindow(QMainWindow):
         menu.setMinimumWidth(390)
         remote = self._settings.get("provider") == "remote"
         
-        installed = []
-        try:
-            import ollama
-            # Short timeout: a hung Ollama server must not freeze the GUI event loop
-            data = ollama.Client(timeout=5).list()
-            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
-            for item in items or []:
-                name = item.get("model") if isinstance(item, dict) else getattr(item, "model", None)
-                if name: installed.append(str(name))
-        except Exception:
-            pass
-            
+        installed = list(getattr(self, "_installed_models", []) or [])
         current = str(getattr(getattr(self.core, "brain", None), "model", "")).strip()
         if current and current not in installed:
             installed.insert(0, current)
@@ -1577,6 +1642,7 @@ class NovaWindow(QMainWindow):
         effort_action.setDefaultWidget(effort_panel)
         menu.addAction(effort_action)
         menu.addSeparator()
+        menu.addAction("Refresh local models").triggered.connect(self._start_model_discovery)
         menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
         noviqx_label = "NoviqX GitHub App…" + (
             "  ✓" if noviqx_is_configured() else "  (not set up)"
@@ -1609,7 +1675,7 @@ class NovaWindow(QMainWindow):
     def _open_model_settings(self):
         if self.busy:
             return
-        dialog = ModelSettingsDialog(self._settings, [], self)
+        dialog = ModelSettingsDialog(self._settings, getattr(self, "_installed_models", []), self)
         if dialog.exec() == QDialog.Accepted:
             values = dialog.values()
             save_settings(values)
