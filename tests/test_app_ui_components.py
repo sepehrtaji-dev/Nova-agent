@@ -4,10 +4,11 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QTabWidget
+from PySide6.QtGui import QTextOption
 from unittest import mock
 import json
 
-from App import ModelSettingsDialog, RemoteModelDiscoveryWorker, TaskPlanWidget
+from App import EffortSlider, MarkdownLabel, ModelSettingsDialog, RemoteModelDiscoveryWorker, TaskPlanWidget
 
 
 class AppUIComponentTests(unittest.TestCase):
@@ -50,6 +51,30 @@ class AppUIComponentTests(unittest.TestCase):
             worker.run()
         self.assertEqual(catalogs, [{"profile-1": ["model-a", "model-z"]}])
         self.assertNotIn("secret-token", str(urlopen.call_args))
+
+    def test_markdown_label_wraps_text_and_reflows_on_resize(self):
+        label = MarkdownLabel("<p>A longer sentence that should wrap at normal word boundaries.</p>")
+        self.assertEqual(
+            label.document().defaultTextOption().wrapMode(),
+            QTextOption.WrapAtWordBoundaryOrAnywhere,
+        )
+        label.resize(320, 100)
+        label.update_height()
+        wide_height = label.height()
+        label.resize(160, 100)
+        label.update_height()
+        self.assertGreaterEqual(label.height(), wide_height)
+        label.deleteLater()
+
+    def test_effort_slider_animation_property_is_registered(self):
+        slider = EffortSlider()
+        slider.setRange(0, 5)
+        slider.setValue(3)
+        slider.show()
+        self.app.processEvents()
+        self.assertGreaterEqual(slider.visualValue, 0.0)
+        slider.hide()
+        slider.deleteLater()
 
     def test_task_plan_panel_marks_only_completed_steps(self):
         panel = TaskPlanWidget()
