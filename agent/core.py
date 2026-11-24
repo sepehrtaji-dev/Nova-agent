@@ -16,6 +16,7 @@ from agent.router import ToolRouter
 from agent.planner import Planner
 from agent.tool_loop import ToolCallingLoop
 from agent.activity import THINKING_ACTIVITY, format_activity
+from agent.cancellation import raise_if_cancelled
 from agent.verifier import Verifier
 from tools import load_tools
 from agent.diagnostics import RuntimeDiagnostics
@@ -152,10 +153,12 @@ class NovaCore:
         thought_started = False
 
         def on_answer(token):
+            self._check_cancelled()
             if token:
                 self._status("MODEL_ANSWER_DELTA:" + str(token))
 
         def on_thought(token):
+            self._check_cancelled()
             nonlocal thought_started
             if not self.thinking_enabled or not token:
                 return
@@ -172,6 +175,7 @@ class NovaCore:
         finally:
             if thought_started:
                 self._status("MODEL_THOUGHT_END")
+        self._check_cancelled()
         return str(result or "").strip()
 
     def _capability_context(self):
@@ -424,6 +428,9 @@ class NovaCore:
             return render_for_prompt(self)
         except Exception:
             return "Tool information is unavailable in this instance."
+
+    def _check_cancelled(self):
+        raise_if_cancelled(getattr(self, "cancel_event", None))
 
     def _status(self, message):
         if self.status_callback:
@@ -1528,8 +1535,9 @@ class NovaCore:
             },
             on_result=record_result,
             on_answer_delta=lambda token: self._status("MODEL_ANSWER_DELTA:" + str(token)),
-            on_thought_delta=(lambda token: self._status("MODEL_THOUGHT_DELTA:" + str(token))) if self.thinking_enabled else None,
+            on_thought_delta=(lambda token: (self._check_cancelled(), self._status("MODEL_THOUGHT_DELTA:" + str(token)))) if self.thinking_enabled else None,
             max_rounds=getattr(self, "max_steps", 12),
+            cancel_event=getattr(self, "cancel_event", None),
         )
         self._status(THINKING_ACTIVITY)
         try:
@@ -1540,6 +1548,9 @@ class NovaCore:
                 history=self._native_history(),
             )
         except Exception as exc:
+            from agent.cancellation import GenerationCancelled
+            if isinstance(exc, GenerationCancelled):
+                raise
             logging.exception("Native tool loop failed")
             response = _tool_failure_message(exc)
 
@@ -1554,6 +1565,7 @@ class NovaCore:
         return str(response)
 
     def ask(self, message):
+        self._check_cancelled()
 
         self._status(
             "Thinking..."
