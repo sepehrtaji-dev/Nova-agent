@@ -4,6 +4,7 @@ _LEVEL = {"low": "low", "medium": "medium", "high": "high", "max": "high", "nova
 
 
 class EffortAwareBrain:
+    supports_cancel_event = True
     """Apply selected effort consistently across planner, tools and responses."""
     def __init__(self, brain, effort="medium"):
         self.brain = brain
@@ -58,7 +59,7 @@ class EffortAwareBrain:
 
     def generate_tool_turn_stream(
         self, messages, tools, system_prompt=None, options=None,
-        on_token=None, on_thought_delta=None,
+        on_token=None, on_thought_delta=None, cancel_event=None,
     ):
         method = getattr(self.brain, "generate_tool_turn_stream", None)
         if callable(method):
@@ -72,6 +73,7 @@ class EffortAwareBrain:
                     options=self._remote_options(options),
                     on_token=on_token,
                     on_thought_delta=on_thought_delta,
+                    cancel_event=cancel_event,
                 )
             think_resolver = getattr(self.brain, "think_value_for_effort", None)
             think_value = (
@@ -87,6 +89,7 @@ class EffortAwareBrain:
                 think=think_value,
                 on_token=on_token,
                 on_thought_delta=on_thought_delta,
+                cancel_event=cancel_event,
             )
         result = self.generate_tool_turn(messages, tools, system_prompt, options)
         if callable(on_token) and isinstance(result, dict) and result.get("content"):
@@ -103,7 +106,7 @@ class EffortAwareBrain:
         return self.brain.generate(prompt, system_prompt=system_prompt, json_mode=json_mode, options=options,
             think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
 
-    def generate_stream(self, prompt, on_token, system_prompt=None, json_mode=False, options=None, on_thought_delta=None):
+    def generate_stream(self, prompt, on_token, system_prompt=None, json_mode=False, options=None, on_thought_delta=None, cancel_event=None):
         from model.remote import OpenAICompatibleBrain
         from model.anthropic import AnthropicBrain
         stream = getattr(self.brain, "generate_stream", None)
@@ -116,6 +119,7 @@ class EffortAwareBrain:
             return stream(
                 prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
                 options=self._remote_options(options), on_thought_delta=on_thought_delta,
+                cancel_event=cancel_event,
             )
         if isinstance(self.brain, AnthropicBrain):
             return stream(prompt, on_token, system_prompt=system_prompt, json_mode=json_mode, options=self._remote_options(options))
