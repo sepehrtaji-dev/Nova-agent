@@ -148,6 +148,7 @@ class NovaCore:
         stream = getattr(self.brain, "generate_stream", None)
         if not callable(stream):
             result = self.brain.generate(prompt, system_prompt=system_prompt)
+            self._check_cancelled()
             return str(result or "").strip()
 
         thought_started = False
