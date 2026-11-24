@@ -1261,6 +1261,7 @@ class NovaWindow(QMainWindow):
         
         self.thread = None
         self.worker = None
+        self._active_workers = set()
         self.busy = False
         self.thinking_panel = None
         self.task_plan_panel = None
@@ -1294,10 +1295,12 @@ class NovaWindow(QMainWindow):
         self._start_model_discovery()
 
     def closeEvent(self, event):
-        active_worker = self.worker
-        if active_worker is not None and active_worker.isRunning():
-            active_worker.request_stop()
-            if not active_worker.wait(1800):
+        workers = list(getattr(self, "_active_workers", set()))
+        for active_worker in workers:
+            if active_worker.isRunning():
+                active_worker.request_stop()
+        for active_worker in workers:
+            if active_worker.isRunning() and not active_worker.wait(1800):
                 QMessageBox.information(
                     self,
                     "Nova is stopping",
@@ -2220,6 +2223,7 @@ class NovaWindow(QMainWindow):
         self._discard_streaming_message()
 
         self.worker = AgentWorker(self.core, message, self)
+        self._active_workers.add(self.worker)
         self.worker.status.connect(self._on_status)
         self.worker.completed.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
@@ -2368,6 +2372,7 @@ class NovaWindow(QMainWindow):
 
     def _on_worker_thread_finished(self):
         worker = self.sender()
+        self._active_workers.discard(worker)
         if self.worker is worker:
             self.worker = None
             self.thread = None
