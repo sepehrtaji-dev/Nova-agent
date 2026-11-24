@@ -241,7 +241,7 @@ class RemoteBrainTests(unittest.TestCase):
                 on_thought_delta=thoughts.append,
             )
         self.assertEqual(thoughts, ["The model is checking the request.", "It has enough context to answer."])
-        self.assertEqual(result["thinking"], "The model is checking the request.\\nIt has enough context to answer.")
+        self.assertEqual(result["thinking"], "The model is checking the request.\nIt has enough context to answer.")
         self.assertNotIn("PRIVATE INTERNAL TRACE", "".join(thoughts))
         self.assertEqual(result["content"], "Ready.")
 
