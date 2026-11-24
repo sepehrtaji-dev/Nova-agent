@@ -5,8 +5,9 @@ from model.ollama import OllamaBrain
 
 
 class Message:
-    def __init__(self, *, thinking="", content="", tool_calls=None):
+    def __init__(self, *, thinking="", thinking_summary="", content="", tool_calls=None):
         self.thinking = thinking
+        self.thinking_summary = thinking_summary
         self.content = content
         self.tool_calls = tool_calls or []
 
@@ -38,7 +39,7 @@ class OllamaNativeThinkingTests(unittest.TestCase):
     def test_standard_stream_forwards_native_thought_callback(self):
         brain = OllamaBrain(model="gemma4:latest")
         chunks = [
-            Chunk(Message(thinking="Native reasoning. ")),
+            Chunk(Message(thinking="PRIVATE INTERNAL TRACE", thinking_summary="The model is checking the request.")),
             Chunk(Message(content="Final answer.")),
         ]
         thoughts = []
@@ -56,14 +57,14 @@ class OllamaNativeThinkingTests(unittest.TestCase):
             )
         self.assertEqual(result, "Final answer.")
         self.assertEqual(answers, ["Final answer."])
-        self.assertEqual(thoughts, ["Native reasoning. "])
+        self.assertEqual(thoughts, ["The model is checking the request. "])
 
 
     def test_streams_native_thinking_separately_from_answer(self):
         brain = OllamaBrain(model="gemma4:latest")
         chunks = [
-            Chunk(Message(thinking="Let me inspect the request. ")),
-            Chunk(Message(thinking="A concise greeting is appropriate. ")),
+            Chunk(Message(thinking="PRIVATE TRACE A", thinking_summary="The model is reviewing the request. ")),
+            Chunk(Message(thinking="PRIVATE TRACE B", thinking_summary="A concise greeting is appropriate. ")),
             Chunk(Message(content="Hey! How can I help?")),
         ]
         thought_deltas = []
@@ -86,12 +87,12 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         self.assertTrue(chat.call_args.kwargs["think"])
         self.assertEqual(
             thought_deltas,
-            ["Let me inspect the request. ", "A concise greeting is appropriate. "],
+            ["The model is reviewing the request. ", "A concise greeting is appropriate. "],
         )
         self.assertEqual(answer_deltas, ["Hey! How can I help?"])
         self.assertEqual(
             result["thinking"],
-            "Let me inspect the request. A concise greeting is appropriate. ",
+            "The model is reviewing the request. A concise greeting is appropriate. ",
         )
         self.assertEqual(result["content"], "Hey! How can I help?")
 
