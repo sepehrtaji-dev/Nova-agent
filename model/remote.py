@@ -680,9 +680,8 @@ class OpenAICompatibleBrain:
         content = None
         if isinstance(message, dict):
             content = message.get("content")
-            if content is None:
-                # Some providers put text here instead.
-                content = message.get("reasoning_content")
+            # reasoning_content is a private reasoning channel, not a final answer.
+            # If content is absent, leave it empty instead of leaking that field.
         if content is None:
             content = first.get("text")
 
