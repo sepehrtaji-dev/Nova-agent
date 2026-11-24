@@ -1407,7 +1407,7 @@ class NovaWindow(QMainWindow):
             QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 28px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
             QTabBar::tab:selected {{ color: {TEXT}; background: {BG_INPUT}; border-color: #405a76; }}
             QTabBar::tab:hover:!selected {{ color: {TEXT}; background: #17212c; }}
-            QTabBar::close-button {{ image: none; subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; }}
+            QTabBar::close-button {{ subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; }}
             QTabBar::close-button:hover {{ background: #3a4654; border-radius: 7px; }}
         """)
         self.agent_tab_bar.addTab("Agent 1")
@@ -1859,6 +1859,8 @@ class NovaWindow(QMainWindow):
     def _toggle_sidebar(self):
         self._sidebar_collapsed = not self._sidebar_collapsed
         collapsing = self._sidebar_collapsed
+        was_visible = self.sidebar.isVisible()
+        current_width = self.sidebar.width() if was_visible else 0
         self.sidebar.setMinimumWidth(0)
         self.sidebar.setVisible(True)
         if self._sidebar_animation is not None:
@@ -1866,10 +1868,10 @@ class NovaWindow(QMainWindow):
         animation = QPropertyAnimation(self.sidebar, b"maximumWidth", self)
         animation.setDuration(240)
         animation.setEasingCurve(QEasingCurve.InOutCubic)
-        animation.setStartValue(self.sidebar.width() if collapsing else 0)
+        animation.setStartValue(current_width)
         animation.setEndValue(0 if collapsing else 272)
         if not collapsing:
-            self.sidebar.setMaximumWidth(0)
+            self.sidebar.setMaximumWidth(current_width)
         def finish():
             if collapsing:
                 self.sidebar.setVisible(False)
