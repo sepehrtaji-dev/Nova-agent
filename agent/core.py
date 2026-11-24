@@ -1907,10 +1907,8 @@ class NovaCore:
         completed = False
         goal_verified = False
         last_tool_error = None
-        for step in range(
+        for step in range(self.max_steps):
             self._check_cancelled()
-            self.max_steps
-        ):
 
             knowledge_context = (
                 self.knowledge.get_context(message)
