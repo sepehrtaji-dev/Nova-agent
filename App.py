@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QToolButton,
     QWidgetAction,
+    QTabBar,
     QTabWidget,
 )
 
@@ -1551,24 +1552,22 @@ class NovaWindow(QMainWindow):
         self.agent_tabs = QTabWidget()
         self.agent_tabs.setObjectName("agentTabs")
         self.agent_tabs.setDocumentMode(True)
-        self.agent_tabs.setTabsClosable(True)
+        self.agent_tabs.setTabsClosable(False)
         self.agent_tabs.setMovable(True)
         self.agent_tabs.setFixedHeight(44)
         self.agent_tabs.setStyleSheet(f"""
             QTabWidget#agentTabs::pane {{ border: none; background: transparent; }}
-            QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 28px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
+            QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 34px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
             QTabBar::tab:selected {{ color: {TEXT}; background: {BG_INPUT}; border-color: #405a76; }}
             QTabBar::tab:hover:!selected {{ color: {TEXT}; background: #17212c; }}
-            QTabBar::close-button {{ subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; margin-right: 8px; }}
-            QTabBar::close-button:hover {{ background: #3a4654; border-radius: 7px; }}
         """)
         self.agent_tab_bar = self.agent_tabs.tabBar()
         self.agent_tab_bar.setExpanding(False)
         self.agent_tab_bar.setDrawBase(False)
         self.agent_tab_bar.setElideMode(Qt.ElideRight)
         self.agent_tabs.addTab(QWidget(), "Agent 1")
+        self._install_agent_tab_close_button(0)
         self.agent_tabs.currentChanged.connect(self._on_agent_tab_changed)
-        self.agent_tabs.tabCloseRequested.connect(self._close_agent_tab)
         self.agent_tab_bar.tabMoved.connect(self._on_agent_tab_moved)
         tabs_layout.addWidget(self.agent_tabs, 1)
         add_agent_tab = QPushButton("+")
@@ -1829,6 +1828,27 @@ class NovaWindow(QMainWindow):
         self._refresh_chat_history()
         self._render_current_chat()
 
+    def _install_agent_tab_close_button(self, index):
+        """Install an inset close control with predictable spacing from the tab edge."""
+        button = QToolButton(self.agent_tab_bar)
+        button.setText("×")
+        button.setCursor(Qt.PointingHandCursor)
+        button.setFixedSize(20, 20)
+        button.setFocusPolicy(Qt.NoFocus)
+        button.setStyleSheet(
+            "QToolButton { color: #9aa9b8; background: transparent; border: none; "
+            "border-radius: 6px; font-size: 16px; font-weight: 500; padding: 0px; }"
+            "QToolButton:hover { color: #e6edf3; background: #3a4654; }"
+        )
+        button.clicked.connect(
+            lambda checked=False, control=button: self._close_agent_tab(
+                self.agent_tab_bar.tabAt(
+                    control.mapTo(self.agent_tab_bar, control.rect().center())
+                )
+            )
+        )
+        self.agent_tab_bar.setTabButton(index, QTabBar.RightSide, button)
+
     def _new_agent_tab(self):
         if self.busy:
             return
@@ -1852,6 +1872,7 @@ class NovaWindow(QMainWindow):
         self._changing_agent_tabs = True
         self.agent_tabs.blockSignals(True)
         self.agent_tabs.addTab(QWidget(), title)
+        self._install_agent_tab_close_button(self.agent_tabs.count() - 1)
         self.agent_tabs.setCurrentIndex(len(self._agent_sessions) - 1)
         self.agent_tabs.blockSignals(False)
         self._changing_agent_tabs = False
