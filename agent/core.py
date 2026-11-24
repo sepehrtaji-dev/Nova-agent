@@ -557,6 +557,14 @@ class NovaCore:
             return "".join(raw_parts).strip()
         return answer
 
+    def _publish_task_plan(self, plan):
+        """Publish structured planner state for the small, user-facing task ledger."""
+        if isinstance(plan, dict) and isinstance(plan.get("steps"), list):
+            try:
+                self._status("TASK_PLAN:" + json.dumps(plan, ensure_ascii=False, default=str))
+            except (TypeError, ValueError):
+                pass
+
     def _publish_thinking_update(self, message):
         """Append a factual execution or verification event to the Thinking Process."""
         text = str(message or "").strip()
@@ -1797,6 +1805,7 @@ class NovaCore:
                 }
                 self.execution_state = state
             state["last_plan"] = plan
+            self._publish_task_plan(plan)
 
             if not isinstance(plan, dict) or not isinstance(plan.get("steps"), list) or not plan["steps"]:
                 # A malformed plan can mean either that the model failed to
@@ -2002,6 +2011,7 @@ class NovaCore:
                             state = getattr(self, "execution_state", None)
                             if isinstance(state, dict):
                                 state["last_plan"] = plan
+            self._publish_task_plan(plan)
                             tool_history.append(
                                 "Goal verification found remaining work: "
                                 + str(goal_check.get("reason", ""))
@@ -2506,6 +2516,7 @@ Nova must choose another useful action.
                 state = getattr(self, "execution_state", None)
                 if isinstance(state, dict):
                     state["last_plan"] = plan
+            self._publish_task_plan(plan)
 
                 workspace_revision += 1
                 last_tool_error = None
@@ -2541,6 +2552,7 @@ Nova must choose another useful action.
                         state = getattr(self, "execution_state", None)
                         if isinstance(state, dict):
                             state["last_plan"] = plan
+            self._publish_task_plan(plan)
                         tool_history.append(
                             "Goal verification found remaining work: "
                             + str(goal_check.get("reason", ""))
@@ -2607,6 +2619,7 @@ Nova must choose another useful action.
                 state = getattr(self, "execution_state", None)
                 if isinstance(state, dict):
                     state["last_plan"] = plan
+            self._publish_task_plan(plan)
 
             last_tool_error = (
                 f"{tool_name}: {verification.message}\n"
