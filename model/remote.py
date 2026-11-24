@@ -22,6 +22,15 @@ import urllib.request
 from agent.cancellation import GenerationCancelled
 
 
+def _set_response_poll_timeout(response, cancel_event):
+    if cancel_event is None:
+        return
+    try:
+        response.fp.raw._sock.settimeout(1.0)
+    except (AttributeError, OSError):
+        pass
+
+
 def _iter_stream_lines(response, cancel_event, timeout):
     """Read SSE lines with short polling intervals so Stop is responsive."""
     if cancel_event is None:
@@ -259,7 +268,7 @@ class OpenAICompatibleBrain:
 
     def generate_tool_turn_stream(
         self, messages, tools, system_prompt=None, options=None,
-        on_token=None, on_thought_delta=None,
+        on_token=None, on_thought_delta=None, cancel_event=None,
     ):
         """Stream an OpenAI-compatible native tool-call turn from SSE deltas."""
         if not self.is_configured():
@@ -311,7 +320,8 @@ class OpenAICompatibleBrain:
         tool_parts = {}
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=min(self.timeout, 1.0) if cancel_event is not None else self.timeout, context=context) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+                _set_response_poll_timeout(response, cancel_event)
                 for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
@@ -612,8 +622,9 @@ class OpenAICompatibleBrain:
         try:
             context = ssl.create_default_context()
             with urllib.request.urlopen(
-                request, timeout=min(self.timeout, 1.0) if cancel_event is not None else self.timeout, context=context
+                request, timeout=self.timeout, context=context
             ) as response:
+                _set_response_poll_timeout(response, cancel_event)
                 for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
