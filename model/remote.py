@@ -147,6 +147,8 @@ class OpenAICompatibleBrain:
         Tool execution stays in Nova. This operation is not retried: replaying
         a timed-out tool decision could duplicate a side effect.
         """
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
@@ -320,7 +322,7 @@ class OpenAICompatibleBrain:
         tool_parts = {}
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+            with urllib.request.urlopen(request, timeout=min(self.timeout, 5.0) if cancel_event is not None else self.timeout, context=context) as response:
                 _set_response_poll_timeout(response, cancel_event)
                 for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
@@ -439,6 +441,8 @@ class OpenAICompatibleBrain:
 
     # -------------------------------------------------------------- generation
     def generate(self, prompt, system_prompt=None, json_mode=False, options=None):
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
@@ -622,7 +626,7 @@ class OpenAICompatibleBrain:
         try:
             context = ssl.create_default_context()
             with urllib.request.urlopen(
-                request, timeout=self.timeout, context=context
+                request, timeout=min(self.timeout, 5.0) if cancel_event is not None else self.timeout, context=context
             ) as response:
                 _set_response_poll_timeout(response, cancel_event)
                 for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
