@@ -334,6 +334,53 @@ def add_markdown_content(layout, text, font_size=14):
         layout.addWidget(label)
 
 
+class TaskPlanWidget(QFrame):
+    """Compact task ledger; checkmarks reflect planner execution state."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("taskPlan")
+        self.setStyleSheet(f"QFrame#taskPlan {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 10px; }}")
+        self._root = QVBoxLayout(self)
+        self._root.setContentsMargins(12, 9, 12, 10)
+        self._root.setSpacing(6)
+        header = QHBoxLayout()
+        title = QLabel("TASK PLAN")
+        title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 800; letter-spacing: 1px; border: none;")
+        header.addWidget(title)
+        header.addStretch(1)
+        self._progress = QLabel("0 / 0")
+        self._progress.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 700; border: none;")
+        header.addWidget(self._progress)
+        self._root.addLayout(header)
+        self._steps = QVBoxLayout()
+        self._steps.setContentsMargins(0, 0, 0, 0)
+        self._steps.setSpacing(5)
+        self._root.addLayout(self._steps)
+
+    def set_plan(self, plan):
+        while self._steps.count():
+            item = self._steps.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        steps = plan.get("steps", []) if isinstance(plan, dict) else []
+        steps = [step for step in steps if isinstance(step, dict)]
+        completed = 0
+        for index, step in enumerate(steps, 1):
+            status = str(step.get("status", "pending") or "pending").casefold()
+            done = status in {"completed", "complete", "done", "verified"}
+            failed = status in {"failed", "error"}
+            completed += int(done)
+            marker = "✓" if done else "×" if failed else "●" if status in {"running", "in_progress", "in progress"} else "○"
+            color = "#7ee787" if done else "#ff7b72" if failed else ACCENT if marker == "●" else TEXT_MUTED
+            title = str(step.get("description") or step.get("action") or step.get("tool") or f"Step {index}")
+            label = QLabel(f"{marker}  {title}")
+            label.setWordWrap(True)
+            label.setStyleSheet(f"color: {color if done or failed or marker == '●' else TEXT}; font-size: 11px; border: none; background: transparent;")
+            self._steps.addWidget(label)
+        self._progress.setText(f"{completed} / {len(steps)} completed")
+        self.setVisible(bool(steps))
+
+
 class ModelDiscoveryWorker(QThread):
     """Discover Ollama models without blocking the GUI event loop."""
     models_ready = Signal(list)
@@ -1107,6 +1154,7 @@ class NovaWindow(QMainWindow):
         self.worker = None
         self.busy = False
         self.thinking_panel = None
+        self.task_plan_panel = None
         self.thinking_enabled = False
         self.streaming_message = None
         self.attachments = []
@@ -1528,6 +1576,16 @@ class NovaWindow(QMainWindow):
             self.chat_container_layout.addItem(stretch)
         self._scroll_chat_to_bottom()
 
+    def _insert_task_plan_panel(self):
+        if self.task_plan_panel is not None:
+            return self.task_plan_panel
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        self.task_plan_panel = TaskPlanWidget()
+        self.chat_container_layout.addWidget(self.task_plan_panel)
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+        return self.task_plan_panel
+
     def _insert_thinking_panel(self):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
         panel = ThinkingPanel()
@@ -1610,10 +1668,41 @@ class NovaWindow(QMainWindow):
         if current and current not in installed:
             installed.insert(0, current)
 
-        title_action = menu.addSection("MODEL")
-        for name in sorted(set(installed), key=str.lower):
+        search_action = QWidgetAction(menu)
+        search_box = QLineEdit()
+        search_box.setPlaceholderText("Search available models…")
+        search_box.setClearButtonEnabled(True)
+        search_box.setStyleSheet(f"QLineEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 7px; padding: 7px 9px; min-width: 260px; }}")
+        search_action.setDefaultWidget(search_box)
+        menu.addAction(search_action)
+        menu.addSection("INSTALLED LOCAL MODELS")
+        searchable_actions = []
+        for name in sorted(set(installed), key=str.casefold):
             action = menu.addAction(("✓  " if (not remote and name == current) else "    ") + name)
             action.triggered.connect(lambda _, n=name: self._select_model(n))
+            searchable_actions.append((action, name))
+
+        try:
+            remote_profiles = json.loads(self._settings.get("remote_models", "[]") or "[]")
+        except (TypeError, ValueError):
+            remote_profiles = []
+        remote_profiles = [item for item in remote_profiles if isinstance(item, dict) and item.get("model")]
+        if remote_profiles:
+            menu.addSection("SAVED REMOTE MODELS")
+            active_remote = str(self._settings.get("active_remote_model_id", "") or "")
+            for profile in remote_profiles:
+                profile_id = str(profile.get("id", ""))
+                model_name = str(profile.get("model", ""))
+                display_name = str(profile.get("name") or model_name)
+                action = menu.addAction(("✓  " if remote and profile_id == active_remote else "    ") + display_name + f"  ·  {model_name}")
+                action.triggered.connect(lambda _, pid=profile_id: self._select_remote_model(pid))
+                searchable_actions.append((action, display_name + " " + model_name))
+        search_box.textChanged.connect(
+            lambda query: [
+                action.setVisible(not query.strip() or query.casefold() in label.casefold())
+                for action, label in searchable_actions
+            ]
+        )
 
         menu.addSeparator()
         effort_action = QWidgetAction(menu)
@@ -1660,6 +1749,27 @@ class NovaWindow(QMainWindow):
             y = max(available.top(), desired.y())
             desired = QPoint(x, y)
         menu.exec(desired)
+
+    def _select_remote_model(self, profile_id):
+        if self.busy:
+            return
+        try:
+            profiles = json.loads(self._settings.get("remote_models", "[]") or "[]")
+        except (TypeError, ValueError):
+            profiles = []
+        profile = next((item for item in profiles if isinstance(item, dict) and str(item.get("id", "")) == str(profile_id)), None)
+        if profile is None:
+            return
+        self._settings["provider"] = "remote"
+        self._settings["active_remote_model_id"] = str(profile_id)
+        self._settings["api_base_url"] = str(profile.get("base_url", ""))
+        self._settings["api_model"] = str(profile.get("model", ""))
+        self._settings["api_key"] = str(profile.get("api_key", ""))
+        save_settings(self._settings)
+        apply_to_environment(self._settings)
+        if self._rebuild_core():
+            self._refresh_model_labels()
+            self._render_current_chat()
 
     def _select_model(self, name):
         if self.busy or not name:
@@ -1818,6 +1928,7 @@ class NovaWindow(QMainWindow):
             setter(self.thinking_enabled)
         self.think_button.setEnabled(False)
         self.thinking_panel = None
+        self.task_plan_panel = None
         self._discard_streaming_message()
 
         self.worker = AgentWorker(self.core, message, self)
@@ -1841,6 +1952,14 @@ class NovaWindow(QMainWindow):
 
     def _on_status(self, message):
         message = str(message)
+        if message.startswith("TASK_PLAN:"):
+            try:
+                plan = json.loads(message[len("TASK_PLAN:"):])
+            except (TypeError, ValueError):
+                return
+            if isinstance(plan, dict) and isinstance(plan.get("steps"), list):
+                self._insert_task_plan_panel().set_plan(plan)
+            return
         if message.startswith("MODEL_ANSWER_DELTA:"):
             if not self._answer_started:
                 self._answer_started = True
