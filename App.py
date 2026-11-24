@@ -523,6 +523,7 @@ class ThinkingPanel(QFrame):
         self._finished = False
         self._has_content = False
         self._expanded = True
+        self._pulse_phase = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 14, 10)
@@ -567,6 +568,21 @@ class ThinkingPanel(QFrame):
         self._timer.setInterval(500)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(180)
+        self._pulse_timer.timeout.connect(self._pulse)
+        self._pulse_timer.start()
+
+    def _pulse(self):
+        if self._finished:
+            self._pulse_timer.stop()
+            return
+        self._pulse_phase = (self._pulse_phase + 1) % 4
+        colors = (ACCENT, "#9b8cff", "#c084fc", "#9b8cff")
+        sizes = (8, 9, 10, 9)
+        self._indicator.setStyleSheet(
+            f"color: {colors[self._pulse_phase]}; font-size: {sizes[self._pulse_phase]}px; border: none; background: transparent;"
+        )
 
     def _tick(self):
         if self._finished:
@@ -595,6 +611,7 @@ class ThinkingPanel(QFrame):
             return
         self._finished = True
         self._timer.stop()
+        self._pulse_timer.stop()
         self._tick()
         self._indicator.setText("○")
         self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
