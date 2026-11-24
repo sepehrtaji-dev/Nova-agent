@@ -23,7 +23,7 @@ from integrations.noviqx.settings import (
     save_settings as save_noviqx_settings,
 )
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 )
 
 from agent.core import NovaCore
+from agent.cancellation import GenerationCancelled
 from utils.math_parser import format_response_math
 from storage.chat_store import ChatStore
 
@@ -327,23 +328,40 @@ def add_markdown_content(layout, text, font_size=14):
         layout.addWidget(label)
 
 
-class AgentWorker(QObject):
+class AgentWorker(QThread):
+    """Run one agent turn outside the GUI thread with cooperative cancellation."""
     status = Signal(str)
-    finished = Signal(str)
+    completed = Signal(str)
     failed = Signal(str)
+    cancelled = Signal()
 
-    def __init__(self, core, message):
-        super().__init__()
+    def __init__(self, core, message, parent=None):
+        super().__init__(parent)
         self.core = core
         self.message = message
+        self.cancel_event = threading.Event()
+
+    def request_stop(self):
+        self.cancel_event.set()
 
     def run(self):
+        self.core.cancel_event = self.cancel_event
+        self.core.status_callback = self.status.emit
         try:
-            self.core.status_callback = self.status.emit
             result = self.core.ask(self.message)
-            self.finished.emit(str(result))
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.completed.emit(str(result))
+        except GenerationCancelled:
+            self.cancelled.emit()
         except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.failed.emit(f"{type(exc).__name__}: {exc}")
+        finally:
+            self.core.cancel_event = None
 
 
 class StreamingMessageWidget(QFrame):
@@ -1694,6 +1712,7 @@ class NovaWindow(QMainWindow):
 
     def _send(self):
         if self.busy:
+            self._stop_generation()
             return
         user_text = self.input.toPlainText().strip()
         attachments = list(self.attachments)
@@ -1712,7 +1731,11 @@ class NovaWindow(QMainWindow):
 
         self.busy = True
         self.input.setEnabled(False)
-        self.send_button.setEnabled(False)
+        self.send_button.setEnabled(True)
+        self.send_button.setText("Stop")
+        self.send_button.setIcon(QIcon())
+        self.send_button.setFixedSize(58, 32)
+        self.send_button.setToolTip("Stop generation")
         self._answer_started = False
         self._set_activity("Thinking")
 
@@ -1724,15 +1747,25 @@ class NovaWindow(QMainWindow):
         self.think_button.setEnabled(False)
         self.thinking_panel = None
         self._discard_streaming_message()
-        if self.thinking_enabled:
-            self.thinking_panel = self._insert_thinking_panel()
 
-        self.worker = AgentWorker(self.core, message)
+        self.worker = AgentWorker(self.core, message, self)
         self.worker.status.connect(self._on_status)
-        self.worker.finished.connect(self._on_finished)
+        self.worker.completed.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
-        self.thread = threading.Thread(target=self.worker.run, daemon=True)
-        self.thread.start()
+        self.worker.cancelled.connect(self._on_cancelled)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread = self.worker
+        self.worker.start()
+
+    def _stop_generation(self):
+        worker = self.worker
+        if worker is None or not self.busy:
+            return
+        worker.request_stop()
+        self.send_button.setEnabled(False)
+        self.send_button.setText("Stopping…")
+        self.send_button.setToolTip("Waiting for the active operation to stop safely")
+        self._set_activity("Stopping")
 
     def _on_status(self, message):
         message = str(message)
@@ -1749,8 +1782,12 @@ class NovaWindow(QMainWindow):
             self._set_activity("Thinking")
             return
         if message.startswith("MODEL_THOUGHT_DELTA:"):
-            if self.thinking_panel:
-                self.thinking_panel.append_delta(message[20:])
+            thought = message[len("MODEL_THOUGHT_DELTA:"):]
+            if thought.strip():
+                if self.thinking_enabled and self.thinking_panel is None:
+                    self.thinking_panel = self._insert_thinking_panel()
+                if self.thinking_panel:
+                    self.thinking_panel.append_delta(thought)
             return
         if message == "MODEL_THOUGHT_END":
             if self.thinking_panel:
@@ -1841,11 +1878,25 @@ class NovaWindow(QMainWindow):
         self._refresh_chat_history()
         self._finish_request()
 
+    def _on_cancelled(self):
+        self._discard_streaming_message()
+        self._separate_thinking_panel_from_reply()
+        self._add_message("nova", "Generation stopped.")
+        self.chat_store.add_message(self.current_chat_id, "assistant", "Generation stopped.")
+        self._refresh_chat_history()
+        self._finish_request()
+
     def _finish_request(self):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.send_button.setText("")
+        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 17, 2.5))
+        self.send_button.setFixedSize(32, 32)
+        self.send_button.setToolTip("Send message")
         self.think_button.setEnabled(True)
+        self.worker = None
+        self.thread = None
         self._status_timer.stop()
         self._activity_text = ""
         self._answer_started = False
