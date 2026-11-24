@@ -70,7 +70,7 @@ def _extract_reasoning_summary(delta):
             and isinstance(item.get("summary"), str)
             and item.get("summary", "").strip()
         ]
-        return "\\n".join(parts)
+        return "\n".join(parts)
     return ""
 
 
