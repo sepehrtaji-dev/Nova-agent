@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidgetAction,
     QTabWidget,
+    QTabBar,
 )
 
 from agent.core import NovaCore
@@ -1202,6 +1203,15 @@ class NovaWindow(QMainWindow):
         self.thinking_enabled = False
         self.streaming_message = None
         self.attachments = []
+        self._agent_sessions = [{
+            "id": uuid.uuid4().hex,
+            "title": "Agent 1",
+            "core": self.core,
+            "chat_id": self.current_chat_id,
+            "attachments": [],
+        }]
+        self._active_agent_index = 0
+        self._changing_agent_tabs = False
 
         self.setWindowTitle("Nova")
         logo = load_nova_logo(256)
@@ -1238,6 +1248,7 @@ class NovaWindow(QMainWindow):
         new_core.set_access(**{**DEFAULT_ACCESS, **access})
         self.core = new_core
         self._apply_effort(self._effort)
+        self._sync_active_agent_session()
         return True
 
     def _build_ui(self):
@@ -1341,6 +1352,38 @@ class NovaWindow(QMainWindow):
         self.model_selector.setLayoutDirection(Qt.LeftToRight)
         self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT}; font-size: 12px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; }}")
         self.model_selector.clicked.connect(self._show_model_menu)
+
+        # Independent agent sessions, presented as browser-like tabs.
+        tabs_row = QWidget()
+        tabs_row.setObjectName("agentTabsRow")
+        tabs_layout = QHBoxLayout(tabs_row)
+        tabs_layout.setContentsMargins(14, 7, 14, 6)
+        tabs_layout.setSpacing(8)
+        self.agent_tab_bar = QTabBar()
+        self.agent_tab_bar.setMovable(True)
+        self.agent_tab_bar.setTabsClosable(True)
+        self.agent_tab_bar.setExpanding(False)
+        self.agent_tab_bar.setDrawBase(False)
+        self.agent_tab_bar.setElideMode(Qt.ElideRight)
+        self.agent_tab_bar.setStyleSheet(f"""
+            QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 28px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
+            QTabBar::tab:selected {{ color: {TEXT}; background: {BG_INPUT}; border-color: #405a76; }}
+            QTabBar::tab:hover:!selected {{ color: {TEXT}; background: #17212c; }}
+            QTabBar::close-button {{ image: none; subcontrol-position: right; subcontrol-origin: padding; width: 14px; height: 14px; }}
+            QTabBar::close-button:hover {{ background: #3a4654; border-radius: 7px; }}
+        """)
+        self.agent_tab_bar.addTab("Agent 1")
+        self.agent_tab_bar.currentChanged.connect(self._on_agent_tab_changed)
+        self.agent_tab_bar.tabCloseRequested.connect(self._close_agent_tab)
+        self.agent_tab_bar.tabMoved.connect(self._on_agent_tab_moved)
+        tabs_layout.addWidget(self.agent_tab_bar, 1)
+        add_agent_tab = QPushButton("+")
+        add_agent_tab.setFixedSize(28, 28)
+        add_agent_tab.setToolTip("New agent tab")
+        add_agent_tab.setStyleSheet(f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: 1px solid {BORDER}; border-radius: 7px; font-size: 17px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; }}")
+        add_agent_tab.clicked.connect(self._new_agent_tab)
+        tabs_layout.addWidget(add_agent_tab)
+        main_layout.addWidget(tabs_row)
 
         # Chat Area
         self.chat_scroll = QScrollArea()
@@ -1564,6 +1607,97 @@ class NovaWindow(QMainWindow):
         self.chat_list.blockSignals(False)
         self._refresh_model_labels()
 
+    def _sync_active_agent_session(self):
+        sessions = getattr(self, "_agent_sessions", None)
+        index = getattr(self, "_active_agent_index", -1)
+        if isinstance(sessions, list) and 0 <= index < len(sessions):
+            sessions[index]["core"] = self.core
+            sessions[index]["chat_id"] = self.current_chat_id
+            sessions[index]["attachments"] = list(getattr(self, "attachments", []) or [])
+
+    def _on_agent_tab_changed(self, index):
+        if self._changing_agent_tabs or not (0 <= index < len(self._agent_sessions)):
+            return
+        if self.busy:
+            self.agent_tab_bar.blockSignals(True)
+            self.agent_tab_bar.setCurrentIndex(self._active_agent_index)
+            self.agent_tab_bar.blockSignals(False)
+            return
+        self._sync_active_agent_session()
+        self._active_agent_index = index
+        session = self._agent_sessions[index]
+        self.core = session["core"]
+        self.current_chat_id = session["chat_id"]
+        self.attachments = list(session.get("attachments", []))
+        self.thinking_panel = None
+        self.streaming_message = None
+        self._refresh_attachment_preview()
+        self._refresh_chat_history()
+        self._render_current_chat()
+
+    def _new_agent_tab(self):
+        if self.busy:
+            return
+        self._sync_active_agent_session()
+        access = self.core.get_access()
+        apply_to_environment(self._settings)
+        core = self._create_core()
+        core.set_access(**access)
+        if hasattr(core, "set_effort"):
+            core.set_effort(self._effort)
+        chat_id = self.chat_store.create_chat()
+        title = f"Agent {len(self._agent_sessions) + 1}"
+        self._agent_sessions.append({
+            "id": uuid.uuid4().hex,
+            "title": title,
+            "core": core,
+            "chat_id": chat_id,
+            "attachments": [],
+        })
+        self._changing_agent_tabs = True
+        self.agent_tab_bar.addTab(title)
+        self.agent_tab_bar.setCurrentIndex(len(self._agent_sessions) - 1)
+        self._changing_agent_tabs = False
+        self._active_agent_index = len(self._agent_sessions) - 1
+        self.core = core
+        self.current_chat_id = chat_id
+        self.attachments = []
+        self._refresh_attachment_preview()
+        self._refresh_chat_history()
+        self._render_current_chat()
+
+    def _close_agent_tab(self, index):
+        if len(self._agent_sessions) <= 1 or not (0 <= index < len(self._agent_sessions)):
+            return
+        if self.busy and index == self._active_agent_index:
+            return
+        self._sync_active_agent_session()
+        self._changing_agent_tabs = True
+        self.agent_tab_bar.blockSignals(True)
+        self.agent_tab_bar.removeTab(index)
+        self._agent_sessions.pop(index)
+        if index < self._active_agent_index:
+            self._active_agent_index -= 1
+        elif index == self._active_agent_index:
+            self._active_agent_index = min(index, len(self._agent_sessions) - 1)
+        self.agent_tab_bar.setCurrentIndex(self._active_agent_index)
+        self.agent_tab_bar.blockSignals(False)
+        self._changing_agent_tabs = False
+        session = self._agent_sessions[self._active_agent_index]
+        self.core = session["core"]
+        self.current_chat_id = session["chat_id"]
+        self.attachments = list(session.get("attachments", []))
+        self._refresh_attachment_preview()
+        self._refresh_chat_history()
+        self._render_current_chat()
+
+    def _on_agent_tab_moved(self, from_index, to_index):
+        if from_index == to_index:
+            return
+        session = self._agent_sessions.pop(from_index)
+        self._agent_sessions.insert(to_index, session)
+        self._active_agent_index = self.agent_tab_bar.currentIndex()
+
     def _on_chat_selected(self, item):
         if self.busy:
             return
@@ -1577,6 +1711,7 @@ class NovaWindow(QMainWindow):
         self.core.set_access(**access)
         self._apply_effort(self._effort)
         self.current_chat_id = str(chat_id)
+        self._sync_active_agent_session()
         self._refresh_model_labels()
         self._render_current_chat()
 
@@ -1590,6 +1725,7 @@ class NovaWindow(QMainWindow):
         self._apply_effort(self._effort)
         self.current_chat_id = self.chat_store.create_chat()
         self.core.short_memory.messages = []
+        self._sync_active_agent_session()
         self._refresh_model_labels()
         self._refresh_chat_history()
         self._render_current_chat()
