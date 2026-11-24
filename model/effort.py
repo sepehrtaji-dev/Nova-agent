@@ -128,4 +128,5 @@ class EffortAwareBrain:
             options=options,
             think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"),
             on_thought_delta=on_thought_delta,
+            cancel_event=cancel_event,
         )
