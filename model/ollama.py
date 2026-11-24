@@ -293,12 +293,12 @@ class OllamaBrain:
         if isinstance(response, dict):
             message = response.get("message") or {}
             content = message.get("content", "") if isinstance(message, dict) else ""
-            thinking = message.get("thinking", "") if isinstance(message, dict) else ""
+            thinking = message.get("thinking_summary", "") if isinstance(message, dict) else ""
             calls = message.get("tool_calls", []) if isinstance(message, dict) else []
         else:
             message = getattr(response, "message", None)
             content = self._field(message, "content", "")
-            thinking = self._field(message, "thinking", "")
+            thinking = self._field(message, "thinking_summary", "")
             calls = self._field(message, "tool_calls", [])
         if content is None:
             content = ""
@@ -383,12 +383,12 @@ class OllamaBrain:
                     if isinstance(part, dict):
                         message = part.get("message") or {}
                         token = message.get("content", "") if isinstance(message, dict) else ""
-                        thought = message.get("thinking", "") if isinstance(message, dict) else ""
+                        thought = message.get("thinking_summary", "") if isinstance(message, dict) else ""
                         chunk_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
                     else:
                         message = getattr(part, "message", None)
                         token = self._field(message, "content", "") or ""
-                        thought = self._field(message, "thinking", "") or ""
+                        thought = self._field(message, "thinking_summary", "") or ""
                         chunk_calls = self._field(message, "tool_calls", []) or []
                     if thought:
                         thought = thought if isinstance(thought, str) else str(thought)
@@ -619,7 +619,7 @@ class OllamaBrain:
                         message = part.get("message") or {}
                         token = message.get("content", "") if isinstance(message, dict) else ""
                         thought = (
-                            message.get("thinking", message.get("think", ""))
+                            message.get("thinking_summary", "")
                             if isinstance(message, dict) else ""
                         )
                     else:
@@ -630,9 +630,9 @@ class OllamaBrain:
                             else getattr(message, "content", "")
                         )
                         thought = (
-                            message.get("thinking", getattr(message, "think", ""))
+                            message.get("thinking_summary", "")
                             if isinstance(message, dict)
-                            else getattr(message, "thinking", getattr(message, "think", ""))
+                            else getattr(message, "thinking_summary", "")
                         )
                     if thought and callable(on_thought_delta):
                         emitted = True
