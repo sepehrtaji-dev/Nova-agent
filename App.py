@@ -23,7 +23,7 @@ from integrations.noviqx.settings import (
     save_settings as save_noviqx_settings,
 )
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread, QPropertyAnimation, QEasingCurve, Property
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
@@ -395,7 +395,10 @@ class ModelDiscoveryWorker(QThread):
             items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
             names = []
             for item in items or []:
-                name = item.get("model") or item.get("name") if isinstance(item, dict) else getattr(item, "model", None) or getattr(item, "name", None)
+                if isinstance(item, dict):
+                    name = item.get("model") or item.get("name")
+                else:
+                    name = getattr(item, "model", None) or getattr(item, "name", None)
                 if name:
                     names.append(str(name).strip())
             self.models_ready.emit(sorted(set(filter(None, names)), key=str.casefold))
@@ -667,10 +670,37 @@ class EffortSlider(QSlider):
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self._phase = 0.0
+        self._visual_value = 0.0
+        self._level_animation = QPropertyAnimation(self, b"visualValue", self)
+        self._level_animation.setDuration(190)
+        self._level_animation.setEasingCurve(QEasingCurve.InOutCubic)
         self._pulse_timer = QTimer(self)
         self._pulse_timer.setInterval(40)
         self._pulse_timer.timeout.connect(self._advance_pulse)
+        self.valueChanged.connect(self._animate_level)
+
+    @Property(float)
+    def visualValue(self):
+        return self._visual_value
+
+    @visualValue.setter
+    def visualValue(self, value):
+        self._visual_value = float(value)
+        self.update()
+
+    def _animate_level(self, value):
+        self._level_animation.stop()
+        self._level_animation.setStartValue(self._visual_value)
+        self._level_animation.setEndValue(float(value))
+        self._level_animation.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
         self._pulse_timer.start()
+
+    def hideEvent(self, event):
+        self._pulse_timer.stop()
+        super().hideEvent(event)
 
     def _advance_pulse(self):
         self._phase = (self._phase + 0.055) % (2 * math.pi)
@@ -689,10 +719,14 @@ class EffortSlider(QSlider):
         y = groove.center().y()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        visual_index = max(0.0, min(float(self.maximum()), self._visual_value))
+        active_index = int(round(visual_index))
+        active_x = left + (right - left) * visual_index / (self.maximum() - self.minimum())
         for index, color_hex in enumerate(self.LEVEL_COLORS):
             x = left + (right - left) * index / (self.maximum() - self.minimum())
             color = QColor(color_hex)
-            if index == self.value():
+            if index == active_index:
+                x = active_x
                 pulse = (math.sin(self._phase) + 1.0) / 2.0
                 painter.setPen(Qt.NoPen)
                 if index == self.maximum():
@@ -1064,6 +1098,10 @@ class ModelSettingsDialog(QDialog):
                     active_page = markers[marker]
             if widget is not None:
                 tab_layouts[active_page].addWidget(widget)
+            elif item.layout() is not None:
+                nested_layout = item.layout()
+                nested_layout.setParent(None)
+                tab_layouts[active_page].addLayout(nested_layout)
             else:
                 tab_layouts[active_page].addItem(item)
         for page_layout in tab_layouts.values():
