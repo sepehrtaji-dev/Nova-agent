@@ -168,9 +168,14 @@ class NovaCore:
             self._status("MODEL_THOUGHT_DELTA:" + str(token))
 
         try:
+            stream_kwargs = {
+                "on_thought_delta": on_thought if self.thinking_enabled else None,
+            }
+            if getattr(self.brain, "supports_cancel_event", False):
+                stream_kwargs["cancel_event"] = getattr(self, "cancel_event", None)
             result = stream(
                 prompt, on_answer, system_prompt=system_prompt,
-                on_thought_delta=on_thought if self.thinking_enabled else None,
+                **stream_kwargs,
             )
         finally:
             if thought_started:
