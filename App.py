@@ -414,6 +414,58 @@ class ModelDiscoveryWorker(QThread):
             self.discovery_failed.emit(f"{type(exc).__name__}: {exc}")
 
 
+class RemoteModelDiscoveryWorker(QThread):
+    """Fetch model catalogs from explicitly configured remote profiles."""
+    catalogs_ready = Signal(dict)
+
+    def __init__(self, profiles, parent=None):
+        super().__init__(parent)
+        self.profiles = [dict(item) for item in (profiles or []) if isinstance(item, dict)]
+
+    def run(self):
+        import urllib.request
+        catalogs = {}
+        for profile in self.profiles:
+            profile_id = str(profile.get("id", "") or "")
+            base_url = str(profile.get("base_url", "") or "").strip().rstrip("/")
+            api_key = str(profile.get("api_key", "") or "").strip()
+            provider = str(profile.get("provider", "openai") or "openai").casefold()
+            if not profile_id or not base_url or not api_key:
+                continue
+            if provider == "anthropic":
+                endpoint_base = base_url if base_url.endswith("/v1") else base_url + "/v1"
+                endpoint = endpoint_base + "/models?limit=1000"
+                headers = {
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Accept": "application/json",
+                }
+            else:
+                endpoint_base = base_url if base_url.endswith("/v1") else base_url + "/v1"
+                endpoint = endpoint_base + "/models"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json",
+                }
+            try:
+                request = urllib.request.Request(endpoint, headers=headers, method="GET")
+                with urllib.request.urlopen(request, timeout=4) as response:
+                    payload = json.loads(response.read().decode("utf-8", "replace"))
+                entries = payload.get("data", []) if isinstance(payload, dict) else []
+                models = sorted({
+                    str(item.get("id")).strip()
+                    for item in entries
+                    if isinstance(item, dict) and item.get("id")
+                }, key=str.casefold)
+                if models:
+                    catalogs[profile_id] = models
+            except Exception:
+                # Some compatible endpoints intentionally do not expose /models.
+                # The saved profile model remains available as a fallback.
+                continue
+        self.catalogs_ready.emit(catalogs)
+
+
 class AgentWorker(QThread):
     """Run one agent turn outside the GUI thread with cooperative cancellation."""
     status = Signal(str)
@@ -1292,6 +1344,8 @@ class NovaWindow(QMainWindow):
         self._render_current_chat()
         self._installed_models = []
         self._model_discovery_worker = None
+        self._remote_model_catalog = {}
+        self._remote_model_discovery_worker = None
         self._start_model_discovery()
 
     def closeEvent(self, event):
@@ -1308,11 +1362,11 @@ class NovaWindow(QMainWindow):
                 )
                 event.ignore()
                 return
-        discovery_worker = self._model_discovery_worker
-        if discovery_worker is not None and discovery_worker.isRunning():
-            if not discovery_worker.wait(3500):
-                event.ignore()
-                return
+        for discovery_worker in (self._model_discovery_worker, self._remote_model_discovery_worker):
+            if discovery_worker is not None and discovery_worker.isRunning():
+                if not discovery_worker.wait(4500):
+                    event.ignore()
+                    return
         super().closeEvent(event)
 
     def _create_core(self):
@@ -1911,6 +1965,29 @@ class NovaWindow(QMainWindow):
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
+    def _start_remote_model_discovery(self):
+        worker = self._remote_model_discovery_worker
+        if worker is not None and worker.isRunning():
+            return
+        try:
+            profiles = json.loads(self._settings.get("remote_models", "[]") or "[]")
+        except (TypeError, ValueError):
+            profiles = []
+        worker = RemoteModelDiscoveryWorker(profiles, self)
+        self._remote_model_discovery_worker = worker
+        worker.catalogs_ready.connect(self._on_remote_models_discovered)
+        worker.finished.connect(lambda current=worker: self._on_remote_model_discovery_finished(current))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_remote_models_discovered(self, catalogs):
+        self._remote_model_catalog = dict(catalogs or {})
+        self._refresh_model_labels()
+
+    def _on_remote_model_discovery_finished(self, worker):
+        if self._remote_model_discovery_worker is worker:
+            self._remote_model_discovery_worker = None
+
     def _on_models_discovered(self, models):
         self._installed_models = list(models or [])
         self._refresh_model_labels()
@@ -1983,10 +2060,23 @@ class NovaWindow(QMainWindow):
             for profile in remote_profiles:
                 profile_id = str(profile.get("id", ""))
                 model_name = str(profile.get("model", ""))
-                display_name = str(profile.get("name") or model_name)
-                action = menu.addAction(("✓  " if remote and profile_id == active_remote else "    ") + display_name + f"  ·  {model_name}")
-                action.triggered.connect(lambda _, pid=profile_id: self._select_remote_model(pid))
-                searchable_actions.append((action, display_name + " " + model_name))
+                display_name = str(profile.get("name") or model_name or "Remote model")
+                submenu = menu.addMenu(display_name)
+                available_remote = list(self._remote_model_catalog.get(profile_id, []) or [])
+                if model_name and model_name not in available_remote:
+                    available_remote.insert(0, model_name)
+                for available_model in available_remote:
+                    action = submenu.addAction(
+                        ("✓  " if remote and profile_id == active_remote and available_model == model_name else "    ")
+                        + available_model
+                    )
+                    action.triggered.connect(
+                        lambda _, pid=profile_id, model=available_model: self._select_remote_model(pid, model)
+                    )
+                    searchable_actions.append((action, display_name + " " + available_model))
+                if not available_remote:
+                    action = submenu.addAction("No model catalog available")
+                    action.setEnabled(False)
         search_box.textChanged.connect(
             lambda query: [
                 action.setVisible(not query.strip() or query.casefold() in label.casefold())
@@ -2023,6 +2113,7 @@ class NovaWindow(QMainWindow):
         menu.addAction(effort_action)
         menu.addSeparator()
         menu.addAction("Refresh local models").triggered.connect(self._start_model_discovery)
+        menu.addAction("Refresh remote model catalogs").triggered.connect(self._start_remote_model_discovery)
         menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
         noviqx_label = "NoviqX GitHub App…" + (
             "  ✓" if noviqx_is_configured() else "  (not set up)"
@@ -2041,7 +2132,7 @@ class NovaWindow(QMainWindow):
             desired = QPoint(x, y)
         menu.exec(desired)
 
-    def _select_remote_model(self, profile_id):
+    def _select_remote_model(self, profile_id, model_name=None):
         if self.busy:
             return
         try:
@@ -2051,6 +2142,9 @@ class NovaWindow(QMainWindow):
         profile = next((item for item in profiles if isinstance(item, dict) and str(item.get("id", "")) == str(profile_id)), None)
         if profile is None:
             return
+        if model_name:
+            profile["model"] = str(model_name)
+            self._settings["remote_models"] = json.dumps(profiles, ensure_ascii=False)
         self._settings["provider"] = "remote"
         self._settings["active_remote_model_id"] = str(profile_id)
         self._settings["api_base_url"] = str(profile.get("base_url", ""))
