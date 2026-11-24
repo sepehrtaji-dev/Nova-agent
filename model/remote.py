@@ -413,7 +413,7 @@ class OpenAICompatibleBrain:
             calls.append(call)
         return {
             "content": "".join(text_parts),
-            "thinking": "".join(thought_parts),
+            "thinking": "\n".join(thought_parts),
             "tool_calls": calls,
             "finish_reason": None,
         }
