@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QToolButton,
     QWidgetAction,
+    QTabWidget,
 )
 
 from agent.core import NovaCore
@@ -1026,6 +1027,48 @@ class ModelSettingsDialog(QDialog):
         self.font_slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }} QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }} QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -6px 0; border-radius: 7px; }}")
         layout.addWidget(self.font_slider)
 
+        # Turn the long settings form into clear product categories.
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.setObjectName("settingsTabs")
+        tabs.setStyleSheet(f"""
+            QTabWidget#settingsTabs::pane {{ border: 1px solid {BORDER}; border-radius: 10px; background: {BG_PANEL}; top: -1px; }}
+            QTabBar::tab {{ color: {TEXT_MUTED}; background: transparent; border: 1px solid transparent; padding: 10px 15px; margin-right: 4px; font-size: 12px; }}
+            QTabBar::tab:selected {{ color: {TEXT}; background: {BG_PANEL}; border-color: {BORDER}; border-bottom-color: {BG_PANEL}; border-top-left-radius: 7px; border-top-right-radius: 7px; }}
+            QTabBar::tab:hover:!selected {{ color: {TEXT}; background: {BG_INPUT}; border-radius: 7px; }}
+        """)
+        tab_pages = {}
+        tab_layouts = {}
+        for key, label in (("models", "Models"), ("instructions", "Instructions"), ("profile", "Profile"), ("appearance", "Appearance")):
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(16, 14, 16, 16)
+            page_layout.setSpacing(12)
+            tab_pages[key] = page
+            tab_layouts[key] = page_layout
+            tabs.addTab(page, label)
+
+        active_page = "models"
+        markers = {
+            "MODEL INSTRUCTIONS": "instructions",
+            "YOUR INFO": "profile",
+            "ASSISTANT TEXT SIZE": "appearance",
+        }
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None and isinstance(widget, QLabel):
+                marker = widget.text().strip()
+                if marker in markers:
+                    active_page = markers[marker]
+            if widget is not None:
+                tab_layouts[active_page].addWidget(widget)
+            else:
+                tab_layouts[active_page].addItem(item)
+        for page_layout in tab_layouts.values():
+            page_layout.addStretch(1)
+        layout.addWidget(tabs)
+
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; border: none; background: transparent; padding: 5px 2px;")
@@ -1649,7 +1692,7 @@ class NovaWindow(QMainWindow):
         animation = QPropertyAnimation(self.sidebar, b"maximumWidth", self)
         animation.setDuration(240)
         animation.setEasingCurve(QEasingCurve.InOutCubic)
-        animation.setStartValue(self.sidebar.width())
+        animation.setStartValue(self.sidebar.width() if collapsing else 0)
         animation.setEndValue(0 if collapsing else 272)
         if not collapsing:
             self.sidebar.setMaximumWidth(0)
