@@ -434,7 +434,8 @@ class AgentWorker(QThread):
             else:
                 self.failed.emit(f"{type(exc).__name__}: {exc}")
         finally:
-            self.core.cancel_event = None
+            if getattr(self.core, "cancel_event", None) is self.cancel_event:
+                self.core.cancel_event = None
 
 
 class StreamingMessageWidget(QFrame):
