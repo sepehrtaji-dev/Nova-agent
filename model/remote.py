@@ -13,10 +13,35 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import ssl
 import time
 import urllib.error
 import urllib.request
+
+from agent.cancellation import GenerationCancelled
+
+
+def _iter_stream_lines(response, cancel_event, timeout):
+    """Read SSE lines with short polling intervals so Stop is responsive."""
+    if cancel_event is None:
+        yield from response
+        return
+    deadline = time.monotonic() + max(1.0, float(timeout or 1.0))
+    while True:
+        if cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
+        try:
+            line = response.readline()
+        except socket.timeout:
+            if cancel_event.is_set():
+                raise GenerationCancelled("Generation stopped by user.")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Remote stream timed out while waiting for data.")
+            continue
+        if not line:
+            break
+        yield line
 
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -285,8 +310,8 @@ class OpenAICompatibleBrain:
         tool_parts = {}
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
-                for raw_line in response:
+            with urllib.request.urlopen(request, timeout=min(self.timeout, 1.0) if cancel_event is not None else self.timeout, context=context) as response:
+                for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
                         continue
@@ -545,7 +570,7 @@ class OpenAICompatibleBrain:
 
     def generate_stream(
         self, prompt, on_token, system_prompt=None, json_mode=False, options=None,
-        on_thought_delta=None,
+        on_thought_delta=None, cancel_event=None,
     ):
         """Stream OpenAI-compatible SSE deltas to on_token and return full text."""
         if not self.is_configured():
@@ -586,9 +611,9 @@ class OpenAICompatibleBrain:
         try:
             context = ssl.create_default_context()
             with urllib.request.urlopen(
-                request, timeout=self.timeout, context=context
+                request, timeout=min(self.timeout, 1.0) if cancel_event is not None else self.timeout, context=context
             ) as response:
-                for raw_line in response:
+                for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
                         continue
