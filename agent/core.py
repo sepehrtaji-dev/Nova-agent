@@ -1542,7 +1542,7 @@ class NovaCore:
                 "conversation": self._conversation_context(max_chars=10000),
             },
             on_result=record_result,
-            on_answer_delta=lambda token: self._status("MODEL_ANSWER_DELTA:" + str(token)),
+            on_answer_delta=lambda token: (self._check_cancelled(), self._status("MODEL_ANSWER_DELTA:" + str(token))),
             on_thought_delta=(lambda token: (self._check_cancelled(), self._status("MODEL_THOUGHT_DELTA:" + str(token)))) if self.thinking_enabled else None,
             max_rounds=getattr(self, "max_steps", 12),
             cancel_event=getattr(self, "cancel_event", None),
@@ -1905,6 +1905,7 @@ class NovaCore:
         goal_verified = False
         last_tool_error = None
         for step in range(
+            self._check_cancelled()
             self.max_steps
         ):
 
