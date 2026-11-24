@@ -147,8 +147,6 @@ class OpenAICompatibleBrain:
         Tool execution stays in Nova. This operation is not retried: replaying
         a timed-out tool decision could duplicate a side effect.
         """
-        if cancel_event is not None and cancel_event.is_set():
-            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
