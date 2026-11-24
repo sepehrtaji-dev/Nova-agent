@@ -212,6 +212,36 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertNotIn("id", assistant_call)
         self.assertNotIn("type", assistant_call)
 
+
+    def test_remote_stream_only_exposes_user_facing_reasoning_summary(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def __iter__(self):
+                events = [
+                    {"choices": [{"delta": {"reasoning_summary": "The model is checking the request."}}]},
+                    {"choices": [{"delta": {"reasoning_content": "PRIVATE INTERNAL TRACE"}}]},
+                    {"choices": [{"delta": {"content": "Ready."}}]},
+                ]
+                return iter([
+                    ("data: " + json.dumps(event) + "\n").encode("utf-8")
+                    for event in events
+                ] + [b"data: [DONE]\n"])
+
+        thoughts = []
+        with mock.patch("model.remote.urllib.request.urlopen", return_value=FakeResponse()):
+            result = self.brain.generate_tool_turn_stream(
+                messages=[{"role": "user", "content": "hello"}],
+                tools=[],
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual(thoughts, ["The model is checking the request."])
+        self.assertEqual(result["thinking"], "The model is checking the request.")
+        self.assertNotIn("PRIVATE INTERNAL TRACE", "".join(thoughts))
+        self.assertEqual(result["content"], "Ready.")
+
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
         sent = CAPTURED[-1]
