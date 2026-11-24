@@ -22,6 +22,7 @@ TOOL_ACTIVITIES = {
     "noviqx_github_get_file": "Reading from GitHub",
     "noviqx_github_update_file": "Updating GitHub file",
     "desktop": "Controlling the desktop",
+    "spawn_subagent": "Delegating to a subagent",
 }
 
 # Fallback prefixes for tools registered outside the manifest default set
