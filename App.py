@@ -1265,6 +1265,25 @@ class NovaWindow(QMainWindow):
         self._model_discovery_worker = None
         self._start_model_discovery()
 
+    def closeEvent(self, event):
+        active_worker = self.worker
+        if active_worker is not None and active_worker.isRunning():
+            active_worker.request_stop()
+            if not active_worker.wait(1800):
+                QMessageBox.information(
+                    self,
+                    "Nova is stopping",
+                    "The current model or tool call is still shutting down. Wait a moment, then close Nova again.",
+                )
+                event.ignore()
+                return
+        discovery_worker = self._model_discovery_worker
+        if discovery_worker is not None and discovery_worker.isRunning():
+            if not discovery_worker.wait(3500):
+                event.ignore()
+                return
+        super().closeEvent(event)
+
     def _create_core(self):
         try:
             return NovaCore()
@@ -1661,9 +1680,9 @@ class NovaWindow(QMainWindow):
         if self._changing_agent_tabs or not (0 <= index < len(self._agent_sessions)):
             return
         if self.busy:
-            self.agent_tab_bar.blockSignals(True)
-            self.agent_tab_bar.setCurrentIndex(self._active_agent_index)
-            self.agent_tab_bar.blockSignals(False)
+            self.agent_tabs.blockSignals(True)
+            self.agent_tabs.setCurrentIndex(self._active_agent_index)
+            self.agent_tabs.blockSignals(False)
             return
         self._sync_active_agent_session()
         self._active_agent_index = index
@@ -1856,13 +1875,17 @@ class NovaWindow(QMainWindow):
         self._model_discovery_worker = worker
         worker.models_ready.connect(self._on_models_discovered)
         worker.discovery_failed.connect(lambda _error: None)
-        worker.finished.connect(lambda: setattr(self, "_model_discovery_worker", None))
+        worker.finished.connect(lambda current=worker: self._on_model_discovery_finished(current))
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_models_discovered(self, models):
         self._installed_models = list(models or [])
         self._refresh_model_labels()
+
+    def _on_model_discovery_finished(self, worker):
+        if self._model_discovery_worker is worker:
+            self._model_discovery_worker = None
 
     def _toggle_sidebar(self):
         self._sidebar_collapsed = not self._sidebar_collapsed
