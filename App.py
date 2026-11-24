@@ -1551,6 +1551,7 @@ class NovaWindow(QMainWindow):
         self._render_current_chat()
 
     def _render_current_chat(self):
+        self.task_plan_panel = None
         messages = self._restore_core_memory(self.current_chat_id)
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
@@ -1575,6 +1576,12 @@ class NovaWindow(QMainWindow):
         if stretch:
             self.chat_container_layout.addItem(stretch)
         self._scroll_chat_to_bottom()
+
+    def _clear_task_plan_panel(self):
+        if self.task_plan_panel is not None:
+            self.chat_container_layout.removeWidget(self.task_plan_panel)
+            self.task_plan_panel.deleteLater()
+            self.task_plan_panel = None
 
     def _insert_task_plan_panel(self):
         if self.task_plan_panel is not None:
@@ -1928,7 +1935,7 @@ class NovaWindow(QMainWindow):
             setter(self.thinking_enabled)
         self.think_button.setEnabled(False)
         self.thinking_panel = None
-        self.task_plan_panel = None
+        self._clear_task_plan_panel()
         self._discard_streaming_message()
 
         self.worker = AgentWorker(self.core, message, self)
