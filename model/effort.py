@@ -71,6 +71,7 @@ class EffortAwareBrain:
                     system_prompt=system_prompt,
                     options=self._remote_options(options),
                     on_token=on_token,
+                    on_thought_delta=on_thought_delta,
                 )
             think_resolver = getattr(self.brain, "think_value_for_effort", None)
             think_value = (
