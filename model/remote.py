@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import ssl
 import time
 import urllib.error
@@ -32,7 +31,6 @@ def _iter_stream_lines(response, cancel_event, timeout):
     configured request timeout instead; the agent runs on a worker thread, so
     the GUI remains responsive, and cancellation is checked between SSE lines.
     """
-    idle_timeout = max(1.0, float(timeout or 1.0))
     while True:
         if cancel_event is not None and cancel_event.is_set():
             raise GenerationCancelled("Generation stopped by user.")
@@ -189,7 +187,7 @@ class OpenAICompatibleBrain:
         )
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
+            with urllib.request.urlopen(request, timeout=min(self.timeout, 15.0), context=context) as response:
                 raw = response.read().decode("utf-8", "replace")
             data = json.loads(raw)
         except urllib.error.HTTPError as exc:
