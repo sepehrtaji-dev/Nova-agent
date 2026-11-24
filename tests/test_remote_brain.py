@@ -446,12 +446,12 @@ class ProviderSelectionTests(unittest.TestCase):
 
     def test_ollama_native_tool_stream_emits_thinking_and_tool_calls(self):
         chunks = [
-            {"message": {"thinking": "First, inspect ", "content": ""}},
-            {"message": {"thinking": "the request.", "content": ""}},
-            {"message": {"thinking": "", "content": "", "tool_calls": [{
+            {"message": {"thinking_summary": "The model is reviewing the request." , "content": ""}},
+            {"message": {"thinking_summary": "The request is clear.", "content": ""}},
+            {"message": {"thinking_summary": "", "content": "", "tool_calls": [{
                 "function": {"name": "read_file", "arguments": {"path": "README.md"}}
             }]}},
-            {"message": {"thinking": "", "content": "I inspected the README."}},
+            {"message": {"thinking_summary": "", "content": "I inspected the README."}},
         ]
         thoughts = []
         with mock.patch("model.ollama.ollama.show", return_value={
@@ -463,8 +463,8 @@ class ProviderSelectionTests(unittest.TestCase):
                 tools=[],
                 on_thought_delta=thoughts.append,
             )
-        self.assertEqual("".join(thoughts), "First, inspect the request.")
-        self.assertEqual(result["thinking"], "First, inspect the request.")
+        self.assertEqual("".join(thoughts), "The model is reviewing the request.The request is clear.")
+        self.assertEqual(result["thinking"], "The model is reviewing the request.The request is clear.")
         self.assertEqual(result["content"], "I inspected the README.")
         self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
         self.assertIs(chat.call_args.kwargs["think"], True)
