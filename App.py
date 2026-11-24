@@ -24,7 +24,7 @@ from integrations.noviqx.settings import (
 )
 
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -274,6 +274,9 @@ class MarkdownLabel(QTextBrowser):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet("QTextBrowser { background: transparent; border: none; color: #c9d1d9; }")
         self.document().setDocumentMargin(0)
+        text_option = QTextOption()
+        text_option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.document().setDefaultTextOption(text_option)
         self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         
         body_style = f"""
@@ -283,7 +286,10 @@ class MarkdownLabel(QTextBrowser):
         strong {{ color: #ffffff; }}
         code {{ background: {BG_INPUT}; color: {TEXT}; padding: 2px 5px; border-radius: 4px; font-family: monospace; }}
         a {{ color: #58a6ff; text-decoration: none; }}
-        p {{ margin: 6px 0 12px 0; }}
+        p {{ margin: 6px 0 12px 0; white-space: normal; }}
+        li {{ margin: 3px 0; }}
+        td, th {{ vertical-align: top; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
         ul, ol {{ margin: 6px 0 12px 0; padding-left: 20px; }}
         blockquote {{ color: {TEXT_MUTED}; border-left: 3px solid {BORDER}; margin-left: 6px; padding-left: 12px; }}
         table {{ border-collapse: collapse; margin: 10px 0 16px 0; }}
