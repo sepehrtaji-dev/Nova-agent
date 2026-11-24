@@ -222,6 +222,7 @@ class RemoteBrainTests(unittest.TestCase):
             def __iter__(self):
                 events = [
                     {"choices": [{"delta": {"reasoning_summary": "The model is checking the request."}}]},
+                    {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.summary", "summary": "It has enough context to answer."}]}}]},
                     {"choices": [{"delta": {"reasoning_content": "PRIVATE INTERNAL TRACE"}}]},
                     {"choices": [{"delta": {"content": "Ready."}}]},
                 ]
@@ -237,8 +238,8 @@ class RemoteBrainTests(unittest.TestCase):
                 tools=[],
                 on_thought_delta=thoughts.append,
             )
-        self.assertEqual(thoughts, ["The model is checking the request."])
-        self.assertEqual(result["thinking"], "The model is checking the request.")
+        self.assertEqual(thoughts, ["The model is checking the request.", "It has enough context to answer."])
+        self.assertEqual(result["thinking"], "The model is checking the request.\\nIt has enough context to answer.")
         self.assertNotIn("PRIVATE INTERNAL TRACE", "".join(thoughts))
         self.assertEqual(result["content"], "Ready.")
 
