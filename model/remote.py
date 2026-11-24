@@ -223,8 +223,10 @@ class OpenAICompatibleBrain:
             content = ""
         elif not isinstance(content, str):
             content = str(content)
+        summary = message.get("reasoning_summary")
         return {
             "content": content,
+            "reasoning_summary": summary if isinstance(summary, str) else "",
             "tool_calls": calls,
             "finish_reason": choice.get("finish_reason"),
         }
@@ -301,7 +303,9 @@ class OpenAICompatibleBrain:
                     delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
                     if not isinstance(delta, dict):
                         continue
-                    thought = delta.get("reasoning_content", "")
+                    # Only provider-declared user-facing summaries are shown.
+                    # Raw reasoning_content/reasoning may contain private chain-of-thought.
+                    thought = delta.get("reasoning_summary", "")
                     if isinstance(thought, str) and thought:
                         thought_parts.append(thought)
                         if callable(on_thought_delta):
@@ -601,7 +605,8 @@ class OpenAICompatibleBrain:
                     delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
                     if not isinstance(delta, dict):
                         continue
-                    thought = delta.get("reasoning_content", delta.get("reasoning", ""))
+                    # Never surface raw private reasoning tokens in the UI.
+                    thought = delta.get("reasoning_summary", "")
                     if thought and callable(on_thought_delta):
                         on_thought_delta(thought if isinstance(thought, str) else str(thought))
                     token = delta.get("content", "")
