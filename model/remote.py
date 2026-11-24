@@ -22,36 +22,24 @@ import urllib.request
 from agent.cancellation import GenerationCancelled
 
 
-def _set_response_poll_timeout(response, cancel_event):
-    if cancel_event is None:
-        return
-    try:
-        response.fp.raw._sock.settimeout(1.0)
-    except (AttributeError, OSError):
-        pass
-
-
 def _iter_stream_lines(response, cancel_event, timeout):
-    """Read SSE lines with short polling intervals so Stop is responsive."""
-    if cancel_event is None:
-        yield from response
-        return
-    deadline = time.monotonic() + max(1.0, float(timeout or 1.0))
+    """Read SSE lines without timing out a buffered socket file mid-read.
+
+    urllib's HTTPResponse wraps the socket in a buffered reader. Changing the
+    underlying socket to a short polling timeout and then calling readline()
+    can permanently invalidate that reader (Python raises
+    "cannot read from timed out object" on the next read). Keep the socket's
+    configured request timeout instead; the agent runs on a worker thread, so
+    the GUI remains responsive, and cancellation is checked between SSE lines.
+    """
+    idle_timeout = max(1.0, float(timeout or 1.0))
     while True:
-        if cancel_event.is_set():
+        if cancel_event is not None and cancel_event.is_set():
             raise GenerationCancelled("Generation stopped by user.")
-        try:
-            line = response.readline()
-        except socket.timeout:
-            if cancel_event.is_set():
-                raise GenerationCancelled("Generation stopped by user.")
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Remote stream timed out while waiting for data.")
-            continue
+        line = response.readline()
         if not line:
             break
         yield line
-        deadline = time.monotonic() + max(1.0, float(timeout or 1.0))
 
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -322,8 +310,7 @@ class OpenAICompatibleBrain:
         tool_parts = {}
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=min(self.timeout, 5.0) if cancel_event is not None else self.timeout, context=context) as response:
-                _set_response_poll_timeout(response, cancel_event)
+            with urllib.request.urlopen(request, timeout=min(self.timeout, 15.0), context=context) as response:
                 for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
@@ -626,9 +613,8 @@ class OpenAICompatibleBrain:
         try:
             context = ssl.create_default_context()
             with urllib.request.urlopen(
-                request, timeout=min(self.timeout, 5.0) if cancel_event is not None else self.timeout, context=context
+                request, timeout=min(self.timeout, 15.0), context=context
             ) as response:
-                _set_response_poll_timeout(response, cancel_event)
                 for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
