@@ -42,6 +42,7 @@ def _iter_stream_lines(response, cancel_event, timeout):
         if not line:
             break
         yield line
+        deadline = time.monotonic() + max(1.0, float(timeout or 1.0))
 
 
 _DEFAULT_SYSTEM_PROMPT = (
