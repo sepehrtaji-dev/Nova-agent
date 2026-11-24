@@ -4,8 +4,10 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QTabWidget
+from unittest import mock
+import json
 
-from App import ModelSettingsDialog, TaskPlanWidget
+from App import ModelSettingsDialog, RemoteModelDiscoveryWorker, TaskPlanWidget
 
 
 class AppUIComponentTests(unittest.TestCase):
@@ -26,6 +28,28 @@ class AppUIComponentTests(unittest.TestCase):
         )
         dialog.close()
         dialog.deleteLater()
+
+    def test_remote_model_catalog_is_loaded_without_exposing_api_key(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self):
+                return json.dumps({"data": [{"id": "model-z"}, {"id": "model-a"}]}).encode()
+
+        worker = RemoteModelDiscoveryWorker([{
+            "id": "profile-1",
+            "provider": "openai",
+            "base_url": "https://provider.example/v1",
+            "api_key": "secret-token",
+        }])
+        catalogs = []
+        worker.catalogs_ready.connect(catalogs.append)
+        with mock.patch("urllib.request.urlopen", return_value=FakeResponse()) as urlopen:
+            worker.run()
+        self.assertEqual(catalogs, [{"profile-1": ["model-a", "model-z"]}])
+        self.assertNotIn("secret-token", str(urlopen.call_args))
 
     def test_task_plan_panel_marks_only_completed_steps(self):
         panel = TaskPlanWidget()
