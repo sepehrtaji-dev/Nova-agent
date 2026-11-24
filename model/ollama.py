@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from agent.cancellation import GenerationCancelled
 
 
 # Loopback hosts must never be sent through a system proxy: the ollama
@@ -317,7 +318,7 @@ class OllamaBrain:
 
     def generate_tool_turn_stream(
         self, messages, tools, system_prompt=None, options=None, think=None,
-        on_token=None, on_thought_delta=None,
+        on_token=None, on_thought_delta=None, cancel_event=None,
     ):
         """Stream native tool-call turns while preserving the normal response shape."""
         if not self.model:
@@ -380,6 +381,8 @@ class OllamaBrain:
             emitted = False
             try:
                 for part in ollama.chat(**kwargs):
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise GenerationCancelled("Generation stopped by user.")
                     if isinstance(part, dict):
                         message = part.get("message") or {}
                         token = message.get("content", "") if isinstance(message, dict) else ""
@@ -570,7 +573,7 @@ class OllamaBrain:
 
     def generate_stream(
         self, prompt, on_token, system_prompt=None, json_mode=False, options=None,
-        think=None, on_thought_delta=None,
+        think=None, on_thought_delta=None, cancel_event=None,
     ):
         """Stream generated text chunks to on_token and return the full text."""
         system = system_prompt or SYSTEM_PROMPT
@@ -615,6 +618,8 @@ class OllamaBrain:
             emitted = False
             try:
                 for part in ollama.chat(**kwargs):
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise GenerationCancelled("Generation stopped by user.")
                     if isinstance(part, dict):
                         message = part.get("message") or {}
                         token = message.get("content", "") if isinstance(message, dict) else ""
