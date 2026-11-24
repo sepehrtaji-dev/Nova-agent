@@ -365,12 +365,15 @@ class TaskPlanWidget(QFrame):
                 item.widget().deleteLater()
         steps = plan.get("steps", []) if isinstance(plan, dict) else []
         steps = [step for step in steps if isinstance(step, dict)]
-        completed = 0
-        for index, step in enumerate(steps, 1):
+        completed = sum(
+            str(step.get("status", "pending") or "pending").casefold()
+            in {"completed", "complete", "done", "verified"}
+            for step in steps
+        )
+        for index, step in enumerate(steps[:6], 1):
             status = str(step.get("status", "pending") or "pending").casefold()
             done = status in {"completed", "complete", "done", "verified"}
             failed = status in {"failed", "error"}
-            completed += int(done)
             marker = "✓" if done else "×" if failed else "●" if status in {"running", "in_progress", "in progress"} else "○"
             color = "#7ee787" if done else "#ff7b72" if failed else ACCENT if marker == "●" else TEXT_MUTED
             title = str(step.get("description") or step.get("action") or step.get("tool") or f"Step {index}")
@@ -378,6 +381,10 @@ class TaskPlanWidget(QFrame):
             label.setWordWrap(True)
             label.setStyleSheet(f"color: {color if done or failed or marker == '●' else TEXT}; font-size: 11px; border: none; background: transparent;")
             self._steps.addWidget(label)
+        if len(steps) > 6:
+            more = QLabel(f"+ {len(steps) - 6} more steps")
+            more.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; border: none;")
+            self._steps.addWidget(more)
         self._progress.setText(f"{completed} / {len(steps)} completed")
         self.setVisible(bool(steps))
 
