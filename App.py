@@ -2044,6 +2044,7 @@ class NovaWindow(QMainWindow):
         menu.addAction(search_action)
         menu.addSection("INSTALLED LOCAL MODELS")
         searchable_actions = []
+        searchable_groups = []
         for name in sorted(set(installed), key=str.casefold):
             action = menu.addAction(("✓  " if (not remote and name == current) else "    ") + name)
             action.triggered.connect(lambda _, n=name: self._select_model(n))
@@ -2077,12 +2078,17 @@ class NovaWindow(QMainWindow):
                 if not available_remote:
                     action = submenu.addAction("No model catalog available")
                     action.setEnabled(False)
-        search_box.textChanged.connect(
-            lambda query: [
-                action.setVisible(not query.strip() or query.casefold() in label.casefold())
-                for action, label in searchable_actions
-            ]
-        )
+                searchable_groups.append((submenu, display_name, available_remote))
+        def filter_model_actions(query):
+            needle = query.strip().casefold()
+            for action, label in searchable_actions:
+                action.setVisible(not needle or needle in label.casefold())
+            for submenu, display_name, model_names in searchable_groups:
+                group_match = not needle or needle in display_name.casefold() or any(
+                    needle in model_name.casefold() for model_name in model_names
+                )
+                submenu.menuAction().setVisible(group_match)
+        search_box.textChanged.connect(filter_model_actions)
         menu.aboutToShow.connect(search_box.setFocus)
 
         menu.addSeparator()
