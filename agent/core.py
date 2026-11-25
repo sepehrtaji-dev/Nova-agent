@@ -147,10 +147,16 @@ class NovaCore:
             setter(self.thinking_enabled)
 
     def _generate_with_native_thinking(self, prompt, system_prompt):
-        """Generate a short public approach summary first, then stream the answer.
+        """Stream the answer immediately; route native thinking to the panel live.
 
-        The summary is a user-facing explanation, not private chain-of-thought.
-        Final answer tokens are forwarded immediately; they are never buffered.
+        The old design generated a separate "approach summary" before the answer
+        — a second full API call that froze the UI for its whole duration and
+        again at the answer's first token (the freeze the user saw on both
+        remote and local models), and dropped the thinking of reasoning models
+        whose supports_thinking() probe returned False (the empty panel). The
+        answer now streams at once and the model's own native thinking is routed
+        to the panel live, interleaved with the answer. Models that produce no
+        thinking simply show no panel.
         """
         stream = getattr(self.brain, "generate_stream", None)
         if not callable(stream):
@@ -159,12 +165,10 @@ class NovaCore:
             return str(result or "").strip()
 
         thinking_on = bool(getattr(self, "thinking_enabled", False))
-        # If the model advertises a native thinking channel, show that thinking
-        # live while the answer streams. Running a separate "approach summary"
-        # generation first would block the UI for a whole extra generation and,
-        # for reasoning models that answer short prompts inside their thinking
-        # channel (empty content stream), left the panel empty and the app
-        # frozen during the model's thinking phases.
+        # Resolve a think= value only when the brain advertises a native
+        # thinking channel (OllamaBrain.think_value_for_effort). The answer
+        # streams immediately (no separate pre-answer generation); the model's
+        # own native thinking is routed to the panel live via on_thought_delta.
         native_think_value = None
         if thinking_on:
             resolver = getattr(self.brain, "think_value_for_effort", None)
@@ -175,101 +179,6 @@ class NovaCore:
                     )
                 except Exception:
                     native_think_value = None
-            if native_think_value is None:
-                supported = getattr(self.brain, "supports_thinking", None)
-                if callable(supported) and supported():
-                    native_think_value = True
-        use_native_thinking = thinking_on and native_think_value is not None
-
-        if thinking_on and not use_native_thinking:
-            summary_prompt = (
-                "Before answering, write a short user-facing approach summary "
-                "for the user's request. State the topic and the broad method "
-                "you will use in one or two concise sentences. Do not reveal "
-                "private chain-of-thought, hidden deliberation, or detailed "
-                "internal reasoning. Do not answer the request yet.\n\n"
-                f"User request:\n{str(prompt)[:1800]}"
-            )
-            summary_parts = []
-            thinking_summary_parts = []
-            started = False
-
-            def on_summary(token):
-                nonlocal started
-                self._check_cancelled()
-                if not token:
-                    return
-                # Stream the approach preview token-by-token so the Thinking
-                # panel fills live. Buffering the whole summary and emitting it
-                # as one delta only after the separate summary generation
-                # finished left the panel empty and the UI idle for the full
-                # duration of that generation, which read as a freeze and, when
-                # the model returned empty content, as "no reasoning at all".
-                if not started:
-                    self._status("MODEL_THOUGHT_START")
-                    started = True
-                self._status("MODEL_THOUGHT_DELTA:" + str(token))
-                summary_parts.append(str(token))
-
-            def on_summary_thought(token):
-                # Reasoning models sometimes answer a short prompt entirely
-                # inside their native thinking channel and emit an empty content
-                # stream. Capture a labelled thinking_summary so the panel can
-                # fall back to it instead of staying empty.
-                self._check_cancelled()
-                if token:
-                    thinking_summary_parts.append(str(token))
-
-            def finalize_summary(summary_text, thought_text):
-                nonlocal started
-                if started:
-                    self._status("MODEL_THOUGHT_END")
-                    return
-                text = " ".join(str(summary_text or "").split()).strip()
-                if not text:
-                    text = " ".join(str(thought_text or "").split()).strip()
-                if text:
-                    self._status("MODEL_THOUGHT_START")
-                    self._status("MODEL_THOUGHT_DELTA:" + text)
-                    self._status("MODEL_THOUGHT_END")
-
-            try:
-                summary = stream(
-                    summary_prompt,
-                    on_summary,
-                    system_prompt=(
-                        "You provide concise, user-facing approach summaries. "
-                        "Never disclose private chain-of-thought."
-                    ),
-                    on_thought_delta=on_summary_thought,
-                )
-                self._check_cancelled()
-                finalize_summary(summary, " ".join(thinking_summary_parts))
-            except TypeError as exc:
-                # A third-party brain whose generate_stream rejects
-                # on_thought_delta (or system_prompt). Retry without the extra
-                # kwarg so the approach preview still streams token-by-token.
-                if "on_thought_delta" not in str(exc) and "system_prompt" not in str(exc):
-                    logging.exception("Could not generate the optional approach summary")
-                else:
-                    started = False
-                    summary_parts.clear()
-                    try:
-                        summary = stream(
-                            summary_prompt,
-                            on_summary,
-                            system_prompt=(
-                                "You provide concise, user-facing approach summaries. "
-                                "Never disclose private chain-of-thought."
-                            ),
-                        )
-                        self._check_cancelled()
-                        finalize_summary(summary, "")
-                    except Exception:
-                        logging.exception("Could not generate the optional approach summary")
-            except Exception:
-                # A summary failure must never block the actual user request.
-                logging.exception("Could not generate the optional approach summary")
 
         answer_parts = []
         thought_started = False
@@ -284,8 +193,9 @@ class NovaCore:
 
         def on_answer_thought(token):
             # Route the model's native thinking to the panel LIVE while the
-            # answer streams, so reasoning phases fill the panel instead of
-            # freezing the UI waiting for content tokens that have not arrived.
+            # answer streams. This is the only thinking surface: reasoning
+            # phases fill the panel instead of freezing the UI, and models that
+            # produce no thinking simply show no panel.
             nonlocal thought_started
             self._check_cancelled()
             if not token:
@@ -295,17 +205,18 @@ class NovaCore:
                 thought_started = True
             self._status("MODEL_THOUGHT_DELTA:" + str(token))
 
+        # Always route on_thought_delta when Think is on, for every brain. Set
+        # think= only when the brain advertises a native thinking channel;
+        # remote OpenAI-compatible brains have no think parameter and stream
+        # labelled reasoning summaries through on_thought_delta directly.
+        stream_kwargs = {"system_prompt": system_prompt}
+        if thinking_on:
+            stream_kwargs["on_thought_delta"] = on_answer_thought
+            if native_think_value is not None:
+                stream_kwargs["think"] = native_think_value
+
         try:
-            if use_native_thinking:
-                result = stream(
-                    prompt,
-                    on_answer,
-                    system_prompt=system_prompt,
-                    on_thought_delta=on_answer_thought,
-                    think=native_think_value,
-                )
-            else:
-                result = stream(prompt, on_answer, system_prompt=system_prompt)
+            result = stream(prompt, on_answer, **stream_kwargs)
         except TypeError as exc:
             msg = str(exc)
             if (
@@ -314,8 +225,8 @@ class NovaCore:
                 and "think" not in msg
             ):
                 raise
-            # A third-party brain rejected one of the optional kwargs; retry
-            # with just system_prompt (or nothing) so the answer still streams.
+            # A brain rejected one of the optional kwargs; retry with just
+            # system_prompt (or nothing) so the answer still streams.
             thought_started = False
             if "system_prompt" in msg:
                 result = stream(prompt, on_answer)

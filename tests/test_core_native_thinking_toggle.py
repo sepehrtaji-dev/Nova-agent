@@ -4,75 +4,42 @@ from agent.core import NovaCore
 
 
 class NativeThinkingBrain:
+    """A brain that streams an answer but emits no native thinking."""
+
     def __init__(self):
         self.calls = []
-        self.callback_received = None
+        self.kwargs_received = None
 
     def generate_stream(self, prompt, on_token, system_prompt=None, **kwargs):
         self.calls.append(prompt)
-        self.callback_received = kwargs.get("on_thought_delta")
-        if "Before answering, write a short user-facing approach summary" in prompt:
-            on_token("A concise approach preview.")
-            return "A concise approach preview."
+        self.kwargs_received = kwargs
         on_token("final ")
         on_token("answer")
         return "final answer"
 
 
-class CoreNativeThinkingToggleTests(unittest.TestCase):
-    def make_core(self, enabled):
-        core = NovaCore.__new__(NovaCore)
-        core.brain = NativeThinkingBrain()
-        events = []
-        core.status_callback = events.append
-        core.thinking_enabled = enabled
-        return core, events
-
-    def test_disabled_skips_approach_preview_and_streams_answer_immediately(self):
-        core, events = self.make_core(False)
-        answer = core._generate_with_native_thinking("hello", "Nova")
-        self.assertEqual(answer, "final answer")
-        self.assertEqual(len(core.brain.calls), 1)
-        self.assertEqual(core.brain.calls, ["hello"])
-        self.assertEqual(events, [
-            "MODEL_ANSWER_DELTA:final ",
-            "MODEL_ANSWER_DELTA:answer",
-        ])
-
-    def test_enabled_shows_approach_before_answer_without_buffering(self):
-        core, events = self.make_core(True)
-        answer = core._generate_with_native_thinking("hello", "Nova")
-        self.assertEqual(answer, "final answer")
-        self.assertEqual(len(core.brain.calls), 2)
-        self.assertEqual(events, [
-            "MODEL_THOUGHT_START",
-            "MODEL_THOUGHT_DELTA:A concise approach preview.",
-            "MODEL_THOUGHT_END",
-            "MODEL_ANSWER_DELTA:final ",
-            "MODEL_ANSWER_DELTA:answer",
-        ])
-
-
-class StreamingSummaryBrain:
-    """Streams the approach preview as several tokens (live, not buffered)."""
+class InterleavedReasoningBrain:
+    """A reasoning model that emits thinking tokens interleaved with content."""
 
     def __init__(self):
         self.calls = []
 
-    def generate_stream(self, prompt, on_token, system_prompt=None, **kwargs):
-        self.calls.append(prompt)
-        if "Before answering, write a short user-facing approach summary" in prompt:
-            for tok in ("Planning ", "a concise ", "reply."):
-                on_token(tok)
-            return "Planning a concise reply."
+    def generate_stream(self, prompt, on_token, system_prompt=None,
+                        on_thought_delta=None, **kwargs):
+        self.calls.append({"has_thought_cb": callable(on_thought_delta)})
+        if callable(on_thought_delta):
+            on_thought_delta("Planning ")
+            on_thought_delta("a concise ")
+            on_thought_delta("reply.")
         on_token("final answer")
         return "final answer"
 
 
-class ThinkingOnlySummaryBrain:
-    """A reasoning model that answers the preview prompt in its thinking channel.
+class ThinkingOnlyBrain:
+    """A reasoning model that answers entirely in its thinking channel.
 
-    The content stream is empty; the summary arrives via on_thought_delta.
+    The content stream is empty; the reasoning arrives via on_thought_delta.
+    This is the gemma4 case the user reported: the panel must still fill.
     """
 
     def __init__(self):
@@ -80,13 +47,10 @@ class ThinkingOnlySummaryBrain:
 
     def generate_stream(self, prompt, on_token, system_prompt=None,
                         on_thought_delta=None, **kwargs):
-        self.calls.append(prompt)
-        if "Before answering, write a short user-facing approach summary" in prompt:
-            if callable(on_thought_delta):
-                on_thought_delta("Greeting the user warmly.")
-            return ""
-        on_token("final answer")
-        return "final answer"
+        self.calls.append({"has_thought_cb": callable(on_thought_delta)})
+        if callable(on_thought_delta):
+            on_thought_delta("Greeting the user warmly.")
+        return ""
 
 
 class StrictSignatureBrain:
@@ -97,19 +61,16 @@ class StrictSignatureBrain:
 
     def generate_stream(self, prompt, on_token, system_prompt=None):
         self.calls.append(prompt)
-        if "Before answering, write a short user-facing approach summary" in prompt:
-            on_token("A concise approach preview.")
-            return "A concise approach preview."
         on_token("final answer")
         return "final answer"
 
 
 class NativeReasoningBrain:
-    """A reasoning model that interleaves thinking and content in one stream.
+    """A reasoning model that advertises a thinking channel.
 
-    advertises a native thinking channel, so the approach-preview path is
-    skipped and the model's own thinking is routed to the panel live while the
-    answer streams.
+    think_value_for_effort resolves a think= value, so the core passes think=
+    and routes on_thought_delta; the model's own thinking is shown live while
+    the answer streams.
     """
 
     def __init__(self):
@@ -127,9 +88,6 @@ class NativeReasoningBrain:
             "think": think,
             "has_thought_cb": callable(on_thought_delta),
         })
-        if "Before answering, write a short user-facing approach summary" in prompt:
-            on_token("SHOULD NOT APPEAR")
-            return "SHOULD NOT APPEAR"
         if callable(on_thought_delta):
             on_thought_delta("Considering the greeting.")
         on_token("Hello! ")
@@ -137,8 +95,43 @@ class NativeReasoningBrain:
         return "Hello! I'm well."
 
 
-class ApproachPreviewStreamingTests(unittest.TestCase):
-    """Think mode must stream the approach preview live and never freeze."""
+class CoreNativeThinkingToggleTests(unittest.TestCase):
+    def make_core(self, brain, enabled):
+        core = NovaCore.__new__(NovaCore)
+        core.brain = brain
+        events = []
+        core.status_callback = events.append
+        core.thinking_enabled = enabled
+        return core, events
+
+    def test_disabled_streams_answer_only(self):
+        core, events = self.make_core(NativeThinkingBrain(), False)
+        answer = core._generate_with_native_thinking("hello", "Nova")
+        self.assertEqual(answer, "final answer")
+        self.assertEqual(core.brain.calls, ["hello"])
+        self.assertEqual(events, [
+            "MODEL_ANSWER_DELTA:final ",
+            "MODEL_ANSWER_DELTA:answer",
+        ])
+
+    def test_enabled_routes_on_thought_delta_but_skips_panel_without_thinking(self):
+        # Think is on and on_thought_delta is routed to the brain, but this brain
+        # never calls it. No thinking panel appears; the answer streams at once.
+        # There is no separate pre-answer generation, so no second API call and
+        # no transition freeze.
+        core, events = self.make_core(NativeThinkingBrain(), True)
+        answer = core._generate_with_native_thinking("hello", "Nova")
+        self.assertEqual(answer, "final answer")
+        self.assertEqual(core.brain.calls, ["hello"])
+        self.assertIn("on_thought_delta", core.brain.kwargs_received)
+        self.assertEqual(events, [
+            "MODEL_ANSWER_DELTA:final ",
+            "MODEL_ANSWER_DELTA:answer",
+        ])
+
+
+class NativeThinkingStreamTests(unittest.TestCase):
+    """Think mode routes the model's native thinking to the panel live during the answer."""
 
     def make_core(self, brain):
         core = NovaCore.__new__(NovaCore)
@@ -148,52 +141,49 @@ class ApproachPreviewStreamingTests(unittest.TestCase):
         core.thinking_enabled = True
         return core, events
 
-    def test_summary_is_streamed_token_by_token_not_buffered(self):
-        core, events = self.make_core(StreamingSummaryBrain())
+    def test_thinking_streams_live_token_by_token(self):
+        core, events = self.make_core(InterleavedReasoningBrain())
         answer = core._generate_with_native_thinking("hello", "Nova")
         self.assertEqual(answer, "final answer")
-        # One START, one DELTA per token, one END — the panel fills live and
-        # the UI is never idle for the whole summary generation (the freeze).
+        # One START, one DELTA per thinking token, then the answer, then END.
+        # The panel fills live and the UI is never idle — there is no separate
+        # blocking generation before the answer (the freeze the user saw).
         self.assertEqual(events, [
             "MODEL_THOUGHT_START",
             "MODEL_THOUGHT_DELTA:Planning ",
             "MODEL_THOUGHT_DELTA:a concise ",
             "MODEL_THOUGHT_DELTA:reply.",
-            "MODEL_THOUGHT_END",
             "MODEL_ANSWER_DELTA:final answer",
+            "MODEL_THOUGHT_END",
         ])
 
-    def test_empty_content_falls_back_to_labelled_thinking_summary(self):
-        core, events = self.make_core(ThinkingOnlySummaryBrain())
+    def test_thinking_only_model_still_fills_the_panel(self):
+        # A reasoning model that answers entirely in its thinking channel (empty
+        # content stream) must still fill the panel — this is the "empty panel"
+        # bug the user reported for gemma4.
+        core, events = self.make_core(ThinkingOnlyBrain())
         answer = core._generate_with_native_thinking("hello", "Nova")
-        self.assertEqual(answer, "final answer")
+        self.assertEqual(answer, "")
         self.assertEqual(events, [
             "MODEL_THOUGHT_START",
             "MODEL_THOUGHT_DELTA:Greeting the user warmly.",
             "MODEL_THOUGHT_END",
-            "MODEL_ANSWER_DELTA:final answer",
         ])
 
     def test_strict_brain_retries_without_on_thought_delta(self):
         core, events = self.make_core(StrictSignatureBrain())
         answer = core._generate_with_native_thinking("hello", "Nova")
         self.assertEqual(answer, "final answer")
-        # The first call raised TypeError (on_thought_delta rejected); the
-        # retry without it still streams the approach preview token-by-token.
-        self.assertEqual(events, [
-            "MODEL_THOUGHT_START",
-            "MODEL_THOUGHT_DELTA:A concise approach preview.",
-            "MODEL_THOUGHT_END",
-            "MODEL_ANSWER_DELTA:final answer",
-        ])
+        # The first call raised TypeError (on_thought_delta rejected); the retry
+        # without it still streams the answer.
+        self.assertEqual(events, ["MODEL_ANSWER_DELTA:final answer"])
 
-    def test_native_thinking_streams_live_during_answer_and_skips_summary(self):
+    def test_native_thinking_streams_live_during_answer_and_passes_think(self):
         core, events = self.make_core(NativeReasoningBrain())
         answer = core._generate_with_native_thinking("hello", "Nova")
         self.assertEqual(answer, "Hello! I'm well.")
-        # Only ONE generation (the answer) — the separate approach summary is
-        # skipped because the model has a native thinking channel, so there is
-        # no second blocking generation to freeze the UI.
+        # Only ONE generation (the answer) — no separate approach summary, so
+        # there is no second blocking generation to freeze the UI.
         self.assertEqual(len(core.brain.calls), 1)
         self.assertTrue(core.brain.calls[0]["has_thought_cb"])
         self.assertIs(core.brain.calls[0]["think"], True)

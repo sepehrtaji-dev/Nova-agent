@@ -2524,11 +2524,9 @@ class NovaWindow(QMainWindow):
             setter(self.thinking_enabled)
         self.think_button.setEnabled(False)
         self.thinking_panel = None
-        if self.thinking_enabled:
-            # Mount the panel before generation starts. Waiting for the first
-            # thinking token made the panel appear late (or not at all on
-            # providers that delay or omit their first summary event).
-            self.thinking_panel = self._insert_thinking_panel()
+        # The panel mounts lazily on the first MODEL_THOUGHT_START — i.e. when
+        # the model actually emits thinking. Pre-mounting it left an empty
+        # "Thinking" card visible for models that produce no reasoning.
         self._clear_task_plan_panel()
         execution_state = getattr(self.core, "execution_state", None)
         if isinstance(execution_state, dict):
