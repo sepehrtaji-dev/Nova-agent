@@ -152,7 +152,7 @@ class NovaCore:
         # Ollama's native message.thinking field is private model deliberation.
         # Ask the model for a concise, user-facing approach note instead of
         # forwarding that raw field into the UI.
-        if self.thinking_enabled and backend.__class__.__name__ == "OllamaBrain":
+        if bool(getattr(self, "thinking_enabled", False)) and backend.__class__.__name__ == "OllamaBrain":
             return self._generate_with_visible_note(prompt, system_prompt)
 
         stream = getattr(self.brain, "generate_stream", None)
@@ -171,7 +171,7 @@ class NovaCore:
         def on_thought(token):
             self._check_cancelled()
             nonlocal thought_started
-            if not self.thinking_enabled or not token:
+            if not bool(getattr(self, "thinking_enabled", False)) or not token:
                 return
             if not thought_started:
                 thought_started = True
@@ -180,7 +180,7 @@ class NovaCore:
 
         try:
             stream_kwargs = {
-                "on_thought_delta": on_thought if self.thinking_enabled else None,
+                "on_thought_delta": on_thought if bool(getattr(self, "thinking_enabled", False)) else None,
             }
             if getattr(self.brain, "supports_cancel_event", False):
                 stream_kwargs["cancel_event"] = getattr(self, "cancel_event", None)
@@ -193,7 +193,7 @@ class NovaCore:
                 self._status("MODEL_THOUGHT_END")
         self._check_cancelled()
         answer = str(result or "").strip()
-        if self.thinking_enabled and not thought_started and answer:
+        if bool(getattr(self, "thinking_enabled", False)) and not thought_started and answer:
             # Providers that do not expose a user-facing summary still get a
             # clearly labelled, model-authored approach summary. This is not
             # presented as the model's private chain-of-thought.
