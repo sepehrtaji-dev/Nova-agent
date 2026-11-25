@@ -554,8 +554,8 @@ class AgentWorker(QThread):
                                 "Do not answer the user's request; only name the conversation."
                             ),
                         )
-                        title = " ".join(str(title or "").strip().strip('\\\"\\'`').split())
-                        title = re.sub(r"^(title|عنوان)\\s*[:：-]\\s*", "", title, flags=re.IGNORECASE)
+                        title = " ".join(str(title or "").strip().strip(chr(34) + chr(39) + chr(96)).split())
+                        title = re.sub(r"^(title|عنوان)\s*[:：-]\s*", "", title, flags=re.IGNORECASE)
                         title = title[:64].strip()
                         if title:
                             self.title_generated.emit(self.chat_id, title)
