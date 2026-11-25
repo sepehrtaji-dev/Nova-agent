@@ -543,32 +543,30 @@ class ProviderSelectionTests(unittest.TestCase):
 
     def test_anthropic_streams_summarized_thinking_blocks(self):
         class FakeResponse:
-            def __init__(self):
-                events = [
-                    {"type": "content_block_delta", "delta": {
-                        "type": "thinking_delta", "thinking": "The request needs a concise explanation."
-                    }},
-                    {"type": "content_block_delta", "delta": {
-                        "type": "text_delta", "text": "Ready."
-                    }},
-                ]
-                self.lines = iter([
-                    ("data: " + json.dumps(event) + "\n").encode("utf-8")
-                    for event in events
-                ])
             def __enter__(self):
                 return self
             def __exit__(self, *args):
                 return False
-            def readline(self):
-                return next(self.lines, b"")
 
+        events = [
+            {"type": "content_block_delta", "delta": {
+                "type": "thinking_delta", "thinking": "The request needs a concise explanation."
+            }},
+            {"type": "content_block_delta", "delta": {
+                "type": "text_delta", "text": "Ready."
+            }},
+        ]
+        lines = [
+            ("data: " + json.dumps(event) + "\n").encode("utf-8")
+            for event in events
+        ]
         brain = AnthropicBrain(
             model="claude-test", api_key="test-key",
             base_url="https://api.anthropic.com",
         )
         thoughts, tokens = [], []
-        with mock.patch("model.anthropic.urllib.request.urlopen", return_value=FakeResponse()) as urlopen:
+        with mock.patch("model.anthropic.urllib.request.urlopen", return_value=FakeResponse()) as urlopen, \
+             mock.patch("model.anthropic._iter_stream_lines", return_value=iter(lines)):
             result = brain.generate_stream(
                 "hello", tokens.append,
                 options={"show_reasoning": True},
