@@ -56,22 +56,34 @@ _DEFAULT_SYSTEM_PROMPT = (
 )
 
 def _extract_reasoning_summary(delta):
-    """Return only explicitly provider-labelled, user-facing reasoning summaries."""
+    """Return only provider-labelled summaries; never expose raw reasoning tokens."""
+    if not isinstance(delta, dict):
+        return ""
     summary = delta.get("reasoning_summary", "")
     if isinstance(summary, str) and summary.strip():
         return summary
     details = delta.get("reasoning_details", [])
     if isinstance(details, list):
-        parts = [
-            str(item.get("summary", "")).strip()
-            for item in details
-            if isinstance(item, dict)
-            and str(item.get("type", "")).casefold() in {"reasoning.summary", "summary"}
-            and isinstance(item.get("summary"), str)
-            and item.get("summary", "").strip()
-        ]
+        parts = []
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type", "")).casefold()
+            if kind not in {"reasoning.summary", "summary", "summary_text"}:
+                continue
+            value = item.get("summary", item.get("text", ""))
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
         return "\n".join(parts)
     return ""
+
+def _add_reasoning_request(payload, base_url, options):
+    """Enable provider summaries where the OpenAI-compatible gateway supports them."""
+    if not isinstance(options, dict) or not options.get("show_reasoning"):
+        return
+    if "openrouter.ai" in str(base_url or "").casefold():
+        effort = options.get("reasoning_effort", "medium")
+        payload["reasoning"] = {"effort": str(effort or "medium")}
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -193,6 +205,7 @@ class OpenAICompatibleBrain:
             for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
                 if key in options:
                     payload[key] = options[key]
+        _add_reasoning_request(payload, self.base_url, options)
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -263,10 +276,11 @@ class OpenAICompatibleBrain:
             content = ""
         elif not isinstance(content, str):
             content = str(content)
-        summary = message.get("reasoning_summary")
+        summary = _extract_reasoning_summary(message)
         return {
             "content": content,
-            "reasoning_summary": summary if isinstance(summary, str) else "",
+            "thinking": summary,
+            "reasoning_summary": summary,
             "tool_calls": calls,
             "finish_reason": choice.get("finish_reason"),
         }
@@ -310,6 +324,7 @@ class OpenAICompatibleBrain:
             for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
                 if key in options:
                     payload[key] = options[key]
+        _add_reasoning_request(payload, self.base_url, options)
 
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -614,6 +629,7 @@ class OpenAICompatibleBrain:
                     payload[key] = options[key]
             if "reasoning_effort" in options:
                 payload["reasoning_effort"] = options["reasoning_effort"]
+        _add_reasoning_request(payload, self.base_url, options)
 
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
