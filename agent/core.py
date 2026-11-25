@@ -140,11 +140,21 @@ class NovaCore:
         }
 
     def set_thinking_enabled(self, enabled):
-        """Enable forwarding of native provider thinking for the current turn."""
+        """Enable provider summaries or a public-facing approach note for this turn."""
         self.thinking_enabled = bool(enabled)
+        setter = getattr(self.brain, "set_thinking_enabled", None)
+        if callable(setter):
+            setter(self.thinking_enabled)
 
     def _generate_with_native_thinking(self, prompt, system_prompt):
-        """Stream answer text separately from the provider's native thinking field."""
+        """Stream answer text separately from provider-approved reasoning summaries."""
+        backend = getattr(self.brain, "brain", self.brain)
+        # Ollama's native message.thinking field is private model deliberation.
+        # Ask the model for a concise, user-facing approach note instead of
+        # forwarding that raw field into the UI.
+        if self.thinking_enabled and backend.__class__.__name__ == "OllamaBrain":
+            return self._generate_with_visible_note(prompt, system_prompt)
+
         stream = getattr(self.brain, "generate_stream", None)
         if not callable(stream):
             result = self.brain.generate(prompt, system_prompt=system_prompt)
@@ -182,7 +192,32 @@ class NovaCore:
             if thought_started:
                 self._status("MODEL_THOUGHT_END")
         self._check_cancelled()
-        return str(result or "").strip()
+        answer = str(result or "").strip()
+        if self.thinking_enabled and not thought_started and answer:
+            # Providers that do not expose a user-facing summary still get a
+            # clearly labelled, model-authored approach summary. This is not
+            # presented as the model's private chain-of-thought.
+            try:
+                summary = self.brain.generate(
+                    "Write a concise, user-facing summary (one or two sentences) "
+                    "of the high-level approach used to answer the request. "
+                    "Do not reveal hidden chain-of-thought or private deliberation.\n\n"
+                    f"User request:\n{str(prompt)[:1800]}\n\n"
+                    f"Final answer:\n{answer[:2400]}",
+                    system_prompt=(
+                        "You produce brief, user-facing approach summaries. "
+                        "Never reveal private chain-of-thought or detailed internal reasoning."
+                    ),
+                    options={"max_tokens": 140},
+                )
+                summary = " ".join(str(summary or "").strip().split())[:700]
+                if summary:
+                    self._status("MODEL_THOUGHT_START")
+                    self._status("MODEL_THOUGHT_DELTA:" + summary)
+                    self._status("MODEL_THOUGHT_END")
+            except Exception:
+                pass
+        return answer
 
     def _capability_context(self):
         """Live capability probe summary for prompts.
