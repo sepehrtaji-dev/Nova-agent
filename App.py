@@ -2016,7 +2016,7 @@ class NovaWindow(QMainWindow):
 
     def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "18") or 16))
+        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "18") or 18))
         self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -2051,7 +2051,7 @@ class NovaWindow(QMainWindow):
         if self.streaming_message is not None:
             return self.streaming_message
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "16") or 16))
+        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "18") or 18))
         self.chat_container_layout.addWidget(self.streaming_message)
         if stretch:
             self.chat_container_layout.addItem(stretch)
