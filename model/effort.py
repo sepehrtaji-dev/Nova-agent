@@ -131,7 +131,12 @@ class EffortAwareBrain:
                 cancel_event=cancel_event,
             )
         if isinstance(self.brain, AnthropicBrain):
-            return stream(prompt, on_token, system_prompt=system_prompt, json_mode=json_mode, options=self._remote_options(options))
+            return stream(
+                prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
+                options=self._remote_options(options),
+                on_thought_delta=on_thought_delta if self.thinking_enabled else None,
+                cancel_event=cancel_event,
+            )
         think_resolver = getattr(self.brain, "think_value_for_effort", None)
         think_value = (
             think_resolver(self.effort)
