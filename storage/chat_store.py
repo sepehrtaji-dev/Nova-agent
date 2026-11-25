@@ -145,26 +145,22 @@ class ChatStore:
                 (str(chat_id), role, content, context,
                  json.dumps(attachment_list, ensure_ascii=False), now),
             )
-            if role == "user":
-                title_row = db.execute(
-                    "SELECT title FROM chats WHERE id=?", (str(chat_id),)
-                ).fetchone()
-                if title_row and title_row["title"] == "New chat":
-                    title = " ".join(content.split())[:52] or "New chat"
-                    db.execute(
-                        "UPDATE chats SET title=?, updated_at=? WHERE id=?",
-                        (title, now, str(chat_id)),
-                    )
-                else:
-                    db.execute(
-                        "UPDATE chats SET updated_at=? WHERE id=?",
-                        (now, str(chat_id)),
-                    )
-            else:
-                db.execute(
-                    "UPDATE chats SET updated_at=? WHERE id=?",
-                    (now, str(chat_id)),
-                )
+            db.execute(
+                "UPDATE chats SET updated_at=? WHERE id=?",
+                (now, str(chat_id)),
+            )
+
+    def set_chat_title(self, chat_id, title):
+        """Persist a concise title selected by the conversation's model."""
+        value = " ".join(str(title or "").split())[:64]
+        if not value:
+            return False
+        with self._db() as db:
+            cursor = db.execute(
+                "UPDATE chats SET title=?, updated_at=? WHERE id=?",
+                (value, self._now(), str(chat_id)),
+            )
+            return cursor.rowcount > 0
 
     def delete_chat(self, chat_id):
         with self._db() as db:
