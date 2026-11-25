@@ -426,9 +426,38 @@ class OpenAICompatibleBrain:
                 arguments = call["function"]["arguments"]
             call["function"]["arguments"] = arguments
             calls.append(call)
+        summary = "\n".join(thought_parts)
+        if callable(on_thought_delta) and not summary:
+            # Providers that do not expose a summary still get a short,
+            # model-authored public explanation of the selected next action.
+            try:
+                user_request = next(
+                    (item.get("content", "") for item in reversed(messages or [])
+                     if isinstance(item, dict) and item.get("role") == "user"),
+                    "",
+                )
+                selected_tools = ", ".join(
+                    str(call.get("function", {}).get("name", ""))
+                    for call in calls if isinstance(call, dict)
+                )
+                summary = self.generate(
+                    "Write one concise user-facing sentence explaining the high-level "
+                    "approach for this request. Do not reveal private chain-of-thought. "
+                    "If a tool was selected, describe the intended action, not its result.\n\n"
+                    f"User request: {str(user_request)[:1200]}\n"
+                    f"Selected tools: {selected_tools or 'No tool selected'}",
+                    system_prompt="You produce concise, public-facing approach summaries only.",
+                    options={"max_tokens": 100},
+                )
+                summary = " ".join(str(summary or "").strip().split())[:500]
+                if summary:
+                    on_thought_delta(summary)
+            except Exception:
+                summary = ""
         return {
             "content": "".join(text_parts),
-            "thinking": "\n".join(thought_parts),
+            "thinking": summary,
+            "reasoning_summary": summary,
             "tool_calls": calls,
             "finish_reason": None,
         }
