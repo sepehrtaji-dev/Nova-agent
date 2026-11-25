@@ -2498,7 +2498,10 @@ class NovaWindow(QMainWindow):
                 # card before the streamed assistant answer is mounted.
                 self._separate_thinking_panel_from_reply()
                 self._answer_started = True
-                self._set_activity("Writing")
+                # The Thinking panel is the only generation-phase UI. Hide the
+                # composer activity chip while the final answer streams.
+                self._status_timer.stop()
+                self.status_row.hide()
             self._ensure_streaming_message().append_delta(message[len("MODEL_ANSWER_DELTA:"):])
             return
         if message == "MODEL_ANSWER_RESET":
