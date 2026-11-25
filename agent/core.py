@@ -147,76 +147,68 @@ class NovaCore:
             setter(self.thinking_enabled)
 
     def _generate_with_native_thinking(self, prompt, system_prompt):
-        """Stream answer text separately from provider-approved reasoning summaries."""
-        backend = getattr(self.brain, "brain", self.brain)
-        # Ollama's native message.thinking field is private model deliberation.
-        # Ask the model for a concise, user-facing approach note instead of
-        # forwarding that raw field into the UI.
-        if bool(getattr(self, "thinking_enabled", False)) and backend.__class__.__name__ == "OllamaBrain":
-            return self._generate_with_visible_note(prompt, system_prompt)
+        """Keep provider summaries and final answer in two strictly ordered UI phases.
 
+        Native private reasoning is never sent to the UI. Providers may emit a
+        displayable summary through on_thought_delta; answer chunks are buffered
+        until generation finishes so that summary (when available) is rendered
+        first and the answer can then stream without interleaving.
+        """
         stream = getattr(self.brain, "generate_stream", None)
         if not callable(stream):
             result = self.brain.generate(prompt, system_prompt=system_prompt)
             self._check_cancelled()
             return str(result or "").strip()
 
-        thought_started = False
+        answer_parts = []
+        thought_parts = []
 
         def on_answer(token):
             self._check_cancelled()
             if token:
-                self._status("MODEL_ANSWER_DELTA:" + str(token))
+                answer_parts.append(str(token))
 
         def on_thought(token):
             self._check_cancelled()
-            nonlocal thought_started
-            if not bool(getattr(self, "thinking_enabled", False)) or not token:
-                return
-            if not thought_started:
-                thought_started = True
-                self._status("MODEL_THOUGHT_START")
-            self._status("MODEL_THOUGHT_DELTA:" + str(token))
+            if bool(getattr(self, "thinking_enabled", False)) and token:
+                thought_parts.append(str(token))
+
+        stream_kwargs = {
+            "on_thought_delta": on_thought if bool(getattr(self, "thinking_enabled", False)) else None,
+        }
+        if getattr(self.brain, "supports_cancel_event", False):
+            stream_kwargs["cancel_event"] = getattr(self, "cancel_event", None)
 
         try:
-            stream_kwargs = {
-                "on_thought_delta": on_thought if bool(getattr(self, "thinking_enabled", False)) else None,
-            }
-            if getattr(self.brain, "supports_cancel_event", False):
-                stream_kwargs["cancel_event"] = getattr(self, "cancel_event", None)
             result = stream(
                 prompt, on_answer, system_prompt=system_prompt,
                 **stream_kwargs,
             )
-        finally:
-            if thought_started:
-                self._status("MODEL_THOUGHT_END")
+        except TypeError as exc:
+            # Compatibility with older/custom backends that do not accept the
+            # optional thought callback or cancellation keyword.
+            if "on_thought_delta" not in str(exc) and "cancel_event" not in str(exc):
+                raise
+            result = stream(prompt, on_answer, system_prompt=system_prompt)
+
         self._check_cancelled()
-        answer = str(result or "").strip()
-        if bool(getattr(self, "thinking_enabled", False)) and not thought_started and answer:
-            # Providers that do not expose a user-facing summary still get a
-            # clearly labelled, model-authored approach summary. This is not
-            # presented as the model's private chain-of-thought.
-            try:
-                summary = self.brain.generate(
-                    "Write a concise, user-facing summary (one or two sentences) "
-                    "of the high-level approach used to answer the request. "
-                    "Do not reveal hidden chain-of-thought or private deliberation.\n\n"
-                    f"User request:\n{str(prompt)[:1800]}\n\n"
-                    f"Final answer:\n{answer[:2400]}",
-                    system_prompt=(
-                        "You produce brief, user-facing approach summaries. "
-                        "Never reveal private chain-of-thought or detailed internal reasoning."
-                    ),
-                    options={"max_tokens": 140},
-                )
-                summary = " ".join(str(summary or "").strip().split())[:700]
-                if summary:
-                    self._status("MODEL_THOUGHT_START")
-                    self._status("MODEL_THOUGHT_DELTA:" + summary)
-                    self._status("MODEL_THOUGHT_END")
-            except Exception:
-                pass
+        answer = str(result or "".join(answer_parts)).strip()
+
+        # Publish only provider-approved summaries. Ollama's raw
+        # message.thinking is retained inside the backend and summarized there;
+        # it is never forwarded to this UI callback.
+        if bool(getattr(self, "thinking_enabled", False)) and thought_parts:
+            self._status("MODEL_THOUGHT_START")
+            for summary in thought_parts:
+                self._status("MODEL_THOUGHT_DELTA:" + summary)
+            self._status("MODEL_THOUGHT_END")
+
+        # The answer starts only after the Thinking panel has received its
+        # summary. No synthetic "Writing" phase is emitted.
+        for index in range(0, len(answer_parts), 8):
+            self._check_cancelled()
+            self._status("MODEL_ANSWER_DELTA:" + "".join(answer_parts[index:index + 8]))
+
         return answer
 
     def _capability_context(self):
