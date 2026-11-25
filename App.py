@@ -755,6 +755,7 @@ class ThinkingPanel(QFrame):
         self._timer.stop()
         self._pulse_timer.stop()
         self._tick()
+        self._title.setText("Reasoning summary")
         self._indicator.setText("○")
         self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
         if not self._has_content:
