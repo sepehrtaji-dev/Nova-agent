@@ -8,8 +8,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
 from model.ollama import OllamaBrain
+from model.anthropic import AnthropicBrain
 from model.provider import backend_kind, build_brain, describe_brain
-from model.remote import OpenAICompatibleBrain, RemoteBrainError
+from model.remote import OpenAICompatibleBrain, RemoteBrainError, _add_reasoning_request
 
 CAPTURED = []
 RESPONSES = {}
@@ -483,34 +484,101 @@ class ProviderSelectionTests(unittest.TestCase):
                 messages=[{"role": "user", "content": "Calculate 6 times 7."}],
                 tools=[],
             )
-        self.assertEqual(result["thinking"], "The calculation is 6 multiplied by 7.")
+        self.assertEqual(result["thinking"], "PRIVATE INTERNAL TRACE")
+        self.assertEqual(result["reasoning_summary"], "The calculation is 6 multiplied by 7.")
         self.assertEqual(result["content"], "The answer is 42.")
         self.assertIs(chat.call_args.kwargs["think"], True)
 
-    def test_ollama_native_tool_stream_emits_thinking_and_tool_calls(self):
+    def test_ollama_native_tool_stream_summarizes_thinking_without_exposing_raw_trace(self):
         chunks = [
-            {"message": {"thinking_summary": "The model is reviewing the request." , "content": ""}},
-            {"message": {"thinking_summary": "The request is clear.", "content": ""}},
-            {"message": {"thinking_summary": "", "content": "", "tool_calls": [{
+            {"message": {"thinking": "PRIVATE TRACE A", "content": ""}},
+            {"message": {"thinking": "PRIVATE TRACE B", "content": ""}},
+            {"message": {"thinking": "", "content": "", "tool_calls": [{
                 "function": {"name": "read_file", "arguments": {"path": "README.md"}}
             }]}},
-            {"message": {"thinking_summary": "", "content": "I inspected the README."}},
+            {"message": {"thinking": "", "content": "I inspected the README."}},
         ]
         thoughts = []
+
+        def summarize(prompt, thinking, callback):
+            self.assertIn("Read README", prompt)
+            self.assertEqual(thinking, "PRIVATE TRACE APRIVATE TRACE B")
+            callback("The model selected the README inspection step.")
+            return "The model selected the README inspection step."
+
         with mock.patch("model.ollama.ollama.show", return_value={
             "thinking": {"values": [True], "default": True},
-        }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat:
+        }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat, \
+             mock.patch.object(OllamaBrain, "_summarize_thinking", side_effect=summarize):
             brain = OllamaBrain(model="test-model")
             result = brain.generate_tool_turn_stream(
                 messages=[{"role": "user", "content": "Read README"}],
                 tools=[],
                 on_thought_delta=thoughts.append,
             )
-        self.assertEqual("".join(thoughts), "The model is reviewing the request.The request is clear.")
-        self.assertEqual(result["thinking"], "The model is reviewing the request.The request is clear.")
+        self.assertEqual(thoughts, ["The model selected the README inspection step."])
+        self.assertEqual(result["thinking"], "PRIVATE TRACE APRIVATE TRACE B")
+        self.assertEqual(result["reasoning_summary"], "The model selected the README inspection step.")
+        self.assertNotIn("PRIVATE TRACE", "".join(thoughts))
         self.assertEqual(result["content"], "I inspected the README.")
         self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
         self.assertIs(chat.call_args.kwargs["think"], True)
+
+    def test_openrouter_reasoning_summary_request_is_enabled_only_when_requested(self):
+        payload = {}
+        _add_reasoning_request(
+            payload,
+            "https://openrouter.ai/api/v1",
+            {"show_reasoning": True, "reasoning_effort": "high"},
+        )
+        self.assertEqual(payload["reasoning"], {"effort": "high"})
+
+        disabled = {}
+        _add_reasoning_request(
+            disabled,
+            "https://openrouter.ai/api/v1",
+            {"show_reasoning": False, "reasoning_effort": "high"},
+        )
+        self.assertNotIn("reasoning", disabled)
+
+    def test_anthropic_streams_summarized_thinking_blocks(self):
+        class FakeResponse:
+            def __init__(self):
+                events = [
+                    {"type": "content_block_delta", "delta": {
+                        "type": "thinking_delta", "thinking": "The request needs a concise explanation."
+                    }},
+                    {"type": "content_block_delta", "delta": {
+                        "type": "text_delta", "text": "Ready."
+                    }},
+                ]
+                self.lines = iter([
+                    ("data: " + json.dumps(event) + "\\n").encode("utf-8")
+                    for event in events
+                ])
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def readline(self):
+                return next(self.lines, b"")
+
+        brain = AnthropicBrain(
+            model="claude-test", api_key="test-key",
+            base_url="https://api.anthropic.com",
+        )
+        thoughts, tokens = [], []
+        with mock.patch("model.anthropic.urllib.request.urlopen", return_value=FakeResponse()) as urlopen:
+            result = brain.generate_stream(
+                "hello", tokens.append,
+                options={"show_reasoning": True},
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual(result, "Ready.")
+        self.assertEqual(thoughts, ["The request needs a concise explanation."])
+        self.assertEqual(tokens, ["Ready."])
+        payload = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["thinking"], {"type": "adaptive", "display": "summarized"})
 
     def test_effort_wrapper_forwards_native_thought_callback(self):
         from model.effort import EffortAwareBrain
