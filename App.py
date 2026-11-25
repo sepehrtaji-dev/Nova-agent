@@ -1205,7 +1205,7 @@ class ModelSettingsDialog(QDialog):
         self.font_slider = QSlider(Qt.Horizontal)
         self.font_slider.setRange(15, 24)
         try:
-            self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "16")))))
+            self.font_slider.setValue(max(15, min(24, int(settings.get("assistant_font_size", "18")))))
         except (TypeError, ValueError):
             self.font_slider.setValue(18)
         self.font_slider.setTickPosition(QSlider.TicksBelow)
@@ -2004,7 +2004,7 @@ class NovaWindow(QMainWindow):
             widget = MessageWidget(
                 item["role"], item["content"],
                 attachments=item.get("attachments") or [],
-                font_size=int(self._settings.get("assistant_font_size", "18") or 16),
+                font_size=int(self._settings.get("assistant_font_size", "18") or 18),
             )
             self.chat_container_layout.addWidget(widget)
             
@@ -2016,7 +2016,7 @@ class NovaWindow(QMainWindow):
 
     def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "16") or 16))
+        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "18") or 16))
         self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
