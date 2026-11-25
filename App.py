@@ -2548,6 +2548,12 @@ class NovaWindow(QMainWindow):
             # A queued event arrived after the request finished; never
             # resurrect the hidden chip for stale activity.
             return
+        if self.thinking_enabled:
+            # Think mode has a dedicated panel; do not show a second,
+            # competing Writing/activity phase above the composer.
+            self._status_timer.stop()
+            self.status_row.hide()
+            return
         text = (text or "").strip() or "Working"
         self._activity_text = text
         self.status_label.setText(text)
