@@ -3,7 +3,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QTabWidget
+from PySide6.QtWidgets import QApplication, QTabBar, QTabWidget, QToolButton
 from PySide6.QtGui import QPixmap
 from PySide6.QtGui import QTextOption
 from unittest import mock
@@ -154,8 +154,25 @@ class AppUIComponentTests(unittest.TestCase):
             window.agent_tabs.setCurrentIndex(1)
             self.assertIs(window.core, second_core)
             self.assertEqual(window.current_chat_id, second_chat)
-            window._close_agent_tab(1)
+
+            # The visible close button is inset inside a wrapper rather than
+            # being placed directly against QTabBar's right edge.
+            close_container = window.agent_tab_bar.tabButton(1, QTabBar.RightSide)
+            self.assertIsNotNone(close_container)
+            self.assertEqual(close_container.objectName(), "agentTabCloseContainer")
+            self.assertEqual(close_container.width(), 28)
+            close_layout = close_container.layout()
+            self.assertIsNotNone(close_layout)
+            self.assertEqual(close_layout.contentsMargins().right(), 8)
+            close_button = close_container.findChild(QToolButton, "agentTabCloseButton")
+            self.assertIsNotNone(close_button)
+
+            # Exercise the actual Qt signal/slot path, not the private close
+            # method directly, and verify the tab/session are removed together.
+            close_button.click()
+            self.app.processEvents()
             self.assertEqual(window.agent_tabs.count(), 1)
+            self.assertEqual(len(window._agent_sessions), 1)
             window.close()
 
     def test_agent_worker_coalesces_stream_deltas_before_qt_delivery(self):
