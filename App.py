@@ -1829,8 +1829,22 @@ class NovaWindow(QMainWindow):
         self._render_current_chat()
 
     def _install_agent_tab_close_button(self, index):
-        """Install an inset close control with predictable spacing from the tab edge."""
-        button = QToolButton(self.agent_tab_bar)
+        """Install a close control with a real inset from the tab's right edge.
+
+        QTabBar positions a right-side tab button against the edge of the tab.
+        A wrapper reserves an explicit 8px trailing gutter so the visible ×
+        never touches the tab border, regardless of the active Qt style.
+        """
+        container = QWidget(self.agent_tab_bar)
+        container.setObjectName("agentTabCloseContainer")
+        container.setFixedSize(28, 24)
+
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(0, 2, 8, 2)
+        container_layout.setSpacing(0)
+
+        button = QToolButton(container)
+        button.setObjectName("agentTabCloseButton")
         button.setText("×")
         button.setCursor(Qt.PointingHandCursor)
         button.setFixedSize(20, 20)
@@ -1840,6 +1854,7 @@ class NovaWindow(QMainWindow):
             "border-radius: 6px; font-size: 16px; font-weight: 500; padding: 0px; }"
             "QToolButton:hover { color: #e6edf3; background: #3a4654; }"
         )
+        container_layout.addWidget(button)
         button.clicked.connect(
             lambda checked=False, control=button: self._close_agent_tab(
                 self.agent_tab_bar.tabAt(
@@ -1847,7 +1862,7 @@ class NovaWindow(QMainWindow):
                 )
             )
         )
-        self.agent_tab_bar.setTabButton(index, QTabBar.RightSide, button)
+        self.agent_tab_bar.setTabButton(index, QTabBar.RightSide, container)
 
     def _new_agent_tab(self):
         if self.busy:
