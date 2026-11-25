@@ -22,6 +22,19 @@ class EffortAwareBrain:
         value = str(effort or "medium").strip().lower()
         self.effort = value if value in _VALID else "medium"
 
+    def _think_value(self):
+        resolver = getattr(self.brain, "think_value_for_effort", None)
+        value = resolver(self.effort) if callable(resolver) else None
+        # Some test doubles and third-party wrappers expose arbitrary Mock
+        # attributes. Accept only the Ollama wire types for a think value.
+        if value is not None and not isinstance(value, (bool, str)):
+            value = None
+        if value is None and not callable(resolver):
+            value = False if self.effort == "off" else _LEVEL.get(self.effort, "medium")
+        if self.thinking_enabled and value in (None, False):
+            value = True
+        return value
+
     def _remote_options(self, options):
         result = dict(options or {})
         if self.effort == "off":
@@ -48,14 +61,7 @@ class EffortAwareBrain:
                 system_prompt=system_prompt,
                 options=self._remote_options(options),
             )
-        think_resolver = getattr(self.brain, "think_value_for_effort", None)
-        think_value = (
-            think_resolver(self.effort)
-            if callable(think_resolver)
-            else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
-        )
-        if self.thinking_enabled and think_value in (None, False):
-            think_value = True
+        think_value = self._think_value()
         return method(
             messages=messages,
             tools=tools,
@@ -82,14 +88,7 @@ class EffortAwareBrain:
                     on_thought_delta=on_thought_delta,
                     cancel_event=cancel_event,
                 )
-            think_resolver = getattr(self.brain, "think_value_for_effort", None)
-            think_value = (
-                think_resolver(self.effort)
-                if callable(think_resolver)
-                else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
-            )
-            if self.thinking_enabled and think_value in (None, False):
-                think_value = True
+            think_value = self._think_value()
             return method(
                 messages=messages,
                 tools=tools,
@@ -137,14 +136,7 @@ class EffortAwareBrain:
                 on_thought_delta=on_thought_delta if self.thinking_enabled else None,
                 cancel_event=cancel_event,
             )
-        think_resolver = getattr(self.brain, "think_value_for_effort", None)
-        think_value = (
-            think_resolver(self.effort)
-            if callable(think_resolver)
-            else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
-        )
-        if self.thinking_enabled and think_value in (None, False):
-            think_value = True
+        think_value = self._think_value()
         return stream(
             prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
             options=options,
