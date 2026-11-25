@@ -553,7 +553,7 @@ class ProviderSelectionTests(unittest.TestCase):
                     }},
                 ]
                 self.lines = iter([
-                    ("data: " + json.dumps(event) + "\\n").encode("utf-8")
+                    ("data: " + json.dumps(event) + "\n").encode("utf-8")
                     for event in events
                 ])
             def __enter__(self):
@@ -601,6 +601,28 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertEqual(thoughts, ["native thought"])
         self.assertEqual(result["thinking"], "native thought")
         self.assertTrue(callable(backend.received["on_thought_delta"]))
+
+    def test_think_toggle_forces_native_ollama_thinking_when_metadata_is_missing(self):
+        from model.effort import EffortAwareBrain
+
+        class Backend:
+            def __init__(self):
+                self.received = None
+
+            def think_value_for_effort(self, _effort):
+                return None
+
+            def generate_stream(self, prompt, on_token, **kwargs):
+                self.received = kwargs
+                on_token("answer")
+                return "answer"
+
+        backend = Backend()
+        wrapper = EffortAwareBrain(backend, "medium")
+        wrapper.set_thinking_enabled(True)
+        result = wrapper.generate_stream("hello", lambda _token: None)
+        self.assertEqual(result, "answer")
+        self.assertIs(backend.received["think"], True)
 
     def test_ollama_effort_uses_only_model_advertised_thinking_levels(self):
         with mock.patch("model.ollama.ollama.show", return_value={
