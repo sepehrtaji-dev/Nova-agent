@@ -619,7 +619,10 @@ class StreamingMessageWidget(QFrame):
         if at_bottom:
             editor.moveCursor(editor.textCursor().MoveOperation.End)
             editor.insertPlainText(str(delta))
-            editor.ensureCursorVisible()
+            # setValue(maximum) is cheaper than ensureCursorVisible() (no
+            # extra cursor geometry work) and is all that is needed to keep
+            # the tail in view while following the stream.
+            bar.setValue(bar.maximum())
         else:
             cursor = QTextCursor(editor.document())
             cursor.movePosition(QTextCursor.End)
@@ -821,17 +824,21 @@ class ThinkingPanel(QFrame):
         self._tick()
         self._title.setText("Reasoning summary")
         self._indicator.set_finished(True)
-        if not self._has_content:
-            self._body.setPlainText("This model did not provide a displayable reasoning summary for this turn.")
-        # Keep the reasoning on screen after the stream ends. Auto-collapsing
-        # here hid the summary the instant thinking finished — before the
-        # answer appeared — which read as the panel "not showing", and left an
-        # empty chip when a model produced no reasoning. The body is
-        # height-capped, so a finished summary stays compact until the user
-        # explicitly hides it.
-        self._expanded = True
-        self._body.setVisible(True)
-        self._toggle.setText("Hide")
+        if self._has_content:
+            # Keep the reasoning on screen after the stream ends. Auto-collapsing
+            # here hid the summary the instant thinking finished — before the
+            # answer appeared — which read as the panel "not showing". The body
+            # is height-capped, so a finished summary stays compact until the
+            # user explicitly hides it.
+            self._expanded = True
+            self._body.setVisible(True)
+            self._toggle.setText("Hide")
+        # When no reasoning arrived, leave the body blank; the caller retires
+        # an empty panel instead of leaving a "no reasoning" chip behind.
+
+    @property
+    def has_content(self):
+        return bool(self._has_content)
 
 
 class MessageWidget(QFrame):
@@ -2659,11 +2666,18 @@ class NovaWindow(QMainWindow):
         return text[:28]
 
     def _separate_thinking_panel_from_reply(self):
-        """Add breathing room between the native-thinking card and Nova's reply."""
-        if not self.thinking_panel:
+        """Retire the Thinking panel and separate it from Nova's reply."""
+        panel = self.thinking_panel
+        if panel is None:
             return
-        self.thinking_panel.finish()
+        panel.finish()
         self.thinking_panel = None
+        if not panel.has_content:
+            # No reasoning arrived this turn — remove the empty placeholder
+            # instead of leaving a "no reasoning" chip above the reply.
+            self.chat_container_layout.removeWidget(panel)
+            panel.deleteLater()
+            return
         # The final layout item is the stretch spacer. Insert a real layout
         # gap immediately before it so the next assistant message is separated.
         index = max(0, self.chat_container_layout.count() - 1)

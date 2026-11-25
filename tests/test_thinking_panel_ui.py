@@ -46,13 +46,17 @@ class ThinkingPanelUnitTests(unittest.TestCase):
         self.assertEqual(panel._toggle.text(), "Hide")
         panel.deleteLater()
 
-    def test_finish_with_no_content_keeps_the_explanation_visible(self):
-        """A model that emits no reasoning must not leave an empty chip."""
+    def test_finish_with_no_content_leaves_the_body_blank(self):
+        """A model that emits no reasoning must not leave a 'no reasoning' chip.
+
+        The panel body stays blank so the caller can retire the empty panel
+        instead of showing a confusing 'This model did not provide...' card.
+        """
         panel = self._make_panel()
         panel.finish()
 
-        self.assertTrue(panel._body.isVisible(), "no-content body was hidden after finish")
-        self.assertIn("did not provide", panel._body.toPlainText())
+        self.assertEqual(panel._body.toPlainText(), "")
+        self.assertFalse(panel.has_content)
         panel.deleteLater()
 
     def test_pulse_does_not_rebuild_the_stylesheet_every_tick(self):
@@ -176,6 +180,33 @@ class ThinkingPanelIntegrationTests(unittest.TestCase):
             self.assertFalse(panel._body.isHidden(), "summary hidden after MODEL_THOUGHT_END")
             self.assertTrue(panel._expanded, "summary collapsed after MODEL_THOUGHT_END")
             self.assertIn("Planning a concise reply", panel._body.toPlainText())
+        finally:
+            window.close()
+
+
+    def test_empty_thinking_panel_is_retired_when_the_answer_starts(self):
+        """A turn with no reasoning must not leave a 'no reasoning' chip behind."""
+        window = self._make_window()
+        try:
+            window.busy = True
+            window.thinking_enabled = True
+            window._answer_started = False
+            window.thinking_panel = None
+
+            # Think is on, the panel mounts, but the model produces no reasoning.
+            window._on_status("MODEL_THOUGHT_START")
+            window._on_status("MODEL_THOUGHT_END")
+            panel = window.thinking_panel
+            self.assertIsNotNone(panel)
+            self.assertFalse(panel.has_content)
+
+            # The first answer delta separates the panel from the reply; an
+            # empty panel must be removed from the layout, not left as a chip.
+            layout = window.chat_container_layout
+            self.assertIn(panel, [layout.itemAt(i).widget() for i in range(layout.count())])
+            window._separate_thinking_panel_from_reply()
+            self.assertIsNone(window.thinking_panel)
+            self.assertNotIn(panel, [layout.itemAt(i).widget() for i in range(layout.count())])
         finally:
             window.close()
 

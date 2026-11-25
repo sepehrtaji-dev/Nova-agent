@@ -168,11 +168,47 @@ class NovaCore:
                 f"User request:\n{str(prompt)[:1800]}"
             )
             summary_parts = []
+            thinking_summary_parts = []
+            started = False
 
             def on_summary(token):
+                nonlocal started
+                self._check_cancelled()
+                if not token:
+                    return
+                # Stream the approach preview token-by-token so the Thinking
+                # panel fills live. Buffering the whole summary and emitting it
+                # as one delta only after the separate summary generation
+                # finished left the panel empty and the UI idle for the full
+                # duration of that generation, which read as a freeze and, when
+                # the model returned empty content, as "no reasoning at all".
+                if not started:
+                    self._status("MODEL_THOUGHT_START")
+                    started = True
+                self._status("MODEL_THOUGHT_DELTA:" + str(token))
+                summary_parts.append(str(token))
+
+            def on_summary_thought(token):
+                # Reasoning models sometimes answer a short prompt entirely
+                # inside their native thinking channel and emit an empty content
+                # stream. Capture a labelled thinking_summary so the panel can
+                # fall back to it instead of staying empty.
                 self._check_cancelled()
                 if token:
-                    summary_parts.append(str(token))
+                    thinking_summary_parts.append(str(token))
+
+            def finalize_summary(summary_text, thought_text):
+                nonlocal started
+                if started:
+                    self._status("MODEL_THOUGHT_END")
+                    return
+                text = " ".join(str(summary_text or "").split()).strip()
+                if not text:
+                    text = " ".join(str(thought_text or "").split()).strip()
+                if text:
+                    self._status("MODEL_THOUGHT_START")
+                    self._status("MODEL_THOUGHT_DELTA:" + text)
+                    self._status("MODEL_THOUGHT_END")
 
             try:
                 summary = stream(
@@ -182,13 +218,32 @@ class NovaCore:
                         "You provide concise, user-facing approach summaries. "
                         "Never disclose private chain-of-thought."
                     ),
+                    on_thought_delta=on_summary_thought,
                 )
                 self._check_cancelled()
-                summary_text = str(summary or "".join(summary_parts)).strip()
-                if summary_text:
-                    self._status("MODEL_THOUGHT_START")
-                    self._status("MODEL_THOUGHT_DELTA:" + summary_text)
-                    self._status("MODEL_THOUGHT_END")
+                finalize_summary(summary, " ".join(thinking_summary_parts))
+            except TypeError as exc:
+                # A third-party brain whose generate_stream rejects
+                # on_thought_delta (or system_prompt). Retry without the extra
+                # kwarg so the approach preview still streams token-by-token.
+                if "on_thought_delta" not in str(exc) and "system_prompt" not in str(exc):
+                    logging.exception("Could not generate the optional approach summary")
+                else:
+                    started = False
+                    summary_parts.clear()
+                    try:
+                        summary = stream(
+                            summary_prompt,
+                            on_summary,
+                            system_prompt=(
+                                "You provide concise, user-facing approach summaries. "
+                                "Never disclose private chain-of-thought."
+                            ),
+                        )
+                        self._check_cancelled()
+                        finalize_summary(summary, "")
+                    except Exception:
+                        logging.exception("Could not generate the optional approach summary")
             except Exception:
                 # A summary failure must never block the actual user request.
                 logging.exception("Could not generate the optional approach summary")
