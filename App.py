@@ -269,7 +269,7 @@ class CodeBlock(QFrame):
 
 
 class MarkdownLabel(QTextBrowser):
-    def __init__(self, text, font_size=14, parent=None):
+    def __init__(self, text, font_size=16, parent=None):
         super().__init__(parent)
         self.setOpenExternalLinks(True)
         self.setFrameShape(QFrame.NoFrame)
@@ -485,14 +485,17 @@ class AgentWorker(QThread):
     """
     status = Signal(str)
     completed = Signal(str)
+    title_generated = Signal(str, str)
     failed = Signal(str)
     cancelled = Signal()
     _DELTA_PREFIXES = ("MODEL_ANSWER_DELTA:", "MODEL_THOUGHT_DELTA:")
 
-    def __init__(self, core, message, parent=None):
+    def __init__(self, core, message, parent=None, generate_title=False, chat_id=None):
         super().__init__(parent)
         self.core = core
         self.message = message
+        self.generate_title = bool(generate_title)
+        self.chat_id = str(chat_id or "")
         self.cancel_event = threading.Event()
         self._pending_deltas = []
         self._last_delta_flush = 0.0
@@ -538,6 +541,28 @@ class AgentWorker(QThread):
                 self.cancelled.emit()
             else:
                 self.completed.emit(str(result))
+                if self.generate_title and self.chat_id:
+                    try:
+                        title = self.core.brain.generate(
+                            "Create a concise title for this conversation. "
+                            "Use the same language as the user's message. "
+                            "Return only the title, without quotes or explanation, "
+                            "in at most 6 words.\n\n"
+                            f"User's first message:\n{self.message[:1200]}",
+                            system_prompt=(
+                                "You generate short, accurate chat titles. "
+                                "Do not answer the user's request; only name the conversation."
+                            ),
+                        )
+                        title = " ".join(str(title or "").strip().strip('\\\"\\'`').split())
+                        title = re.sub(r"^(title|عنوان)\\s*[:：-]\\s*", "", title, flags=re.IGNORECASE)
+                        title = title[:64].strip()
+                        if title:
+                            self.title_generated.emit(self.chat_id, title)
+                    except Exception:
+                        # Title generation is auxiliary; a failed title call
+                        # must never turn a successful chat response into an error.
+                        pass
         except GenerationCancelled:
             self._flush_deltas()
             self.cancelled.emit()
@@ -555,7 +580,7 @@ class AgentWorker(QThread):
 
 class StreamingMessageWidget(QFrame):
     """Plain-text assistant draft updated as model deltas arrive."""
-    def __init__(self, font_size=16, parent=None):
+    def __init__(self, font_size=18, parent=None):
         super().__init__(parent)
         self.setObjectName("streamingMessage")
         self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
@@ -1173,16 +1198,16 @@ class ModelSettingsDialog(QDialog):
         font_hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         font_row.addWidget(font_hint)
         font_row.addStretch(1)
-        self.font_value = QLabel(f'{settings.get("assistant_font_size", "16")} px')
+        self.font_value = QLabel(f'{settings.get("assistant_font_size", "18")} px')
         self.font_value.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
         font_row.addWidget(self.font_value)
         layout.addLayout(font_row)
         self.font_slider = QSlider(Qt.Horizontal)
-        self.font_slider.setRange(13, 20)
+        self.font_slider.setRange(15, 24)
         try:
             self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "16")))))
         except (TypeError, ValueError):
-            self.font_slider.setValue(15)
+            self.font_slider.setValue(18)
         self.font_slider.setTickPosition(QSlider.TicksBelow)
         self.font_slider.setTickInterval(1)
         self.font_slider.valueChanged.connect(lambda value: self.font_value.setText(f"{value} px"))
@@ -1357,7 +1382,7 @@ class NovaWindow(QMainWindow):
         
         self.chat_store = ChatStore()
         saved_chats = self.chat_store.list_chats()
-        self.current_chat_id = saved_chats[0]["id"] if saved_chats else self.chat_store.create_chat()
+        self.current_chat_id = saved_chats[0]["id"] if saved_chats else None
         self._restore_core_memory(self.current_chat_id)
         
         self.thread = None
@@ -1874,7 +1899,9 @@ class NovaWindow(QMainWindow):
         core.set_access(**access)
         if hasattr(core, "set_effort"):
             core.set_effort(self._effort)
-        chat_id = self.chat_store.create_chat()
+        # A tab is an empty agent session, not a persisted conversation.
+        # The chat row is created only when its first message is sent.
+        chat_id = None
         self._agent_tab_counter += 1
         title = f"Agent {self._agent_tab_counter}"
         self._agent_sessions.append({
@@ -1958,7 +1985,7 @@ class NovaWindow(QMainWindow):
         self.core = self._create_core()
         self.core.set_access(**access)
         self._apply_effort(self._effort)
-        self.current_chat_id = self.chat_store.create_chat()
+        self.current_chat_id = None
         self.core.short_memory.messages = []
         self._sync_active_agent_session()
         self._refresh_model_labels()
@@ -1967,7 +1994,7 @@ class NovaWindow(QMainWindow):
 
     def _render_current_chat(self):
         self.task_plan_panel = None
-        messages = self._restore_core_memory(self.current_chat_id)
+        messages = self._restore_core_memory(self.current_chat_id) if self.current_chat_id else []
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
             if item.widget():
@@ -1977,7 +2004,7 @@ class NovaWindow(QMainWindow):
             widget = MessageWidget(
                 item["role"], item["content"],
                 attachments=item.get("attachments") or [],
-                font_size=int(self._settings.get("assistant_font_size", "16") or 16),
+                font_size=int(self._settings.get("assistant_font_size", "18") or 16),
             )
             self.chat_container_layout.addWidget(widget)
             
@@ -2386,6 +2413,10 @@ class NovaWindow(QMainWindow):
         self.input.clear()
         self.attachments.clear()
         self._refresh_attachment_preview()
+        created_new_chat = not self.current_chat_id
+        if created_new_chat:
+            self.current_chat_id = self.chat_store.create_chat()
+            self._sync_active_agent_session()
         self._add_message("user", user_text, attachments=attachments)
         self.chat_store.add_message(self.current_chat_id, "user", user_text, attachments=attachments, context=message)
         self._refresh_chat_history()
@@ -2413,9 +2444,14 @@ class NovaWindow(QMainWindow):
             execution_state["last_plan"] = None
         self._discard_streaming_message()
 
-        self.worker = AgentWorker(self.core, message, self)
+        self.worker = AgentWorker(
+            self.core, message, self,
+            generate_title=created_new_chat,
+            chat_id=self.current_chat_id,
+        )
         self._active_workers.add(self.worker)
         self.worker.status.connect(self._on_status)
+        self.worker.title_generated.connect(self._on_chat_title_generated)
         self.worker.completed.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
         self.worker.cancelled.connect(self._on_cancelled)
@@ -2535,6 +2571,15 @@ class NovaWindow(QMainWindow):
         # gap immediately before it so the next assistant message is separated.
         index = max(0, self.chat_container_layout.count() - 1)
         self.chat_container_layout.insertSpacing(index, 18)
+
+    def _on_chat_title_generated(self, chat_id, title):
+        """Persist the title chosen by the configured language model."""
+        if not chat_id or not title:
+            return
+        setter = getattr(self.chat_store, "set_chat_title", None)
+        if callable(setter):
+            setter(chat_id, title)
+            self._refresh_chat_history()
 
     def _on_finished(self, response):
         self._discard_streaming_message()
