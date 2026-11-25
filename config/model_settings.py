@@ -57,6 +57,10 @@ def load_settings() -> dict:
                     values[key] = stored[key]
     except (OSError, json.JSONDecodeError):
         pass
+    # 16px was Nova's former built-in default. Promote that legacy default
+    # to 18px so existing installations receive the improved chat readability.
+    if values.get("assistant_font_size") == "16":
+        values["assistant_font_size"] = "18"
     return values
 
 
