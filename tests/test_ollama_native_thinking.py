@@ -92,8 +92,13 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         self.assertEqual(answer_deltas, ["Hey! How can I help?"])
         self.assertEqual(
             result["thinking"],
+            "PRIVATE TRACE APRIVATE TRACE B",
+        )
+        self.assertEqual(
+            result["reasoning_summary"],
             "The model is reviewing the request. A concise greeting is appropriate. ",
         )
+        self.assertNotIn("PRIVATE TRACE", "".join(thought_deltas))
         self.assertEqual(result["content"], "Hey! How can I help?")
 
 
