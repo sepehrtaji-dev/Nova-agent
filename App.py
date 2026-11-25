@@ -673,7 +673,7 @@ class ThinkingPanel(QFrame):
         self._indicator.setStyleSheet(f"color: {ACCENT}; font-size: 8px; border: none; background: transparent;")
         header.addWidget(self._indicator)
 
-        self._title = QLabel("Thinking")
+        self._title = QLabel("Reasoning summary")
         self._title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
         header.addWidget(self._title)
 
@@ -695,7 +695,7 @@ class ThinkingPanel(QFrame):
         self._body.setStyleSheet(f"QPlainTextEdit {{ background: transparent; color: {TEXT_MUTED}; border: none; font-family: 'Cascadia Mono', 'Consolas', monospace; font-size: 12px; }}")
         self._body.setReadOnly(True)
         self._body.setFrameShape(QFrame.NoFrame)
-        self._body.setPlaceholderText("Waiting for the model to reason...")
+        self._body.setPlaceholderText("Waiting for a user-facing reasoning summary...")
         self._body.setMaximumHeight(200)
         self._body.setMinimumHeight(60)
         root.addWidget(self._body)
@@ -752,7 +752,7 @@ class ThinkingPanel(QFrame):
         self._indicator.setText("○")
         self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
         if not self._has_content:
-            self._body.setPlainText("The selected model did not return reasoning for this turn.")
+            self._body.setPlainText("The selected provider did not return a reasoning summary for this turn.")
         self._expanded = False
         self._body.setVisible(False)
         self._toggle.setText("Show")
@@ -1686,7 +1686,7 @@ class NovaWindow(QMainWindow):
         self.think_button = QPushButton("Think")
         self.think_button.setCheckable(True)
         self.think_button.setChecked(False)
-        self.think_button.setToolTip("Show the model's native thinking output")
+        self.think_button.setToolTip("Show a concise, model-generated reasoning summary")
         self.think_button.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {TEXT_MUTED}; border: 1px solid {BORDER}; border-radius: 8px; padding: 0 11px; font-size: 11px; font-weight: 600; }}"
             f"QPushButton:checked {{ background: {BG_INPUT}; color: {ACCENT}; border-color: {ACCENT}; }}"
