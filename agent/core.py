@@ -147,12 +147,10 @@ class NovaCore:
             setter(self.thinking_enabled)
 
     def _generate_with_native_thinking(self, prompt, system_prompt):
-        """Keep provider summaries and final answer in two strictly ordered UI phases.
+        """Generate a short public approach summary first, then stream the answer.
 
-        Native private reasoning is never sent to the UI. Providers may emit a
-        displayable summary through on_thought_delta; answer chunks are buffered
-        until generation finishes so that summary (when available) is rendered
-        first and the answer can then stream without interleaving.
+        The summary is a user-facing explanation, not private chain-of-thought.
+        Final answer tokens are forwarded immediately; they are never buffered.
         """
         stream = getattr(self.brain, "generate_stream", None)
         if not callable(stream):
@@ -160,56 +158,60 @@ class NovaCore:
             self._check_cancelled()
             return str(result or "").strip()
 
+        if bool(getattr(self, "thinking_enabled", False)):
+            summary_prompt = (
+                "Before answering, write a short user-facing approach summary "
+                "for the user's request. State the topic and the broad method "
+                "you will use in one or two concise sentences. Do not reveal "
+                "private chain-of-thought, hidden deliberation, or detailed "
+                "internal reasoning. Do not answer the request yet.\n\n"
+                f"User request:\n{str(prompt)[:1800]}"
+            )
+            summary_parts = []
+
+            def on_summary(token):
+                self._check_cancelled()
+                if token:
+                    summary_parts.append(str(token))
+
+            try:
+                summary = stream(
+                    summary_prompt,
+                    on_summary,
+                    system_prompt=(
+                        "You provide concise, user-facing approach summaries. "
+                        "Never disclose private chain-of-thought."
+                    ),
+                )
+                self._check_cancelled()
+                summary_text = str(summary or "".join(summary_parts)).strip()
+                if summary_text:
+                    self._status("MODEL_THOUGHT_START")
+                    self._status("MODEL_THOUGHT_DELTA:" + summary_text)
+                    self._status("MODEL_THOUGHT_END")
+            except Exception:
+                # A summary failure must never block the actual user request.
+                logging.exception("Could not generate the optional approach summary")
+
         answer_parts = []
-        thought_parts = []
 
         def on_answer(token):
             self._check_cancelled()
             if token:
-                answer_parts.append(str(token))
-
-        def on_thought(token):
-            self._check_cancelled()
-            if bool(getattr(self, "thinking_enabled", False)) and token:
-                thought_parts.append(str(token))
-
-        stream_kwargs = {
-            "on_thought_delta": on_thought if bool(getattr(self, "thinking_enabled", False)) else None,
-        }
-        if getattr(self.brain, "supports_cancel_event", False):
-            stream_kwargs["cancel_event"] = getattr(self, "cancel_event", None)
+                value = str(token)
+                answer_parts.append(value)
+                # Deliver every token as soon as the provider emits it.
+                self._status("MODEL_ANSWER_DELTA:" + value)
 
         try:
-            result = stream(
-                prompt, on_answer, system_prompt=system_prompt,
-                **stream_kwargs,
-            )
-        except TypeError as exc:
-            # Compatibility with older/custom backends that do not accept the
-            # optional thought callback or cancellation keyword.
-            if "on_thought_delta" not in str(exc) and "cancel_event" not in str(exc):
-                raise
             result = stream(prompt, on_answer, system_prompt=system_prompt)
+        except TypeError as exc:
+            if "system_prompt" not in str(exc):
+                raise
+            result = stream(prompt, on_answer)
 
         self._check_cancelled()
-        answer = str(result or "".join(answer_parts)).strip()
-
-        # Publish only provider-approved summaries. Ollama's raw
-        # message.thinking is retained inside the backend and summarized there;
-        # it is never forwarded to this UI callback.
-        if bool(getattr(self, "thinking_enabled", False)) and thought_parts:
-            self._status("MODEL_THOUGHT_START")
-            for summary in thought_parts:
-                self._status("MODEL_THOUGHT_DELTA:" + summary)
-            self._status("MODEL_THOUGHT_END")
-
-        # The answer starts only after the Thinking panel has received its
-        # summary. No synthetic "Writing" phase is emitted.
-        for index in range(0, len(answer_parts), 8):
-            self._check_cancelled()
-            self._status("MODEL_ANSWER_DELTA:" + "".join(answer_parts[index:index + 8]))
-
-        return answer
+        return str(result or "".join(answer_parts)).strip()
 
     def _capability_context(self):
         """Live capability probe summary for prompts.
