@@ -673,7 +673,7 @@ class ThinkingPanel(QFrame):
         self._indicator.setStyleSheet(f"color: {ACCENT}; font-size: 8px; border: none; background: transparent;")
         header.addWidget(self._indicator)
 
-        self._title = QLabel("Reasoning summary")
+        self._title = QLabel("Thinking")
         self._title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
         header.addWidget(self._title)
 
@@ -731,6 +731,12 @@ class ThinkingPanel(QFrame):
         self._body.setVisible(self._expanded)
         self._toggle.setText("Hide" if self._expanded else "Show")
 
+    def set_phase(self, phase):
+        """Keep the panel title aligned with the active generation phase."""
+        if self._finished:
+            return
+        self._title.setText("Thinking" if str(phase).casefold() == "thinking" else "Reasoning summary")
+
     def append_delta(self, delta):
         if not delta:
             return
@@ -752,7 +758,7 @@ class ThinkingPanel(QFrame):
         self._indicator.setText("○")
         self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
         if not self._has_content:
-            self._body.setPlainText("The selected provider did not return a reasoning summary for this turn.")
+            self._body.setPlainText("This model did not provide a displayable reasoning summary for this turn.")
         self._expanded = False
         self._body.setVisible(False)
         self._toggle.setText("Show")
@@ -2438,6 +2444,11 @@ class NovaWindow(QMainWindow):
             setter(self.thinking_enabled)
         self.think_button.setEnabled(False)
         self.thinking_panel = None
+        if self.thinking_enabled:
+            # Mount the panel before generation starts. Waiting for the first
+            # thinking token made the panel appear late (or not at all on
+            # providers that delay or omit their first summary event).
+            self.thinking_panel = self._insert_thinking_panel()
         self._clear_task_plan_panel()
         execution_state = getattr(self.core, "execution_state", None)
         if isinstance(execution_state, dict):
@@ -2482,6 +2493,9 @@ class NovaWindow(QMainWindow):
             return
         if message.startswith("MODEL_ANSWER_DELTA:"):
             if not self._answer_started:
+                # Keep the two phases visually ordered: finish the reasoning
+                # card before the streamed assistant answer is mounted.
+                self._separate_thinking_panel_from_reply()
                 self._answer_started = True
                 self._set_activity("Writing")
             self._ensure_streaming_message().append_delta(message[len("MODEL_ANSWER_DELTA:"):])
@@ -2491,13 +2505,17 @@ class NovaWindow(QMainWindow):
             return
         if message.startswith("MODEL_THOUGHT_START"):
             self._set_activity("Thinking")
+            if self.thinking_enabled and self.thinking_panel is None and not self._answer_started:
+                self.thinking_panel = self._insert_thinking_panel()
+            if self.thinking_panel:
+                self.thinking_panel.set_phase("Thinking")
             return
         if message.startswith("MODEL_THOUGHT_DELTA:"):
             thought = message[len("MODEL_THOUGHT_DELTA:"):]
             if thought.strip():
-                if self.thinking_enabled and self.thinking_panel is None:
+                if self.thinking_enabled and self.thinking_panel is None and not self._answer_started:
                     self.thinking_panel = self._insert_thinking_panel()
-                if self.thinking_panel:
+                if self.thinking_panel and not self._answer_started:
                     self.thinking_panel.append_delta(thought)
             return
         if message == "MODEL_THOUGHT_END":
