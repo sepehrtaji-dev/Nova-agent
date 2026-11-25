@@ -9,7 +9,11 @@ class EffortAwareBrain:
     def __init__(self, brain, effort="medium"):
         self.brain = brain
         self.effort = "medium"
+        self.thinking_enabled = False
         self.set_effort(effort)
+
+    def set_thinking_enabled(self, enabled):
+        self.thinking_enabled = bool(enabled)
 
     def __getattr__(self, name):
         return getattr(self.brain, name)
@@ -24,6 +28,7 @@ class EffortAwareBrain:
             result.pop("reasoning_effort", None)
         else:
             result["reasoning_effort"] = _LEVEL.get(self.effort, "medium")
+        result["show_reasoning"] = bool(self.thinking_enabled)
         return result
 
     @property
@@ -49,6 +54,8 @@ class EffortAwareBrain:
             if callable(think_resolver)
             else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
         )
+        if self.thinking_enabled and think_value in (None, False):
+            think_value = True
         return method(
             messages=messages,
             tools=tools,
@@ -81,6 +88,8 @@ class EffortAwareBrain:
                 if callable(think_resolver)
                 else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
             )
+            if self.thinking_enabled and think_value in (None, False):
+                think_value = True
             return method(
                 messages=messages,
                 tools=tools,
@@ -123,10 +132,18 @@ class EffortAwareBrain:
             )
         if isinstance(self.brain, AnthropicBrain):
             return stream(prompt, on_token, system_prompt=system_prompt, json_mode=json_mode, options=self._remote_options(options))
+        think_resolver = getattr(self.brain, "think_value_for_effort", None)
+        think_value = (
+            think_resolver(self.effort)
+            if callable(think_resolver)
+            else (False if self.effort == "off" else _LEVEL.get(self.effort, "medium"))
+        )
+        if self.thinking_enabled and think_value in (None, False):
+            think_value = True
         return stream(
             prompt, on_token, system_prompt=system_prompt, json_mode=json_mode,
             options=options,
-            think=False if self.effort == "off" else _LEVEL.get(self.effort, "medium"),
+            think=think_value,
             on_thought_delta=on_thought_delta,
             cancel_event=cancel_event,
         )
