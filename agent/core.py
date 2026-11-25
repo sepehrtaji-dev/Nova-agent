@@ -165,10 +165,10 @@ class NovaCore:
             return str(result or "").strip()
 
         thinking_on = bool(getattr(self, "thinking_enabled", False))
-        # Resolve a think= value only when the brain advertises a native
-        # thinking channel (OllamaBrain.think_value_for_effort). The answer
-        # streams immediately (no separate pre-answer generation); the model's
-        # own native thinking is routed to the panel live via on_thought_delta.
+        # Resolve a think= value when the brain exposes a native thinking
+        # channel (OllamaBrain.think_value_for_effort). The answer streams
+        # immediately (no separate pre-answer generation); the model's own native
+        # thinking is routed to the panel live via on_thought_delta.
         native_think_value = None
         if thinking_on:
             resolver = getattr(self.brain, "think_value_for_effort", None)
@@ -179,6 +179,15 @@ class NovaCore:
                     )
                 except Exception:
                     native_think_value = None
+                # The user explicitly turned Think on. If the brain exposes a
+                # thinking channel but the model does not ADVERTISE it via
+                # /api/show (so think_value_for_effort returned None), still send
+                # think=True so models that CAN reason (gemma4 and similar)
+                # actually produce thinking — otherwise no thinking streams and
+                # the panel stays empty. generate_stream retries without think=
+                # if the server rejects it for a genuinely non-reasoning model.
+                if native_think_value is None:
+                    native_think_value = True
 
         answer_parts = []
         thought_started = False

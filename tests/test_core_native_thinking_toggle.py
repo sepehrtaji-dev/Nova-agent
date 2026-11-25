@@ -95,6 +95,30 @@ class NativeReasoningBrain:
         return "Hello! I'm well."
 
 
+class UnadvertisedReasoningBrain:
+    """A brain that exposes think_value_for_effort but returns None.
+
+    This models a model that CAN reason but does not advertise thinking via
+    /api/show (so think_value_for_effort resolves to None). With Think on, the
+    core must STILL force think=True so the model actually produces thinking —
+    otherwise the panel stays empty (the gemma4 bug).
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def think_value_for_effort(self, effort="medium"):
+        return None
+
+    def generate_stream(self, prompt, on_token, system_prompt=None,
+                        on_thought_delta=None, think=None, **kwargs):
+        self.calls.append({"think": think, "has_thought_cb": callable(on_thought_delta)})
+        if callable(on_thought_delta):
+            on_thought_delta("Reasoning without advertisement.")
+        on_token("answer")
+        return "answer"
+
+
 class CoreNativeThinkingToggleTests(unittest.TestCase):
     def make_core(self, brain, enabled):
         core = NovaCore.__new__(NovaCore)
@@ -194,6 +218,23 @@ class NativeThinkingStreamTests(unittest.TestCase):
             "MODEL_THOUGHT_DELTA:Considering the greeting.",
             "MODEL_ANSWER_DELTA:Hello! ",
             "MODEL_ANSWER_DELTA:I'm well.",
+            "MODEL_THOUGHT_END",
+        ])
+
+    def test_unadvertised_reasoning_model_still_forces_think_true(self):
+        # think_value_for_effort returns None (model doesn't advertise thinking),
+        # but Think is ON. The core must force think=True so the model actually
+        # reasons and the panel fills — this is the gemma4 empty-panel fix.
+        core, events = self.make_core(UnadvertisedReasoningBrain())
+        answer = core._generate_with_native_thinking("hello", "Nova")
+        self.assertEqual(answer, "answer")
+        self.assertEqual(len(core.brain.calls), 1)
+        self.assertIs(core.brain.calls[0]["think"], True)
+        self.assertTrue(core.brain.calls[0]["has_thought_cb"])
+        self.assertEqual(events, [
+            "MODEL_THOUGHT_START",
+            "MODEL_THOUGHT_DELTA:Reasoning without advertisement.",
+            "MODEL_ANSWER_DELTA:answer",
             "MODEL_THOUGHT_END",
         ])
 

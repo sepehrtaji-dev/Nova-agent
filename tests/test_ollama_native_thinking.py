@@ -136,5 +136,43 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         self.assertEqual(result["content"], "Hey! How can I help?")
 
 
+    def test_generate_stream_retries_without_think_when_server_rejects_it(self):
+        """A non-reasoning model rejects think=; generate_stream retries without it.
+
+        The core forces think=True when the user turns Think on (so models that
+        can reason but don't advertise it still produce thinking). A genuinely
+        non-reasoning model answers think= with an error mentioning think +
+        "not supported"; generate_stream must retry once WITHOUT think= so the
+        answer still streams instead of erroring out.
+        """
+        brain = OllamaBrain(model="plain-model")
+        chunks = [Chunk(Message(content="Final answer."))]
+        answers = []
+        calls = []
+
+        def fake_chat(**kwargs):
+            calls.append(dict(kwargs))
+            if kwargs.get("think"):
+                raise RuntimeError("think is not supported by this model")
+            return iter(chunks)
+
+        with (
+            patch("model.ollama.ollama.show", return_value={
+                "thinking": {"values": [False], "default": False},
+                "capabilities": ["completion"],
+            }),
+            patch("model.ollama.ollama.chat", side_effect=fake_chat),
+        ):
+            result = brain.generate_stream(
+                "hi", answers.append, system_prompt="Nova", think=True,
+            )
+        # First call carried think=True and was rejected; retry dropped think=.
+        self.assertEqual(len(calls), 2)
+        self.assertIs(calls[0]["think"], True)
+        self.assertNotIn("think", calls[1])
+        self.assertEqual(answers, ["Final answer."])
+        self.assertEqual(result, "Final answer.")
+
+
 if __name__ == "__main__":
     unittest.main()

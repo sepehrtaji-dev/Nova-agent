@@ -327,22 +327,44 @@ class MarkdownLabel(QTextBrowser):
         # mouse-wheel input instead of swallowing it here.
         event.ignore()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.update_height()
 
+def add_markdown_content(layout, text, font_size=14, incremental=False, on_block=None):
+    blocks = [
+        (kind, value, language)
+        for kind, value, language in split_markdown_blocks(text)
+        if kind == "code" or value.strip()
+    ]
+    if not blocks:
+        return
 
-def add_markdown_content(layout, text, font_size=14):
-    for kind, value, language in split_markdown_blocks(text):
+    def _emit(index):
+        kind, value, language = blocks[index]
         if kind == "code":
             layout.addWidget(CodeBlock(value, language))
-            continue
-        if not value.strip():
-            continue
-        
-        html = render_markdown_text(value)
-        label = MarkdownLabel(html, font_size=font_size)
-        layout.addWidget(label)
+        else:
+            html = render_markdown_text(value)
+            layout.addWidget(MarkdownLabel(html, font_size=font_size))
+        if callable(on_block):
+            on_block()
+
+    if not incremental:
+        for index in range(len(blocks)):
+            _emit(index)
+        return
+    # Incremental: render the first block now (so the bubble is not empty) and
+    # defer the rest one per event-loop tick. A large response no longer builds
+    # one giant QTextDocument layout synchronously on the UI thread (the
+    # multi-second freeze after the model stopped); blocks appear progressively
+    # and the UI keeps painting between them.
+    _emit(0)
+
+    def _rest(index=1):
+        if index >= len(blocks):
+            return
+        _emit(index)
+        QTimer.singleShot(0, lambda: _rest(index + 1))
+
+    QTimer.singleShot(0, _rest)
 
 
 class TaskPlanWidget(QFrame):
@@ -845,7 +867,8 @@ class ThinkingPanel(QFrame):
 
 
 class MessageWidget(QFrame):
-    def __init__(self, role, text, attachments=None, font_size=16, parent=None):
+    def __init__(self, role, text, attachments=None, font_size=16, parent=None,
+                 incremental=False, on_block=None):
         super().__init__(parent)
         is_user = role == "user"
         self.setObjectName("userMessageRow" if is_user else "assistantMessageRow")
@@ -867,7 +890,13 @@ class MessageWidget(QFrame):
         name = QLabel("You" if is_user else "Nova")
         name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 650; border: none; background: transparent;")
         content.addWidget(name)
-        add_markdown_content(content, text if text else ("Attached files" if attachments else " "), font_size=font_size if not is_user else 14)
+        add_markdown_content(
+            content,
+            text if text else ("Attached files" if attachments else " "),
+            font_size=font_size if not is_user else 14,
+            incremental=incremental and not is_user,
+            on_block=on_block,
+        )
         if is_user and attachments:
             badges = QHBoxLayout()
             badges.setContentsMargins(0, 4, 0, 0)
@@ -2698,10 +2727,28 @@ class NovaWindow(QMainWindow):
             self._refresh_chat_history()
 
     def _on_finished(self, response):
+        # Defer the markdown build by one event-loop tick so the final streaming
+        # tokens paint first, then render the response INCREMENTALLY (one block
+        # per tick). Building one giant QTextDocument layout synchronously froze
+        # the UI for several seconds after the model stopped; the streaming text
+        # stayed visible but frozen until the markdown "popped in". Now the
+        # bubble fills block-by-block and the UI keeps painting between them.
+        response = str(response)
+        QTimer.singleShot(0, lambda: self._finalize_response(response))
+
+    def _finalize_response(self, response):
         self._discard_streaming_message()
         self._separate_thinking_panel_from_reply()
-        self._add_message("nova", str(response))
-        self.chat_store.add_message(self.current_chat_id, "assistant", str(response))
+        font_size = int(self._settings.get("assistant_font_size", "18") or 18)
+        widget = MessageWidget(
+            "nova", response, font_size=font_size,
+            incremental=True, on_block=self._scroll_chat_to_bottom,
+        )
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        self.chat_container_layout.addWidget(widget)
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+        self.chat_store.add_message(self.current_chat_id, "assistant", response)
         self._refresh_chat_history()
         self._finish_request()
 

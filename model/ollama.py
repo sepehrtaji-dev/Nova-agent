@@ -75,6 +75,23 @@ def is_transient_server_error(exc):
     return _status_code_of(exc) in RETRYABLE_STATUS_CODES
 
 
+def is_think_rejection(exc):
+    """True when Ollama rejected the think= option for a non-reasoning model.
+
+    We force think=True when the user turns Think on (so models that can reason
+    but don't advertise it still produce thinking). A genuinely non-reasoning
+    model answers this with an error mentioning think/thinking and "support";
+    generate_stream then retries once WITHOUT think= so the answer still streams.
+    """
+    text = str(exc).lower()
+    if "think" not in text and "thinking" not in text:
+        return False
+    return any(marker in text for marker in (
+        "not supported", "unsupported", "does not support",
+        "not a thinking", "is not a thinking",
+    ))
+
+
 def _retry_attempts():
     try:
         return max(1, int(os.getenv("NOVA_OLLAMA_RETRIES", str(DEFAULT_RETRY_ATTEMPTS))))
@@ -671,6 +688,7 @@ class OllamaBrain:
         thinking_parts = []
         summary_parts = []
         thought_emitted = False
+        think_disabled = False
         total_attempts = _retry_attempts()
         for attempt in range(total_attempts):
             emitted = False
@@ -719,6 +737,20 @@ class OllamaBrain:
                         on_token(token)
                 break
             except Exception as exc:
+                # If the server rejected think= (the model genuinely does not
+                # support thinking), retry once WITHOUT it so a non-reasoning
+                # model still answers instead of erroring out. Think is a user
+                # request, not a hard failure; only pre-first-chunk rejections
+                # are safe to replay (no tokens reached the UI yet).
+                if (
+                    not emitted
+                    and not think_disabled
+                    and "think" in kwargs
+                    and is_think_rejection(exc)
+                ):
+                    think_disabled = True
+                    kwargs.pop("think", None)
+                    continue
                 # Retrying after tokens already reached the UI would duplicate
                 # output; only pre-first-chunk failures (the server rejected
                 # the request before producing anything) are safe to replay.
