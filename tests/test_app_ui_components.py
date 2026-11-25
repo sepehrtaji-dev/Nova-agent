@@ -28,6 +28,9 @@ class AppUIComponentTests(unittest.TestCase):
             [tabs.tabText(index) for index in range(tabs.count())],
             ["Models", "Instructions", "Profile", "Appearance"],
         )
+        self.assertEqual(dialog.font_slider.minimum(), 15)
+        self.assertEqual(dialog.font_slider.maximum(), 24)
+        self.assertEqual(dialog.font_slider.value(), 18)
         dialog.close()
         dialog.deleteLater()
 
@@ -128,7 +131,7 @@ class AppUIComponentTests(unittest.TestCase):
             "provider": "local",
             "effort": "medium",
             "remote_models": "[]",
-            "assistant_font_size": "16",
+            "assistant_font_size": "18",
         }
         with (
             mock.patch("App.load_settings", return_value=settings),
