@@ -46,7 +46,16 @@ class FakeOllama(BaseHTTPRequestHandler):
 
 def main():
     repo = sys.argv[1]
-    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOllama)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOllama)
+    except OSError as exc:
+        # Some locked-down Windows environments have no usable Winsock
+        # provider. Report an explicit skip instead of mislabeling this as
+        # an Ollama proxy-bypass failure.
+        if getattr(exc, "winerror", None) == 10106:
+            print(f"E2E-SKIP: Windows socket provider unavailable ({exc})", flush=True)
+            return
+        raise
     threading.Thread(target=server.serve_forever, daemon=True).start()
     os.environ["OLLAMA_HOST"] = f"http://127.0.0.1:{server.server_address[1]}"
 

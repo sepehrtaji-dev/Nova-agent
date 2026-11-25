@@ -20,12 +20,25 @@ def _ensure_loopback_bypasses_proxy():
     Remote providers keep using the proxy — only loopback hosts are added,
     and entries the user already configured are preserved.
     """
+    # Some HTTP stacks prefer the uppercase spelling and others prefer the
+    # lowercase spelling. Merge both first so neither user's existing bypass
+    # list is lost, then publish the same canonical list to both variables.
+    entries = []
+    seen = set()
     for name in ("NO_PROXY", "no_proxy"):
-        existing = os.environ.get(name, "")
-        entries = [entry.strip() for entry in existing.split(",") if entry.strip()]
-        missing = [host for host in LOOPBACK_HOSTS if host not in entries]
-        if missing:
-            os.environ[name] = ",".join(entries + missing)
+        for raw_entry in os.environ.get(name, "").split(","):
+            entry = raw_entry.strip()
+            key = entry.casefold()
+            if entry and key not in seen:
+                entries.append(entry)
+                seen.add(key)
+    for host in LOOPBACK_HOSTS:
+        if host.casefold() not in seen:
+            entries.append(host)
+            seen.add(host.casefold())
+    value = ",".join(entries)
+    os.environ["NO_PROXY"] = value
+    os.environ["no_proxy"] = value
 
 
 # MUST run before importing ollama: the ollama package constructs its

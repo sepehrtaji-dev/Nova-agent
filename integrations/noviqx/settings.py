@@ -37,7 +37,22 @@ def settings_path() -> Path:
     configured = os.getenv(SETTINGS_ENV, "").strip()
     if configured:
         return Path(configured).expanduser()
-    home = Path(os.getenv("NOVA_HOME", Path.home() / ".nova"))
+    home_value = os.getenv("NOVA_HOME", "").strip()
+    if home_value:
+        home = Path(home_value).expanduser()
+    else:
+        # Path.home() can raise when a caller deliberately clears the process
+        # environment (for example, isolated tests or a restricted service).
+        # Prefer the platform home variables, then use a predictable local
+        # fallback instead of failing during authentication construction.
+        home_value = os.getenv("USERPROFILE") or os.getenv("HOME")
+        if home_value:
+            home = Path(home_value).expanduser()
+        else:
+            try:
+                home = Path.home()
+            except RuntimeError:
+                home = Path.cwd() / ".nova"
     return home / "noviqx.json"
 
 

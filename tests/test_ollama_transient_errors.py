@@ -217,8 +217,11 @@ class LoopbackProxyBypassTests(unittest.TestCase):
                 os.environ["NO_PROXY"],
                 "internal.corp.example,localhost,127.0.0.1,::1",
             )
-            # The user's own entries are preserved and both casings patched.
-            self.assertEqual(os.environ["no_proxy"], "localhost,127.0.0.1,::1")
+            # Both casings contain the union: neither user's entries are lost.
+            self.assertEqual(
+                os.environ["no_proxy"],
+                "internal.corp.example,localhost,127.0.0.1,::1",
+            )
 
     def test_bypass_is_idempotent(self):
         from model.ollama import _ensure_loopback_bypasses_proxy
@@ -268,6 +271,8 @@ class LocalServerWithDeadProxyEndToEndTests(unittest.TestCase):
             timeout=120,
             cwd=repo,
         )
+        if "E2E-SKIP:" in proc.stdout:
+            self.skipTest(proc.stdout.strip())
         self.assertIn(
             "E2E-OK", proc.stdout,
             msg=f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",

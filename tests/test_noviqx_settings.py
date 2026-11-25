@@ -107,6 +107,7 @@ class NoviqXSettingsTests(unittest.TestCase):
         self.assertNotIn("should also be dropped", raw)
         self.assertNotIn("pem_content", raw)
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits do not represent Windows ACLs")
     def test_settings_file_permissions_are_owner_only(self):
         save_settings({"app_id": "1"})
         path = noviqx_settings.settings_path()
@@ -142,12 +143,13 @@ class GitHubAppAuthFallbackTests(unittest.TestCase):
 
     def test_settings_file_is_used_when_env_unset(self):
         from integrations.noviqx.auth import GitHubAppAuth
+        pem_path = Path(self._home) / "whatever.pem"
         save_settings({"app_id": "111", "installation_id": "222",
-                       "private_key_path": "/tmp/whatever.pem"})
+                       "private_key_path": str(pem_path)})
         auth = GitHubAppAuth()
         self.assertEqual(auth.app_id, "111")
         self.assertEqual(auth.installation_id, "222")
-        self.assertEqual(str(auth.private_key_path), "/tmp/whatever.pem")
+        self.assertEqual(auth.private_key_path, pem_path)
 
     def test_env_overrides_settings_file(self):
         from integrations.noviqx.auth import GitHubAppAuth
