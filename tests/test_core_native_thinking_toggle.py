@@ -11,7 +11,7 @@ class NativeThinkingBrain:
     def generate_stream(self, prompt, on_token, system_prompt=None, **kwargs):
         self.calls.append(prompt)
         self.callback_received = kwargs.get("on_thought_delta")
-        if len(self.calls) == 1:
+        if "Before answering, write a short user-facing approach summary" in prompt:
             on_token("A concise approach preview.")
             return "A concise approach preview."
         on_token("final ")
@@ -33,6 +33,7 @@ class CoreNativeThinkingToggleTests(unittest.TestCase):
         answer = core._generate_with_native_thinking("hello", "Nova")
         self.assertEqual(answer, "final answer")
         self.assertEqual(len(core.brain.calls), 1)
+        self.assertEqual(core.brain.calls, ["hello"])
         self.assertEqual(events, [
             "MODEL_ANSWER_DELTA:final ",
             "MODEL_ANSWER_DELTA:answer",
