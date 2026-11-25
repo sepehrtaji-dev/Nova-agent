@@ -147,7 +147,8 @@ class AppUIComponentTests(unittest.TestCase):
             self.assertIsNot(window.core, first_core)
             second_core = window.core
             second_chat = window.current_chat_id
-            self.assertNotEqual(first_chat, second_chat)
+            self.assertIsNone(second_chat)
+            self.assertEqual(len(window.chat_store.chats), 1)
             window.agent_tabs.setCurrentIndex(0)
             self.assertIs(window.core, first_core)
             self.assertEqual(window.current_chat_id, first_chat)
