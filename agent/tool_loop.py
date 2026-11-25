@@ -277,6 +277,9 @@ class ToolCallingLoop:
             thinking = response.get("thinking")
             if isinstance(thinking, str) and thinking:
                 assistant_message["thinking"] = thinking
+            provider_content = response.get("provider_content")
+            if isinstance(provider_content, list) and provider_content:
+                assistant_message["provider_content"] = provider_content
             messages.append(assistant_message)
 
             for normalized, name, arguments, parse_error in parsed_calls:
