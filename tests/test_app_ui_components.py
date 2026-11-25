@@ -179,6 +179,36 @@ class AppUIComponentTests(unittest.TestCase):
             self.assertEqual(len(window._agent_sessions), 1)
             window.close()
 
+    def test_agent_worker_uses_model_to_generate_new_chat_title(self):
+        class FakeBrain:
+            def __init__(self):
+                self.prompt = ""
+
+            def generate(self, prompt, system_prompt=None):
+                self.prompt = prompt
+                return "  Nova Project Planning  "
+
+        class FakeCore:
+            def __init__(self):
+                self.brain = FakeBrain()
+                self.cancel_event = None
+                self.status_callback = None
+
+            def ask(self, _message):
+                return "The answer"
+
+        core = FakeCore()
+        worker = AgentWorker(core, "Help me plan Nova", generate_title=True, chat_id="chat-new")
+        titles = []
+        completed = []
+        worker.title_generated.connect(lambda chat_id, title: titles.append((chat_id, title)))
+        worker.completed.connect(completed.append)
+        worker.run()
+
+        self.assertEqual(completed, ["The answer"])
+        self.assertEqual(titles, [("chat-new", "Nova Project Planning")])
+        self.assertIn("Return only the title", core.brain.prompt)
+
     def test_agent_worker_coalesces_stream_deltas_before_qt_delivery(self):
         worker = AgentWorker(object(), "test")
         received = []
