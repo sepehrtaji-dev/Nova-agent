@@ -27,9 +27,8 @@ class EffortAwareBrain:
         value = resolver(self.effort) if callable(resolver) else None
         # Some test doubles and third-party wrappers expose arbitrary Mock
         # attributes. Accept only the Ollama wire types for a think value.
-        if value is not None and not isinstance(value, (bool, str)):
-            value = None
-        if value is None and not callable(resolver):
+        invalid_value = value is not None and not isinstance(value, (bool, str))
+        if invalid_value or (value is None and not callable(resolver)):
             value = False if self.effort == "off" else _LEVEL.get(self.effort, "medium")
         if self.thinking_enabled and value in (None, False):
             value = True
