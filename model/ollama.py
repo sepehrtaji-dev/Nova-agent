@@ -670,6 +670,7 @@ class OllamaBrain:
         chunks = []
         thinking_parts = []
         summary_parts = []
+        thought_emitted = False
         total_attempts = _retry_attempts()
         for attempt in range(total_attempts):
             emitted = False
@@ -692,13 +693,22 @@ class OllamaBrain:
                         thought = self._message_thinking(message)
                         summary = self._message_thinking_summary(message)
                     if thought:
-                        thinking_parts.append(thought if isinstance(thought, str) else str(thought))
+                        thought = thought if isinstance(thought, str) else str(thought)
+                        thinking_parts.append(thought)
                         emitted = True
                     if summary:
                         summary = summary if isinstance(summary, str) else str(summary)
                         summary_parts.append(summary)
                         if callable(on_thought_delta):
                             on_thought_delta(summary)
+                            thought_emitted = True
+                    elif thought and callable(on_thought_delta):
+                        # No labelled summary for this chunk — stream the raw
+                        # thinking live so the panel fills during the model's
+                        # thinking phase instead of freezing until a post-hoc
+                        # summary is generated at the end.
+                        on_thought_delta(thought)
+                        thought_emitted = True
                     if not token:
                         continue
                     if not isinstance(token, str):
@@ -725,7 +735,7 @@ class OllamaBrain:
                 )
                 time.sleep(wait)
 
-        if callable(on_thought_delta) and not summary_parts and thinking_parts:
+        if callable(on_thought_delta) and not thought_emitted and thinking_parts:
             self._summarize_thinking(prompt, "".join(thinking_parts), on_thought_delta)
         return "".join(chunks)
 

@@ -158,7 +158,30 @@ class NovaCore:
             self._check_cancelled()
             return str(result or "").strip()
 
-        if bool(getattr(self, "thinking_enabled", False)):
+        thinking_on = bool(getattr(self, "thinking_enabled", False))
+        # If the model advertises a native thinking channel, show that thinking
+        # live while the answer streams. Running a separate "approach summary"
+        # generation first would block the UI for a whole extra generation and,
+        # for reasoning models that answer short prompts inside their thinking
+        # channel (empty content stream), left the panel empty and the app
+        # frozen during the model's thinking phases.
+        native_think_value = None
+        if thinking_on:
+            resolver = getattr(self.brain, "think_value_for_effort", None)
+            if callable(resolver):
+                try:
+                    native_think_value = resolver(
+                        getattr(self.brain, "effort", os.getenv("NOVA_EFFORT", "medium"))
+                    )
+                except Exception:
+                    native_think_value = None
+            if native_think_value is None:
+                supported = getattr(self.brain, "supports_thinking", None)
+                if callable(supported) and supported():
+                    native_think_value = True
+        use_native_thinking = thinking_on and native_think_value is not None
+
+        if thinking_on and not use_native_thinking:
             summary_prompt = (
                 "Before answering, write a short user-facing approach summary "
                 "for the user's request. State the topic and the broad method "
@@ -249,6 +272,7 @@ class NovaCore:
                 logging.exception("Could not generate the optional approach summary")
 
         answer_parts = []
+        thought_started = False
 
         def on_answer(token):
             self._check_cancelled()
@@ -258,14 +282,49 @@ class NovaCore:
                 # Deliver every token as soon as the provider emits it.
                 self._status("MODEL_ANSWER_DELTA:" + value)
 
+        def on_answer_thought(token):
+            # Route the model's native thinking to the panel LIVE while the
+            # answer streams, so reasoning phases fill the panel instead of
+            # freezing the UI waiting for content tokens that have not arrived.
+            nonlocal thought_started
+            self._check_cancelled()
+            if not token:
+                return
+            if not thought_started:
+                self._status("MODEL_THOUGHT_START")
+                thought_started = True
+            self._status("MODEL_THOUGHT_DELTA:" + str(token))
+
         try:
-            result = stream(prompt, on_answer, system_prompt=system_prompt)
+            if use_native_thinking:
+                result = stream(
+                    prompt,
+                    on_answer,
+                    system_prompt=system_prompt,
+                    on_thought_delta=on_answer_thought,
+                    think=native_think_value,
+                )
+            else:
+                result = stream(prompt, on_answer, system_prompt=system_prompt)
         except TypeError as exc:
-            if "system_prompt" not in str(exc):
+            msg = str(exc)
+            if (
+                "system_prompt" not in msg
+                and "on_thought_delta" not in msg
+                and "think" not in msg
+            ):
                 raise
-            result = stream(prompt, on_answer)
+            # A third-party brain rejected one of the optional kwargs; retry
+            # with just system_prompt (or nothing) so the answer still streams.
+            thought_started = False
+            if "system_prompt" in msg:
+                result = stream(prompt, on_answer)
+            else:
+                result = stream(prompt, on_answer, system_prompt=system_prompt)
 
         self._check_cancelled()
+        if thought_started:
+            self._status("MODEL_THOUGHT_END")
         return str(result or "".join(answer_parts)).strip()
 
     def _capability_context(self):

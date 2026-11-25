@@ -840,6 +840,9 @@ class ThinkingPanel(QFrame):
     def has_content(self):
         return bool(self._has_content)
 
+    def is_finished(self):
+        return bool(self._finished)
+
 
 class MessageWidget(QFrame):
     def __init__(self, role, text, attachments=None, font_size=16, parent=None):
@@ -2570,10 +2573,14 @@ class NovaWindow(QMainWindow):
             return
         if message.startswith("MODEL_ANSWER_DELTA:"):
             if not self._answer_started:
-                # Keep the two phases visually ordered: finish the reasoning
-                # card before the streamed assistant answer is mounted.
-                self._separate_thinking_panel_from_reply()
                 self._answer_started = True
+                # If the reasoning card already finished (the approach-preview
+                # path), separate it from the reply now. If it is still live
+                # (a reasoning model streaming native thinking interleaved with
+                # the answer), keep it mounted so later MODEL_THOUGHT_DELTA
+                # events keep filling it instead of freezing the UI.
+                if self.thinking_panel and self.thinking_panel.is_finished():
+                    self._separate_thinking_panel_from_reply()
                 # The Thinking panel is the only generation-phase UI. Hide the
                 # composer activity chip while the final answer streams.
                 self._status_timer.stop()
@@ -2585,7 +2592,7 @@ class NovaWindow(QMainWindow):
             return
         if message.startswith("MODEL_THOUGHT_START"):
             self._set_activity("Thinking")
-            if self.thinking_enabled and self.thinking_panel is None and not self._answer_started:
+            if self.thinking_enabled and self.thinking_panel is None:
                 self.thinking_panel = self._insert_thinking_panel()
             if self.thinking_panel:
                 self.thinking_panel.set_phase("Thinking")
@@ -2593,9 +2600,9 @@ class NovaWindow(QMainWindow):
         if message.startswith("MODEL_THOUGHT_DELTA:"):
             thought = message[len("MODEL_THOUGHT_DELTA:"):]
             if thought.strip():
-                if self.thinking_enabled and self.thinking_panel is None and not self._answer_started:
+                if self.thinking_enabled and self.thinking_panel is None:
                     self.thinking_panel = self._insert_thinking_panel()
-                if self.thinking_panel and not self._answer_started:
+                if self.thinking_panel:
                     self.thinking_panel.append_delta(thought)
             return
         if message == "MODEL_THOUGHT_END":

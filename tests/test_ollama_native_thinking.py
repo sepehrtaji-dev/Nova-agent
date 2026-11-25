@@ -59,6 +59,40 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         self.assertEqual(answers, ["Final answer."])
         self.assertEqual(thoughts, ["The model is checking the request."])
 
+    def test_standard_stream_streams_raw_thinking_live_when_no_labelled_summary(self):
+        """A reasoning model with only raw thinking fills the panel live.
+
+        Without this, the panel stayed empty for the whole thinking phase and
+        only filled (via a separate post-hoc summary) at the end — the freeze
+        the user reported. When a chunk carries raw thinking but no labelled
+        thinking_summary, stream that thinking live.
+        """
+        brain = OllamaBrain(model="gemma4:latest")
+        chunks = [
+            Chunk(Message(thinking="Working through the greeting.")),
+            Chunk(Message(thinking="Deciding to be warm.")),
+            Chunk(Message(content="Hi there!")),
+        ]
+        thoughts = []
+        answers = []
+        with (
+            patch("model.ollama.ollama.show", return_value={
+                "thinking": {"values": [False, True], "default": True},
+                "capabilities": ["completion", "thinking"],
+            }),
+            patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat,
+        ):
+            result = brain.generate_stream(
+                "hi", answers.append, system_prompt="Nova",
+                on_thought_delta=thoughts.append, think=True,
+            )
+        self.assertIs(chat.call_args.kwargs["think"], True)
+        # Raw thinking streamed live, in order — not buffered for a post-hoc
+        # summary that would only arrive after a second blocking generation.
+        self.assertEqual(thoughts, ["Working through the greeting.", "Deciding to be warm."])
+        self.assertEqual(answers, ["Hi there!"])
+        self.assertEqual(result, "Hi there!")
+
 
     def test_streams_native_thinking_separately_from_answer(self):
         brain = OllamaBrain(model="gemma4:latest")

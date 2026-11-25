@@ -104,6 +104,39 @@ class StrictSignatureBrain:
         return "final answer"
 
 
+class NativeReasoningBrain:
+    """A reasoning model that interleaves thinking and content in one stream.
+
+    advertises a native thinking channel, so the approach-preview path is
+    skipped and the model's own thinking is routed to the panel live while the
+    answer streams.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def supports_thinking(self):
+        return True
+
+    def think_value_for_effort(self, effort="medium"):
+        return True
+
+    def generate_stream(self, prompt, on_token, system_prompt=None,
+                        on_thought_delta=None, think=None, **kwargs):
+        self.calls.append({
+            "think": think,
+            "has_thought_cb": callable(on_thought_delta),
+        })
+        if "Before answering, write a short user-facing approach summary" in prompt:
+            on_token("SHOULD NOT APPEAR")
+            return "SHOULD NOT APPEAR"
+        if callable(on_thought_delta):
+            on_thought_delta("Considering the greeting.")
+        on_token("Hello! ")
+        on_token("I'm well.")
+        return "Hello! I'm well."
+
+
 class ApproachPreviewStreamingTests(unittest.TestCase):
     """Think mode must stream the approach preview live and never freeze."""
 
@@ -152,6 +185,26 @@ class ApproachPreviewStreamingTests(unittest.TestCase):
             "MODEL_THOUGHT_DELTA:A concise approach preview.",
             "MODEL_THOUGHT_END",
             "MODEL_ANSWER_DELTA:final answer",
+        ])
+
+    def test_native_thinking_streams_live_during_answer_and_skips_summary(self):
+        core, events = self.make_core(NativeReasoningBrain())
+        answer = core._generate_with_native_thinking("hello", "Nova")
+        self.assertEqual(answer, "Hello! I'm well.")
+        # Only ONE generation (the answer) — the separate approach summary is
+        # skipped because the model has a native thinking channel, so there is
+        # no second blocking generation to freeze the UI.
+        self.assertEqual(len(core.brain.calls), 1)
+        self.assertTrue(core.brain.calls[0]["has_thought_cb"])
+        self.assertIs(core.brain.calls[0]["think"], True)
+        # The model's native thinking is routed to the panel LIVE, interleaved
+        # with the streamed answer — not buffered, not dropped.
+        self.assertEqual(events, [
+            "MODEL_THOUGHT_START",
+            "MODEL_THOUGHT_DELTA:Considering the greeting.",
+            "MODEL_ANSWER_DELTA:Hello! ",
+            "MODEL_ANSWER_DELTA:I'm well.",
+            "MODEL_THOUGHT_END",
         ])
 
 

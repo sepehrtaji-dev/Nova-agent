@@ -210,6 +210,37 @@ class ThinkingPanelIntegrationTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_thinking_panel_stays_live_during_answer_for_native_thinking(self):
+        """Native thinking interleaved with the answer must keep filling the panel.
+
+        Previously the panel was torn down on the first answer delta, so a
+        reasoning model's mid-answer thinking phases were dropped and the UI
+        froze until content tokens resumed.
+        """
+        window = self._make_window()
+        try:
+            window.busy = True
+            window.thinking_enabled = True
+            window._answer_started = False
+            window.thinking_panel = None
+
+            # Thinking starts, the answer begins, then more thinking arrives.
+            window._on_status("MODEL_THOUGHT_START")
+            window._on_status("MODEL_THOUGHT_DELTA:Considering the greeting.")
+            window._on_status("MODEL_ANSWER_DELTA:Hello!")
+            panel = window.thinking_panel
+            self.assertIsNotNone(panel, "panel was torn down when the answer started")
+            self.assertFalse(panel.is_finished(),
+                             "panel finished early; later thinking would be dropped")
+
+            # More thinking arrives mid-answer — it must still reach the panel.
+            window._on_status("MODEL_THOUGHT_DELTA:Choosing a warm reply.")
+            self.assertIn("Choosing a warm reply.", panel._body.toPlainText())
+            window._on_status("MODEL_THOUGHT_END")
+            self.assertTrue(panel.is_finished())
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()
