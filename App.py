@@ -25,7 +25,7 @@ from integrations.noviqx.settings import (
 )
 
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread, QPropertyAnimation, QEasingCurve, Property
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient, QTextOption
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient, QTextCursor, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -609,9 +609,21 @@ class StreamingMessageWidget(QFrame):
     def append_delta(self, delta):
         if not delta:
             return
-        self.editor.moveCursor(self.editor.textCursor().MoveOperation.End)
-        self.editor.insertPlainText(str(delta))
-        self.editor.ensureCursorVisible()
+        editor = self.editor
+        bar = editor.verticalScrollBar()
+        # Mirror ThinkingPanel: follow the stream only while the reader is at
+        # the bottom. When they scrolled up, insert through a standalone
+        # document cursor so the viewport is not pulled to the end on every
+        # token.
+        at_bottom = bar.maximum() - bar.value() <= max(bar.singleStep(), 1)
+        if at_bottom:
+            editor.moveCursor(editor.textCursor().MoveOperation.End)
+            editor.insertPlainText(str(delta))
+            editor.ensureCursorVisible()
+        else:
+            cursor = QTextCursor(editor.document())
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(str(delta))
 
     def clear(self):
         self.editor.clear()
@@ -649,6 +661,52 @@ class ComposerEdit(QPlainTextEdit):
         self.fit_height()
 
 
+class _PulseDot(QWidget):
+    """Painted indicator dot for the Thinking panel.
+
+    The previous indicator animated by rebuilding its Qt stylesheet on every
+    tick (a CSS reparse plus a repaint, several times a second). That work
+    piled onto the same UI thread that streams reasoning tokens and made the
+    panel feel frozen during long generations. This widget repaints cheaply
+    from a numeric phase property instead — ``update()`` is coalesced by Qt
+    and never reparses a stylesheet.
+    """
+
+    _COLORS = (ACCENT, "#9b8cff", "#c084fc", "#9b8cff")
+    _RADII = (4, 5, 6, 5)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._phase = 0
+        self._finished = False
+        self.setFixedSize(14, 14)
+
+    def set_phase(self, phase):
+        self._phase = int(phase) % len(self._COLORS)
+        self.update()
+
+    def set_finished(self, finished):
+        self._finished = bool(finished)
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+        center = QPointF(rect.width() / 2, rect.height() / 2)
+        if self._finished:
+            pen = QPen(QColor(TEXT_MUTED))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(center, 4, 4)
+            return
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(self._COLORS[self._phase]))
+        radius = self._RADII[self._phase]
+        painter.drawEllipse(center, radius, radius)
+
+
 class ThinkingPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -669,8 +727,7 @@ class ThinkingPanel(QFrame):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
 
-        self._indicator = QLabel("●")
-        self._indicator.setStyleSheet(f"color: {ACCENT}; font-size: 8px; border: none; background: transparent;")
+        self._indicator = _PulseDot()
         header.addWidget(self._indicator)
 
         self._title = QLabel("Thinking")
@@ -714,11 +771,7 @@ class ThinkingPanel(QFrame):
             self._pulse_timer.stop()
             return
         self._pulse_phase = (self._pulse_phase + 1) % 4
-        colors = (ACCENT, "#9b8cff", "#c084fc", "#9b8cff")
-        sizes = (8, 9, 10, 9)
-        self._indicator.setStyleSheet(
-            f"color: {colors[self._pulse_phase]}; font-size: {sizes[self._pulse_phase]}px; border: none; background: transparent;"
-        )
+        self._indicator.set_phase(self._pulse_phase)
 
     def _tick(self):
         if self._finished:
@@ -740,12 +793,23 @@ class ThinkingPanel(QFrame):
     def append_delta(self, delta):
         if not delta:
             return
-        cursor = self._body.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-        self._body.setTextCursor(cursor)
-        self._body.insertPlainText(delta)
         bar = self._body.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        # Only follow the stream when the reader is already at the bottom.
+        # Moving the editor's own cursor to the end forces the viewport to
+        # follow it, which yanks the view away from someone who scrolled up to
+        # re-read earlier reasoning. When that happens, insert through a
+        # standalone document cursor that never touches the editor cursor.
+        at_bottom = bar.maximum() - bar.value() <= max(bar.singleStep(), 1)
+        if at_bottom:
+            cursor = self._body.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self._body.setTextCursor(cursor)
+            self._body.insertPlainText(delta)
+            bar.setValue(bar.maximum())
+        else:
+            cursor = QTextCursor(self._body.document())
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(delta)
         self._has_content = True
 
     def finish(self):
@@ -756,13 +820,18 @@ class ThinkingPanel(QFrame):
         self._pulse_timer.stop()
         self._tick()
         self._title.setText("Reasoning summary")
-        self._indicator.setText("○")
-        self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
+        self._indicator.set_finished(True)
         if not self._has_content:
             self._body.setPlainText("This model did not provide a displayable reasoning summary for this turn.")
-        self._expanded = False
-        self._body.setVisible(False)
-        self._toggle.setText("Show")
+        # Keep the reasoning on screen after the stream ends. Auto-collapsing
+        # here hid the summary the instant thinking finished — before the
+        # answer appeared — which read as the panel "not showing", and left an
+        # empty chip when a model produced no reasoning. The body is
+        # height-capped, so a finished summary stays compact until the user
+        # explicitly hides it.
+        self._expanded = True
+        self._body.setVisible(True)
+        self._toggle.setText("Hide")
 
 
 class MessageWidget(QFrame):
