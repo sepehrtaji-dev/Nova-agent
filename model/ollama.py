@@ -434,6 +434,8 @@ class OllamaBrain:
         thinking_parts = []
         summary_parts = []
         calls = []
+        thought_emitted = False
+        think_disabled = False
         total_attempts = _retry_attempts()
         for attempt in range(total_attempts):
             emitted = False
@@ -462,6 +464,15 @@ class OllamaBrain:
                         summary_parts.append(summary)
                         if callable(on_thought_delta):
                             on_thought_delta(summary)
+                            thought_emitted = True
+                    elif thought and callable(on_thought_delta):
+                        # Stream the model's thinking to the panel AS IT ARRIVES.
+                        # Holding it back and summarizing after the stream ended
+                        # ran a second blocking inference on every tool round,
+                        # which is the multi-second freeze, and it left the
+                        # panel empty until the round was already over.
+                        on_thought_delta(thought)
+                        thought_emitted = True
                     if token:
                         token = token if isinstance(token, str) else str(token)
                         content_parts.append(token)
@@ -472,8 +483,20 @@ class OllamaBrain:
                         # Ollama streams one complete tool call per chunk; accumulate
                         # instead of overwriting, or every call but the last is lost.
                         calls.extend(list(chunk_calls))
+                        emitted = True
                 break
             except Exception as exc:
+                # Think is a user request, not a hard failure: a model that
+                # does not support it is retried once without think=.
+                if (
+                    not emitted
+                    and not think_disabled
+                    and "think" in kwargs
+                    and is_think_rejection(exc)
+                ):
+                    think_disabled = True
+                    kwargs.pop("think", None)
+                    continue
                 # Retrying after tokens already reached the UI would duplicate
                 # output; only pre-first-chunk failures (the server rejected
                 # the request before producing anything) are safe to replay.
@@ -490,12 +513,8 @@ class OllamaBrain:
                 )
                 time.sleep(wait)
         reasoning_summary = "".join(summary_parts)
-        if not reasoning_summary and thinking_parts and callable(on_thought_delta):
-            reasoning_summary = self._summarize_thinking(
-                messages[-1].get("content", "") if messages and isinstance(messages[-1], dict) else "",
-                "".join(thinking_parts),
-                on_thought_delta,
-            )
+        if not reasoning_summary and thought_emitted:
+            reasoning_summary = "".join(thinking_parts)
         return {
             "content": "".join(content_parts),
             # Keep the native field for Ollama's next tool round; never stream it to the UI.

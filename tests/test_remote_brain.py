@@ -489,10 +489,10 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertEqual(result["content"], "The answer is 42.")
         self.assertIs(chat.call_args.kwargs["think"], True)
 
-    def test_ollama_native_tool_stream_summarizes_thinking_without_exposing_raw_trace(self):
+    def test_ollama_native_tool_stream_routes_thinking_live_without_a_second_generation(self):
         chunks = [
-            {"message": {"thinking": "PRIVATE TRACE A", "content": ""}},
-            {"message": {"thinking": "PRIVATE TRACE B", "content": ""}},
+            {"message": {"thinking": "Reading the README first.", "content": ""}},
+            {"message": {"thinking": " Then summarizing it.", "content": ""}},
             {"message": {"thinking": "", "content": "", "tool_calls": [{
                 "function": {"name": "read_file", "arguments": {"path": "README.md"}}
             }]}},
@@ -500,28 +500,25 @@ class ProviderSelectionTests(unittest.TestCase):
         ]
         thoughts = []
 
-        def summarize(prompt, thinking, callback):
-            self.assertIn("Read README", prompt)
-            self.assertEqual(thinking, "PRIVATE TRACE APRIVATE TRACE B")
-            callback("The model selected the README inspection step.")
-            return "The model selected the README inspection step."
-
         with mock.patch("model.ollama.ollama.show", return_value={
             "thinking": {"values": [True], "default": True},
         }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat, \
-             mock.patch.object(OllamaBrain, "_summarize_thinking", side_effect=summarize):
+             mock.patch.object(OllamaBrain, "_summarize_thinking",
+                               side_effect=AssertionError("blocking summarizer ran")):
             brain = OllamaBrain(model="test-model")
             result = brain.generate_tool_turn_stream(
                 messages=[{"role": "user", "content": "Read README"}],
                 tools=[],
                 on_thought_delta=thoughts.append,
             )
-        self.assertEqual(thoughts, ["The model selected the README inspection step."])
-        self.assertEqual(result["thinking"], "PRIVATE TRACE APRIVATE TRACE B")
-        self.assertEqual(result["reasoning_summary"], "The model selected the README inspection step.")
-        self.assertNotIn("PRIVATE TRACE", "".join(thoughts))
+        # The panel fills as the thinking arrives, in order; no extra
+        # inference runs after the stream (that was the freeze).
+        self.assertEqual(thoughts, ["Reading the README first.", " Then summarizing it."])
+        self.assertEqual(result["thinking"], "Reading the README first. Then summarizing it.")
+        self.assertEqual(result["reasoning_summary"], "Reading the README first. Then summarizing it.")
         self.assertEqual(result["content"], "I inspected the README.")
         self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(chat.call_count, 1)
         self.assertIs(chat.call_args.kwargs["think"], True)
 
     def test_openrouter_reasoning_summary_request_is_enabled_only_when_requested(self):

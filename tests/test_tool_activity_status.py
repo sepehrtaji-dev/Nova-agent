@@ -184,6 +184,7 @@ class ToolLoopActivityEventTests(unittest.TestCase):
                 }],
             },
             {"chunks": ["Handled gracefully."], "tool_calls": []},
+            {"chunks": ["Handled gracefully."], "tool_calls": []},
         ], events)
         result = loop.run("q", system_prompt="Nova")
         self.assertEqual(result, "Handled gracefully.")

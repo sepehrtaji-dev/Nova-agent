@@ -233,6 +233,32 @@ class AppUIComponentTests(unittest.TestCase):
         self.assertEqual(panel._steps.count(), 3)
         panel.deleteLater()
 
+    def test_task_plan_shows_a_checkbox_for_every_task(self):
+        panel = TaskPlanWidget()
+        panel.set_plan({
+            "steps": [
+                {"description": "Done task", "status": "completed"},
+                {"description": "Active task", "status": "in_progress"},
+                {"description": "Waiting task", "status": "pending"},
+                {"description": "Broken task", "status": "failed"},
+            ]
+        })
+        labels = [panel._steps.itemAt(i).widget().text() for i in range(panel._steps.count())]
+        self.assertEqual(labels, [
+            "\u2611  Done task",
+            "\u25c9  Active task",
+            "\u2610  Waiting task",
+            "\u2612  Broken task",
+        ])
+        panel.deleteLater()
+
+    def test_task_plan_shows_up_to_ten_steps_before_collapsing(self):
+        panel = TaskPlanWidget()
+        panel.set_plan({"steps": [{"description": f"Step {i}", "status": "pending"} for i in range(12)]})
+        self.assertEqual(panel._steps.count(), 11)  # 10 steps + "+ 2 more steps"
+        self.assertEqual(panel._progress.text(), "0 / 12 completed")
+        panel.deleteLater()
+
 
 if __name__ == "__main__":
     unittest.main()

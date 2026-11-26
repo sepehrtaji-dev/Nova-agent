@@ -9,6 +9,20 @@ import json
 
 from agent.activity import THINKING_ACTIVITY, format_activity
 from agent.cancellation import raise_if_cancelled
+from tools.task_plan import normalize_plan, open_steps
+
+
+# Failures that retrying cannot fix (the session simply does not allow the tool).
+_PERMANENT_FAILURES = (
+    "is disabled by session permissions",
+    "is not enabled in this session",
+    "is not registered",
+)
+
+
+def _is_permanent_failure(result):
+    error = str(result.get("error") or "") if isinstance(result, dict) else ""
+    return any(marker in error for marker in _PERMANENT_FAILURES)
 
 
 class ToolLoopError(RuntimeError):
@@ -50,6 +64,9 @@ class ToolCallingLoop:
 
     MAX_RESULT_CHARS = 40000
     MAX_CALLS_PER_TURN = 6
+    # How many times a premature final answer may be sent back for more work
+    # (a failed tool call, or checklist items still open) before it is accepted.
+    MAX_CONTINUATIONS = 4
 
     def __init__(
         self,
@@ -66,6 +83,7 @@ class ToolCallingLoop:
         on_thought_delta=None,
         max_rounds=12,
         cancel_event=None,
+        max_continuations=None,
     ):
         self.brain = brain
         self.tools = tools
@@ -79,6 +97,10 @@ class ToolCallingLoop:
         self.on_thought_delta = on_thought_delta
         self.max_rounds = max(1, int(max_rounds or 12))
         self.cancel_event = cancel_event
+        self.max_continuations = (
+            self.MAX_CONTINUATIONS if max_continuations is None else max(0, int(max_continuations))
+        )
+        self._plan_steps = []
 
     def _check_cancelled(self):
         raise_if_cancelled(self.cancel_event)
@@ -212,6 +234,32 @@ class ToolCallingLoop:
             "output": output,
         }
 
+    def _record_plan(self, output):
+        """Remember the model's task checklist and publish it to the UI."""
+        try:
+            data = json.loads(output) if isinstance(output, str) else {}
+            steps = normalize_plan(data.get("steps")) if isinstance(data, dict) else []
+        except (TypeError, ValueError):
+            return
+        self._plan_steps = steps
+        self._status("TASK_PLAN:" + json.dumps({"steps": steps}, ensure_ascii=False))
+
+    def _unfinished_work(self, round_failures):
+        """Describe work that is provably not done yet, or return ''."""
+        parts = []
+        if round_failures:
+            parts.append(
+                "These tool calls failed in your last step: "
+                + "; ".join(round_failures[:4]) + "."
+            )
+        remaining = open_steps(self._plan_steps)
+        if remaining:
+            listing = "; ".join(
+                f"{step['description']} ({step['status']})" for step in remaining[:6]
+            )
+            parts.append("Task list items that are not completed: " + listing + ".")
+        return " ".join(parts)
+
     def run(self, user_message, *, system_prompt, context="", history=None):
         definitions = self._definitions()
         if not definitions:
@@ -237,6 +285,9 @@ class ToolCallingLoop:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": prompt})
 
+        round_failures = []
+        continuations = 0
+        self._plan_steps = []
         for round_index in range(self.max_rounds):
             self._check_cancelled()
             self._status(THINKING_ACTIVITY)
@@ -254,6 +305,27 @@ class ToolCallingLoop:
             if not raw_calls:
                 answer = content.strip()
                 if answer:
+                    pending = self._unfinished_work(round_failures)
+                    if (
+                        pending
+                        and continuations < self.max_continuations
+                        and round_index + 1 < self.max_rounds
+                    ):
+                        # Not a perfect result yet: do not accept this answer.
+                        # Discard what was streamed and send the model back to
+                        # work until the task is finished and verified.
+                        continuations += 1
+                        round_failures = []
+                        self._status("MODEL_ANSWER_RESET")
+                        messages.append({"role": "assistant", "content": answer})
+                        messages.append({"role": "user", "content": (
+                            "Your task is not finished yet. " + pending + " "
+                            "Keep working with your tools until every item is completed "
+                            "and verified. If an item truly cannot be done, mark it "
+                            "'failed' with update_plan and say why in your final answer. "
+                            "Do not only describe what you would do; do it."
+                        )})
+                        continue
                     return answer
                 raise ToolLoopError("The model returned neither a final answer nor a tool call.")
 
@@ -282,7 +354,9 @@ class ToolCallingLoop:
                 assistant_message["provider_content"] = provider_content
             messages.append(assistant_message)
 
-            for normalized, name, arguments, parse_error in parsed_calls:
+            round_failures = []
+            dropped = len(raw_calls) - len(parsed_calls)
+            for call_number, (normalized, name, arguments, parse_error) in enumerate(parsed_calls):
                 if parse_error:
                     result = {"ok": False, "error": parse_error}
                 else:
@@ -297,6 +371,20 @@ class ToolCallingLoop:
                         },
                     )
 
+                if name == "update_plan" and result.get("ok"):
+                    self._record_plan(result.get("output"))
+                if (
+                    (not result.get("ok") or result.get("verification") == "failed")
+                    and not _is_permanent_failure(result)
+                ):
+                    detail = result.get("error") or result.get("verification_message") or "failed"
+                    round_failures.append(f"{name}: {str(detail)[:160]}")
+                if dropped > 0 and call_number == len(parsed_calls) - 1:
+                    result["notice"] = (
+                        f"{dropped} additional tool call(s) in this step were not run "
+                        f"(limit {self.MAX_CALLS_PER_TURN} per step). Request them again "
+                        "if they are still needed."
+                    )
                 messages.append({
                     "role": "tool",
                     "tool_call_id": normalized["id"],

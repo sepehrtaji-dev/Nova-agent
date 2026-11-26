@@ -2,6 +2,16 @@
 
 All notable changes to Nova are documented in this file.
 
+## Unreleased
+
+### Added
+- **Task checklist the model controls**: new `update_plan` tool (`tools/task_plan.py`). The model creates its task list up front and ticks items off as it works; the Task Plan panel now shows a checkbox per task (☐ pending, ◉ in progress, ☑ done, ☒ failed) and up to 10 steps before collapsing.
+
+### Fixed
+- **Multi-second freeze while answering (local models)**: `OllamaBrain.generate_tool_turn_stream` held the model's thinking back and, after the stream ended, ran a *second blocking inference* just to summarize it, on every tool round. Thinking now streams to the panel as it arrives and the blocking summary call is gone. A model that rejects `think=` is retried once without it, as the plain stream already did.
+- **Thinking panel empty during tool turns**: the same change fills the panel live in the native tool loop instead of leaving it blank until the round is over.
+- **Tool loop stopped at the first answer**: a failed tool call, or checklist items still open, no longer end the turn. The premature answer is discarded and the model is sent back to keep working (at most 4 times per turn, and once per failure round; permission-disabled tools are never retried). The native loop now has its own budget (`NOVA_MAX_TOOL_ROUNDS`, default 40) separate from the planner's `NOVA_MAX_STEPS`, and tool calls beyond the per-step limit are reported to the model instead of silently dropped.
+
 ## 2.3 — 2026-11-11
 
 ### Added

@@ -402,20 +402,23 @@ class TaskPlanWidget(QFrame):
             in {"completed", "complete", "done", "verified"}
             for step in steps
         )
-        for index, step in enumerate(steps[:6], 1):
+        for index, step in enumerate(steps[:10], 1):
             status = str(step.get("status", "pending") or "pending").casefold()
             done = status in {"completed", "complete", "done", "verified"}
             failed = status in {"failed", "error"}
-            marker = "✓" if done else "×" if failed else "●" if status in {"running", "in_progress", "in progress"} else "○"
-            color = "#7ee787" if done else "#ff7b72" if failed else ACCENT if marker == "●" else TEXT_MUTED
+            running = status in {"running", "in_progress", "in progress"}
+            # Checkbox style: every task the model creates is shown with a box
+            # that gets ticked when the step is completed.
+            marker = "☑" if done else "☒" if failed else "◉" if running else "☐"
+            color = "#7ee787" if done else "#ff7b72" if failed else ACCENT if running else TEXT_MUTED
             title = str(step.get("description") or step.get("action") or step.get("tool") or f"Step {index}")
             label = QLabel(f"{marker}  {title}")
             label.setTextFormat(Qt.PlainText)
             label.setWordWrap(True)
-            label.setStyleSheet(f"color: {color if done or failed or marker == '●' else TEXT}; font-size: 11px; border: none; background: transparent;")
+            label.setStyleSheet(f"color: {color if done or failed or running else TEXT}; font-size: 11px; border: none; background: transparent;")
             self._steps.addWidget(label)
-        if len(steps) > 6:
-            more = QLabel(f"+ {len(steps) - 6} more steps")
+        if len(steps) > 10:
+            more = QLabel(f"+ {len(steps) - 10} more steps")
             more.setTextFormat(Qt.PlainText)
             more.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; border: none;")
             self._steps.addWidget(more)

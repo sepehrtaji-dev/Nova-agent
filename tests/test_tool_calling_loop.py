@@ -142,6 +142,9 @@ class ToolCallingLoopTests(unittest.TestCase):
                     "function": {"name": "read_note", "arguments": "{"},
                 }],
             },
+            # A fixable failure is sent back once for another attempt; the model
+            # then confirms it cannot proceed and that answer is accepted.
+            {"content": "The tool arguments were malformed, so nothing was read.", "tool_calls": []},
             {"content": "The tool arguments were malformed, so nothing was read.", "tool_calls": []},
         ])
         loop = ToolCallingLoop(brain, registry, FakeVerifier(), ["read_note"])
@@ -190,6 +193,7 @@ class ToolCallingLoopTests(unittest.TestCase):
                     "function": {"name": "read_note", "arguments": '{"wrong":"x"}'},
                 }],
             },
+            {"content": "I need a valid path before reading.", "tool_calls": []},
             {"content": "I need a valid path before reading.", "tool_calls": []},
         ])
         loop = ToolCallingLoop(brain, registry, FakeVerifier(), ["read_note"])

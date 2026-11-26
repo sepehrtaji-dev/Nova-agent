@@ -23,6 +23,7 @@ TOOL_ACTIVITIES = {
     "noviqx_github_update_file": "Updating GitHub file",
     "desktop": "Controlling the desktop",
     "spawn_subagent": "Delegating to a subagent",
+    "update_plan": "Updating the task list",
 }
 
 # Fallback prefixes for tools registered outside the manifest default set

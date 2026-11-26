@@ -174,5 +174,61 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         self.assertEqual(result, "Final answer.")
 
 
+    def test_tool_turn_streams_thinking_live_and_never_runs_a_blocking_summarizer(self):
+        """The tool-call path must not freeze for a second inference per round.
+
+        generate_tool_turn_stream used to hold the thinking back and, after the
+        stream ended, call generate() again just to summarize it. That extra
+        blocking call was the multi-second freeze and left the panel empty
+        until the round was already over.
+        """
+        brain = OllamaBrain(model="gemma4:latest")
+        chunks = [
+            Chunk(Message(thinking="Checking which file to read.")),
+            Chunk(Message(thinking="I should list the folder first.")),
+            Chunk(Message(tool_calls=[{"function": {"name": "list_files", "arguments": {}}}])),
+        ]
+        thoughts = []
+        with (
+            patch("model.ollama.ollama.show", return_value={
+                "thinking": {"values": [False, True], "default": True},
+                "capabilities": ["completion", "thinking"],
+            }),
+            patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat,
+            patch.object(OllamaBrain, "generate", side_effect=AssertionError("blocking summarizer ran")),
+        ):
+            result = brain.generate_tool_turn_stream(
+                [{"role": "user", "content": "look around"}], [],
+                think=True, on_thought_delta=thoughts.append,
+            )
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual(thoughts, ["Checking which file to read.", "I should list the folder first."])
+        self.assertEqual(len(result["tool_calls"]), 1)
+        self.assertIn("list the folder", result["reasoning_summary"])
+
+    def test_tool_turn_retries_without_think_when_server_rejects_it(self):
+        brain = OllamaBrain(model="plain-model")
+        answers = []
+        calls = []
+
+        def fake_chat(**kwargs):
+            calls.append(dict(kwargs))
+            if kwargs.get("think"):
+                raise RuntimeError("think is not supported by this model")
+            return iter([Chunk(Message(content="Plain answer."))])
+
+        with (
+            patch("model.ollama.ollama.show", return_value={"capabilities": ["completion"]}),
+            patch("model.ollama.ollama.chat", side_effect=fake_chat),
+        ):
+            result = brain.generate_tool_turn_stream(
+                [{"role": "user", "content": "hi"}], [], think=True, on_token=answers.append,
+            )
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("think", calls[1])
+        self.assertEqual(answers, ["Plain answer."])
+        self.assertEqual(result["content"], "Plain answer.")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -467,6 +467,56 @@
       }
     },
     {
+      "name": "update_plan",
+      "description": "Create or update your visible task checklist. Call it first for any multi-step request with every step as 'pending', then call it again whenever a step starts ('in_progress') or finishes ('completed'; 'failed' if it could not be done). Always send the FULL list. The checklist is shown to the user with a checkbox per step. The request is not finished until every step is completed.",
+      "module": "tools.task_plan",
+      "class": "TaskPlanTool",
+      "method": "update_plan",
+      "capability": "pc",
+      "enabled": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "The complete ordered task list.",
+            "items": {
+              "type": "object",
+              "required": [
+                "description",
+                "status"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300,
+                  "description": "Short imperative description of the step."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed",
+                    "failed"
+                  ],
+                  "description": "Current state of the step."
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "desktop",
       "description": "Interact with the local desktop: open or focus an installed application. Application names are resolved against what is actually installed, so an unknown name returns an error rather than launching anything else.",
       "module": "tools.desktop",
