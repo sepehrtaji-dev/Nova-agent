@@ -57,6 +57,26 @@ RETRYABLE_STATUS_CODES = (500, 502, 503, 504)
 DEFAULT_RETRY_ATTEMPTS = 6
 RETRY_BASE_DELAY_SECONDS = 1.0
 
+# Native tool turns carry the tool definitions, the live registry and every
+# tool result, so they need a much larger window than a chat turn. Without an
+# explicit num_ctx Ollama silently falls back to its server default (often
+# 4096), truncates the OLDEST text of the prompt, and the model loses the
+# user's request as soon as a large tool result arrives.
+DEFAULT_TOOL_NUM_CTX = 16384
+MIN_TOOL_NUM_CTX = 4096
+
+
+def tool_turn_context_tokens():
+    """Context window (tokens) requested for native tool-calling turns."""
+    for name in ("NOVA_TOOL_NUM_CTX", "NOVA_NUM_CTX"):
+        raw = os.getenv(name)
+        if raw:
+            try:
+                return max(MIN_TOOL_NUM_CTX, int(raw))
+            except (TypeError, ValueError):
+                continue
+    return DEFAULT_TOOL_NUM_CTX
+
 
 def _status_code_of(exc):
     """Best-effort HTTP status code from an Ollama client exception."""
@@ -137,6 +157,11 @@ SYSTEM_PROMPT = (
 
 
 class OllamaBrain:
+
+    @property
+    def context_window_tokens(self):
+        """Tokens available to a native tool turn (used to budget the prompt)."""
+        return tool_turn_context_tokens()
 
     def __init__(self, model=None):
         self.model = str(model or os.getenv("NOVA_MODEL", "")).strip()
@@ -292,7 +317,7 @@ class OllamaBrain:
             self.model = self._discover_model()
         if not self.model:
             raise RuntimeError("No local Ollama model is available.")
-        base_options = {"temperature": 0.1}
+        base_options = {"temperature": 0.1, "num_ctx": tool_turn_context_tokens()}
         if isinstance(options, dict):
             base_options.update(options)
         wire_messages = []
@@ -382,7 +407,7 @@ class OllamaBrain:
             self.model = self._discover_model()
         if not self.model:
             raise RuntimeError("No local Ollama model is available.")
-        base_options = {"temperature": 0.1}
+        base_options = {"temperature": 0.1, "num_ctx": tool_turn_context_tokens()}
         if isinstance(options, dict):
             base_options.update(options)
 

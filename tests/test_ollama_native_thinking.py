@@ -230,5 +230,33 @@ class OllamaNativeThinkingTests(unittest.TestCase):
         self.assertEqual(result["content"], "Plain answer.")
 
 
+    def test_tool_turns_request_an_explicit_context_window(self):
+        """Without num_ctx Ollama truncates the oldest prompt text (the user's request)."""
+        import os
+        brain = OllamaBrain(model="plain-model")
+        seen = []
+
+        def fake_chat(**kwargs):
+            seen.append(kwargs["options"])
+            return iter([Chunk(Message(content="ok"))])
+
+        with (
+            patch("model.ollama.ollama.show", return_value={"capabilities": ["completion"]}),
+            patch("model.ollama.ollama.chat", side_effect=fake_chat),
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("NOVA_TOOL_NUM_CTX", None)
+            os.environ.pop("NOVA_NUM_CTX", None)
+            brain.generate_tool_turn_stream([{"role": "user", "content": "hi"}], [])
+            self.assertEqual(seen[-1]["num_ctx"], 16384)
+            self.assertEqual(brain.context_window_tokens, 16384)
+            os.environ["NOVA_TOOL_NUM_CTX"] = "32768"
+            brain.generate_tool_turn_stream([{"role": "user", "content": "hi"}], [])
+            self.assertEqual(seen[-1]["num_ctx"], 32768)
+            # A caller-supplied value always wins.
+            brain.generate_tool_turn_stream([{"role": "user", "content": "hi"}], [], options={"num_ctx": 9000})
+            self.assertEqual(seen[-1]["num_ctx"], 9000)
+
+
 if __name__ == "__main__":
     unittest.main()

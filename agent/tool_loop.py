@@ -10,6 +10,8 @@ import json
 from agent.activity import THINKING_ACTIVITY, format_activity
 from agent.cancellation import raise_if_cancelled
 from tools.task_plan import normalize_plan, open_steps
+from agent.context_budget import compact_definitions, estimate_tokens, fit_messages
+from agent.goals import describe_unmet, goal_tools, infer_goals, record_goal_result, unmet_goals
 
 
 # Failures that retrying cannot fix (the session simply does not allow the tool).
@@ -75,6 +77,12 @@ class ToolCallingLoop:
     # Rounds in a row where every call was a blocked repeat before the loop
     # stops asking for tools and makes the model summarize.
     MAX_BLOCKED_ROUNDS = 2
+    # Prompt budget used when the backend does not report its context window
+    # (hosted models have very large windows).
+    DEFAULT_CONTEXT_TOKENS = 60000
+    # Above this share of the window, tool descriptions are shortened.
+    COMPACT_DEFINITIONS_SHARE = 0.35
+    LEDGER_CHARS = 12000
 
     def __init__(
         self,
@@ -92,6 +100,7 @@ class ToolCallingLoop:
         max_rounds=12,
         cancel_event=None,
         max_continuations=None,
+        context_window_tokens=None,
     ):
         self.brain = brain
         self.tools = tools
@@ -110,6 +119,8 @@ class ToolCallingLoop:
         )
         self._plan_steps = []
         self._thought_seen = False
+        self._goals = []
+        self.context_window_tokens = context_window_tokens
 
     def _check_cancelled(self):
         raise_if_cancelled(self.cancel_event)
@@ -264,6 +275,65 @@ class ToolCallingLoop:
             "output": output,
         }
 
+    def _budget_tokens(self):
+        window = self.context_window_tokens
+        if window is None:
+            window = getattr(self.brain, "context_window_tokens", None)
+        if isinstance(window, int) and not isinstance(window, bool) and window >= 1024:
+            return window
+        return self.DEFAULT_CONTEXT_TOKENS
+
+    def _tool_ledger(self, messages):
+        """Compact, readable record of what the tools returned this turn.
+
+        write_file builds a document from this, so it must hold the research
+        itself, not the JSON-escaped session context the model was shown.
+        """
+        calls = {}
+        entries = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") == "assistant":
+                for call in message.get("tool_calls") or []:
+                    function = call.get("function", {}) if isinstance(call, dict) else {}
+                    calls[call.get("id")] = (function.get("name", ""), function.get("arguments", {}))
+            elif message.get("role") == "tool":
+                try:
+                    data = json.loads(message.get("content") or "")
+                except (TypeError, ValueError):
+                    data = {}
+                name, arguments = calls.get(message.get("tool_call_id"), (message.get("name", "tool"), {}))
+                if name == "update_plan" or not isinstance(data, dict) or not data.get("ok"):
+                    continue
+                shown = {k: v for k, v in (arguments or {}).items() if k != "content"} if isinstance(arguments, dict) else {}
+                entries.append(
+                    f"[{name}] {json.dumps(shown, ensure_ascii=False)[:300]}\n"
+                    f"{str(data.get('output', ''))[:6000]}"
+                )
+        kept, used = [], 0
+        for entry in reversed(entries):  # newest results matter most
+            if used + len(entry) > self.LEDGER_CHARS and kept:
+                break
+            kept.append(entry)
+            used += len(entry)
+        return "\n\n".join(reversed(kept))
+
+    def _reminder(self, user_message):
+        missing = unmet_goals(self._goals)
+        remaining = open_steps(self._plan_steps)
+        if not missing and not remaining:
+            return ""
+        todo = []
+        if missing:
+            todo.append(describe_unmet(missing))
+        if remaining:
+            todo.append("task list items still open: " + "; ".join(s["description"] for s in remaining[:5]))
+        return (
+            f"Original request: {str(user_message).strip()[:500]} | Still to do: "
+            + "; ".join(todo) + ". Continue with the next tool call; do not stop yet."
+        )
+
     def _record_plan(self, output):
         """Remember the model's task checklist and publish it to the UI."""
         try:
@@ -282,6 +352,9 @@ class ToolCallingLoop:
                 "These tool calls failed in your last step: "
                 + "; ".join(round_failures[:4]) + "."
             )
+        missing = unmet_goals(self._goals)
+        if missing:
+            parts.append("The request is not complete: " + describe_unmet(missing) + ".")
         remaining = open_steps(self._plan_steps)
         if remaining:
             listing = "; ".join(
@@ -314,6 +387,20 @@ class ToolCallingLoop:
             if role in {"user", "assistant"} and content:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": prompt})
+        prompt_index = len(messages) - 1
+
+        self._goals = infer_goals(user_message, self.allowed_tools)
+        budget = self._budget_tokens()
+        fixed = estimate_tokens(system_prompt or "") + estimate_tokens(definitions)
+        if fixed > budget * self.COMPACT_DEFINITIONS_SHARE:
+            definitions = compact_definitions(definitions)
+            fixed = estimate_tokens(system_prompt or "") + estimate_tokens(definitions)
+        focus_tools = None
+
+        def fitted():
+            return fit_messages(
+                messages, budget_tokens=budget, fixed_tokens=fixed, protect_index=prompt_index,
+            )
 
         round_failures = []
         continuations = 0
@@ -327,7 +414,11 @@ class ToolCallingLoop:
         for round_index in range(self.max_rounds):
             self._check_cancelled()
             self._status(THINKING_ACTIVITY)
-            response = self._generate_turn(messages, definitions, system_prompt)
+            turn_definitions = definitions
+            if focus_tools:
+                narrowed = [d for d in definitions if d.get("function", {}).get("name") in focus_tools]
+                turn_definitions = narrowed or definitions
+            response = self._generate_turn(fitted(), turn_definitions, system_prompt)
             self._check_cancelled()
             if not isinstance(response, dict):
                 raise ToolLoopError("The model provider returned an invalid tool-call response.")
@@ -342,34 +433,44 @@ class ToolCallingLoop:
                 answer = content.strip()
                 if answer:
                     pending = self._unfinished_work(round_failures)
+                    missing = unmet_goals(self._goals)
                     normalized_answer = " ".join(answer.split()).casefold()
+                    # A missing deliverable gets one extra, narrowed attempt.
+                    stall_limit = 3 if missing else 2
                     if (
                         pending
                         and continuations < self.max_continuations
-                        and stalled_nudges < 2
-                        and normalized_answer != last_nudged_answer
+                        and stalled_nudges < stall_limit
+                        and (bool(missing) or normalized_answer != last_nudged_answer)
                         and round_index + 1 < self.max_rounds
                     ):
                         # Not a perfect result yet: do not accept this answer.
                         # Discard what was streamed and send the model back to
                         # work until the task is finished and verified.
                         continuations += 1
-                        # Two nudges in a row without any tool call in between,
-                        # or the same answer twice, means the model cannot make
-                        # progress; accept the answer instead of nagging forever.
                         stalled_nudges += 1
                         last_nudged_answer = normalized_answer
                         round_failures = []
+                        if missing and stalled_nudges >= 2:
+                            # The model keeps talking instead of acting: offer
+                            # only the tools that finish the missing deliverable.
+                            focus_tools = goal_tools(missing)
+                        hints = " ".join(goal.hint for goal in missing)
                         self._status("MODEL_ANSWER_RESET")
                         messages.append({"role": "assistant", "content": answer})
                         messages.append({"role": "user", "content": (
-                            "Your task is not finished yet. " + pending + " "
+                            "Your task is not finished yet. " + pending + " " + hints + " "
                             "Keep working with your tools until every item is completed "
                             "and verified. If an item truly cannot be done, mark it "
                             "'failed' with update_plan and say why in your final answer. "
                             "Do not only describe what you would do; do it."
-                        )})
+                        ).replace("  ", " ")})
                         continue
+                    if missing:
+                        # Never let the user believe unfinished work is done.
+                        answer += (
+                            "\n\nNote: this is not complete. " + describe_unmet(missing).capitalize() + "."
+                        )
                     return answer
                 raise ToolLoopError("The model returned neither a final answer nor a tool call.")
 
@@ -400,6 +501,7 @@ class ToolCallingLoop:
 
             round_failures = []
             stalled_nudges = 0  # the model is acting again, not just answering
+            focus_tools = None
             blocked_this_round = 0
             dropped = len(raw_calls) - len(parsed_calls)
             for call_number, (normalized, name, arguments, parse_error) in enumerate(parsed_calls):
@@ -441,7 +543,7 @@ class ToolCallingLoop:
                         {
                             "message": user_message,
                             **(self.prepare_context if isinstance(self.prepare_context, dict) else {}),
-                            "tool_history": json.dumps(messages, ensure_ascii=False),
+                            "tool_history": self._tool_ledger(messages),
                             "status": self._status,
                         },
                     )
@@ -458,6 +560,12 @@ class ToolCallingLoop:
                 ):
                     detail = result.get("error") or result.get("verification_message") or "failed"
                     round_failures.append(f"{name}: {str(detail)[:160]}")
+                if not failed_call and not repeat_block:
+                    record_goal_result(self._goals, name)
+                if call_number == len(parsed_calls) - 1:
+                    reminder = self._reminder(user_message)
+                    if reminder:
+                        result["reminder"] = reminder
                 if dropped > 0 and call_number == len(parsed_calls) - 1:
                     result["notice"] = (
                         f"{dropped} additional tool call(s) in this step were not run "
@@ -489,7 +597,7 @@ class ToolCallingLoop:
                 "unverified work succeeded."
             ),
         })
-        final = self._generate_turn(messages, definitions, system_prompt)
+        final = self._generate_turn(fitted(), definitions, system_prompt)
         if isinstance(final, dict) and not final.get("tool_calls"):
             text = final.get("content")
             if isinstance(text, str) and text.strip():
