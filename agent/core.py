@@ -126,7 +126,7 @@ class NovaCore:
         # The native tool loop works until the task is finished, so it gets a
         # much larger round budget than the planner's step budget.
         self.max_tool_rounds = _parse_max_steps(
-            os.getenv("NOVA_MAX_TOOL_ROUNDS", "40"), default=40, maximum=200
+            os.getenv("NOVA_MAX_TOOL_ROUNDS", "30"), default=30, maximum=200
         )
         configured_access = getattr(self.tools, "default_access", {}) or {}
         self.access = {
@@ -1621,7 +1621,7 @@ class NovaCore:
             on_result=record_result,
             on_answer_delta=lambda token: (self._check_cancelled(), self._status("MODEL_ANSWER_DELTA:" + str(token))),
             on_thought_delta=(lambda token: (self._check_cancelled(), self._status("MODEL_THOUGHT_DELTA:" + str(token)))) if self.thinking_enabled else None,
-            max_rounds=getattr(self, "max_tool_rounds", 40),
+            max_rounds=getattr(self, "max_tool_rounds", 30),
             cancel_event=getattr(self, "cancel_event", None),
         )
         self._status(THINKING_ACTIVITY)

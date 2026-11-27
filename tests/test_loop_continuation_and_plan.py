@@ -126,6 +126,95 @@ class ContinuationTests(unittest.TestCase):
         self.assertIn("not run", json.loads(last_tool["content"])["notice"])
 
 
+class LoopGuardTests(unittest.TestCase):
+    def test_model_repeating_the_same_call_is_stopped_not_run_forever(self):
+        """Reproduces: 'I'll search the web...' repeated round after round."""
+        statuses = []
+        executed = []
+        reg = ToolRegistry()
+        reg.register(
+            "web_search", "Search.", lambda payload: executed.append(payload) or "BOOM no results",
+            capability="pc", input_schema={"type": "object", "properties": {}},
+        )
+        same = {"content": "I'll search the web for the best local AI models.",
+                "tool_calls": [call("web_search", query="best local ai models")]}
+        # 2 real runs, 2 blocked rounds, then the loop stops asking for tools and
+        # requests a text summary (the final scripted turn).
+        brain = Brain([dict(same) for _ in range(4)] + [
+            {"content": "I could not get search results, so here is what I know.", "tool_calls": []},
+        ])
+        loop = ToolCallingLoop(brain, reg, Verifier(), {"web_search"}, status=statuses.append, max_rounds=30)
+        answer = loop.run("search the web and write a readme", system_prompt="s")
+        self.assertIn("could not get search results", answer)
+        # The tool ran only a few times, not once per round.
+        self.assertLessEqual(len(executed), ToolCallingLoop.MAX_IDENTICAL_FAILURES)
+        # And the model was told why it was blocked.
+        blocked = [
+            json.loads(m["content"]) for m in brain.messages_seen[-1] if m["role"] == "tool"
+        ]
+        self.assertTrue(any("Do not repeat" in b.get("error", "") or "Retrying it unchanged" in b.get("error", "") for b in blocked))
+
+    def test_same_answer_after_a_nudge_is_accepted(self):
+        statuses = []
+        plan = [{"description": "Search", "status": "pending"}]
+        announce = {"content": "I'll search the web for the best local AI models.", "tool_calls": []}
+        brain = Brain([
+            {"content": "", "tool_calls": [call("update_plan", steps=plan)]},
+            dict(announce), dict(announce), dict(announce), dict(announce), dict(announce),
+        ])
+        loop = make_loop(brain, registry([]), statuses)
+        self.assertEqual(loop.run("go", system_prompt="s"), announce["content"])
+        # One nudge, then the identical answer ends it: 1 plan call + 2 answers.
+        self.assertEqual(len(brain.messages_seen), 3)
+
+    def test_two_nudges_without_any_tool_call_stop_the_nagging(self):
+        statuses = []
+        plan = [{"description": "Search", "status": "pending"}]
+        brain = Brain([
+            {"content": "", "tool_calls": [call("update_plan", steps=plan)]},
+            {"content": "First try.", "tool_calls": []},
+            {"content": "Second try.", "tool_calls": []},
+            {"content": "Third try.", "tool_calls": []},
+            {"content": "Fourth try.", "tool_calls": []},
+        ])
+        loop = make_loop(brain, registry([]), statuses)
+        self.assertEqual(loop.run("go", system_prompt="s"), "Third try.")
+
+    def test_thinking_of_each_round_starts_on_a_new_paragraph(self):
+        pieces = []
+
+        class ThinkingBrain(Brain):
+            def generate_tool_turn_stream(self, *, messages, tools, system_prompt,
+                                          on_token=None, on_thought_delta=None, **kw):
+                turn = self.turns.pop(0)
+                for piece in turn.get("thoughts", []):
+                    on_thought_delta(piece)
+                return turn
+
+        brain = ThinkingBrain([
+            {"thoughts": ["Round one", " thinking."], "content": "", "tool_calls": [call("work")]},
+            {"thoughts": ["Round two thinking."], "content": "Done.", "tool_calls": []},
+        ])
+        loop = ToolCallingLoop(brain, registry(["ok"]), Verifier(), {"work", "update_plan"},
+                               on_thought_delta=pieces.append)
+        loop.run("go", system_prompt="s")
+        self.assertEqual("".join(pieces), "Round one thinking.\n\nRound two thinking.")
+
+    def test_legitimate_repeat_within_the_limit_still_runs(self):
+        executed = []
+        reg = ToolRegistry()
+        reg.register("work", "Work.", lambda payload: executed.append(1) or "ok",
+                     capability="pc", input_schema={"type": "object", "properties": {}})
+        brain = Brain([
+            {"content": "", "tool_calls": [call("work")]},
+            {"content": "", "tool_calls": [call("work")]},
+            {"content": "Done.", "tool_calls": []},
+        ])
+        loop = ToolCallingLoop(brain, reg, Verifier(), {"work"})
+        self.assertEqual(loop.run("go", system_prompt="s"), "Done.")
+        self.assertEqual(len(executed), 2)
+
+
 class TaskPlanToolTests(unittest.TestCase):
     def test_normalizes_statuses_and_strings(self):
         steps = normalize_plan(["Plan it", {"description": "Ship", "status": "DONE"}, {"description": "x", "status": "in-progress"}])

@@ -67,6 +67,14 @@ class ToolCallingLoop:
     # How many times a premature final answer may be sent back for more work
     # (a failed tool call, or checklist items still open) before it is accepted.
     MAX_CONTINUATIONS = 4
+    # A model that keeps repeating the same call is stuck, not working. The same
+    # call is run at most this many times per turn, and a call that already
+    # failed this many times is not retried unchanged.
+    MAX_IDENTICAL_CALLS = 3
+    MAX_IDENTICAL_FAILURES = 2
+    # Rounds in a row where every call was a blocked repeat before the loop
+    # stops asking for tools and makes the model summarize.
+    MAX_BLOCKED_ROUNDS = 2
 
     def __init__(
         self,
@@ -101,6 +109,7 @@ class ToolCallingLoop:
             self.MAX_CONTINUATIONS if max_continuations is None else max(0, int(max_continuations))
         )
         self._plan_steps = []
+        self._thought_seen = False
 
     def _check_cancelled(self):
         raise_if_cancelled(self.cancel_event)
@@ -112,6 +121,27 @@ class ToolCallingLoop:
             except Exception:
                 pass
 
+    def _round_thought_callback(self):
+        """Wrap on_thought_delta so each round's thinking starts on a new paragraph.
+
+        Without a separator, the thinking from consecutive rounds runs together
+        in the panel ("...search the web.I'll search the web...").
+        """
+        callback = self.on_thought_delta
+        if not callable(callback):
+            return callback
+        state = {"first": True}
+
+        def emit(piece):
+            if state["first"]:
+                state["first"] = False
+                if self._thought_seen:
+                    piece = "\n\n" + str(piece)
+                self._thought_seen = True
+            callback(piece)
+
+        return emit
+
     def _generate_turn(self, messages, definitions, system_prompt):
         stream_method = getattr(self.brain, "generate_tool_turn_stream", None)
         if callable(stream_method):
@@ -120,7 +150,7 @@ class ToolCallingLoop:
                 "tools": definitions,
                 "system_prompt": system_prompt,
                 "on_token": self.on_answer_delta,
-                "on_thought_delta": self.on_thought_delta,
+                "on_thought_delta": self._round_thought_callback(),
             }
             if getattr(self.brain, "supports_cancel_event", False):
                 stream_kwargs["cancel_event"] = self.cancel_event
@@ -287,7 +317,13 @@ class ToolCallingLoop:
 
         round_failures = []
         continuations = 0
+        stalled_nudges = 0
+        last_nudged_answer = None
+        call_counts = {}
+        failure_counts = {}
+        blocked_rounds = 0
         self._plan_steps = []
+        self._thought_seen = False
         for round_index in range(self.max_rounds):
             self._check_cancelled()
             self._status(THINKING_ACTIVITY)
@@ -306,15 +342,23 @@ class ToolCallingLoop:
                 answer = content.strip()
                 if answer:
                     pending = self._unfinished_work(round_failures)
+                    normalized_answer = " ".join(answer.split()).casefold()
                     if (
                         pending
                         and continuations < self.max_continuations
+                        and stalled_nudges < 2
+                        and normalized_answer != last_nudged_answer
                         and round_index + 1 < self.max_rounds
                     ):
                         # Not a perfect result yet: do not accept this answer.
                         # Discard what was streamed and send the model back to
                         # work until the task is finished and verified.
                         continuations += 1
+                        # Two nudges in a row without any tool call in between,
+                        # or the same answer twice, means the model cannot make
+                        # progress; accept the answer instead of nagging forever.
+                        stalled_nudges += 1
+                        last_nudged_answer = normalized_answer
                         round_failures = []
                         self._status("MODEL_ANSWER_RESET")
                         messages.append({"role": "assistant", "content": answer})
@@ -355,11 +399,42 @@ class ToolCallingLoop:
             messages.append(assistant_message)
 
             round_failures = []
+            stalled_nudges = 0  # the model is acting again, not just answering
+            blocked_this_round = 0
             dropped = len(raw_calls) - len(parsed_calls)
             for call_number, (normalized, name, arguments, parse_error) in enumerate(parsed_calls):
-                if parse_error:
+                call_key = None
+                repeat_block = None
+                if not parse_error:
+                    try:
+                        call_key = (name, json.dumps(arguments, sort_keys=True, default=str))
+                    except (TypeError, ValueError):
+                        call_key = None
+                    if call_key is not None:
+                        if call_counts.get(call_key, 0) >= self.MAX_IDENTICAL_CALLS:
+                            repeat_block = (
+                                f"You already made this exact '{name}' call "
+                                f"{call_counts[call_key]} times this turn. Do not repeat it."
+                            )
+                        elif failure_counts.get(call_key, 0) >= self.MAX_IDENTICAL_FAILURES:
+                            repeat_block = (
+                                f"This exact '{name}' call already failed "
+                                f"{failure_counts[call_key]} times this turn. Retrying it unchanged "
+                                "will not help."
+                            )
+                if repeat_block:
+                    blocked_this_round += 1
+                    result = {
+                        "ok": False,
+                        "error": repeat_block + " Use the results you already have, change the "
+                                 "arguments, try a different tool, or answer with what you have "
+                                 "and say what is missing.",
+                    }
+                elif parse_error:
                     result = {"ok": False, "error": parse_error}
                 else:
+                    if call_key is not None:
+                        call_counts[call_key] = call_counts.get(call_key, 0) + 1
                     result = self._execute_call(
                         name,
                         arguments,
@@ -373,8 +448,12 @@ class ToolCallingLoop:
 
                 if name == "update_plan" and result.get("ok"):
                     self._record_plan(result.get("output"))
+                failed_call = not result.get("ok") or result.get("verification") == "failed"
+                if failed_call and call_key is not None and not repeat_block:
+                    failure_counts[call_key] = failure_counts.get(call_key, 0) + 1
                 if (
-                    (not result.get("ok") or result.get("verification") == "failed")
+                    failed_call
+                    and not repeat_block
                     and not _is_permanent_failure(result)
                 ):
                     detail = result.get("error") or result.get("verification_message") or "failed"
@@ -392,6 +471,13 @@ class ToolCallingLoop:
                     "content": json.dumps(result, ensure_ascii=False, default=str),
                 })
                 self._status(THINKING_ACTIVITY)
+
+            if blocked_this_round and blocked_this_round == len(parsed_calls):
+                blocked_rounds += 1
+                if blocked_rounds >= self.MAX_BLOCKED_ROUNDS:
+                    break
+            else:
+                blocked_rounds = 0
 
         self._status("Tool-call limit reached; asking the model for a concise status.")
         messages.append({
