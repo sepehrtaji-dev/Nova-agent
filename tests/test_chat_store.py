@@ -31,15 +31,19 @@ class ChatStoreTests(unittest.TestCase):
             self.assertEqual(len(second_messages), 1)
             self.assertEqual(second_messages[0]["content"], "A separate conversation")
 
-    def test_first_user_message_becomes_chat_title(self):
+    def test_user_message_does_not_choose_chat_title(self):
         with tempfile.TemporaryDirectory() as directory:
             store = ChatStore(Path(directory) / "chats.sqlite3")
             chat_id = store.create_chat()
             store.add_message(chat_id, "user", "  Help me build Nova  ")
 
             chat = next(item for item in store.list_chats() if item["id"] == chat_id)
-            self.assertEqual(chat["title"], "Help me build Nova")
+            self.assertEqual(chat["title"], "New chat")
             self.assertEqual(chat["message_count"], 1)
+
+            self.assertTrue(store.set_chat_title(chat_id, "Nova project planning"))
+            renamed = next(item for item in store.list_chats() if item["id"] == chat_id)
+            self.assertEqual(renamed["title"], "Nova project planning")
 
     def test_deleting_chat_cascades_to_messages(self):
         with tempfile.TemporaryDirectory() as directory:

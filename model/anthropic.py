@@ -5,7 +5,7 @@ import os
 import ssl
 import urllib.error
 import urllib.request
-from model.remote import RemoteBrainError, _scrub, _DEFAULT_SYSTEM_PROMPT
+from model.remote import RemoteBrainError, _scrub, _DEFAULT_SYSTEM_PROMPT, _iter_stream_lines
 
 
 class AnthropicBrain:
@@ -31,6 +31,25 @@ class AnthropicBrain:
         blocks = data.get("content", []) if isinstance(data, dict) else []
         return "\n".join(str(b.get("text", "")) for b in blocks
                           if isinstance(b, dict) and b.get("type") == "text").strip()
+
+    @staticmethod
+    def _extract_thinking_summary(data):
+        blocks = data.get("content", []) if isinstance(data, dict) else []
+        return "\n".join(
+            str(block.get("thinking", "")).strip()
+            for block in blocks
+            if isinstance(block, dict)
+            and block.get("type") == "thinking"
+            and isinstance(block.get("thinking"), str)
+            and block.get("thinking", "").strip()
+        ).strip()
+
+    @staticmethod
+    def _thinking_options(payload, options):
+        if isinstance(options, dict) and options.get("show_reasoning"):
+            # Anthropic returns a summarized thinking block, not raw private
+            # chain-of-thought, when display is set to summarized.
+            payload["thinking"] = {"type": "adaptive", "display": "summarized"}
 
     def _request(self, payload):
         if not self.is_configured():
@@ -92,6 +111,10 @@ class AnthropicBrain:
                 else:
                     result.append({"role": "user", "content": [block]})
             elif role == "assistant" and isinstance(item.get("tool_calls"), list):
+                provider_content = item.get("provider_content")
+                if isinstance(provider_content, list) and provider_content:
+                    result.append({"role": "assistant", "content": provider_content})
+                    continue
                 blocks = []
                 if item.get("content"):
                     blocks.append({"type": "text", "text": str(item["content"])})
@@ -154,12 +177,139 @@ class AnthropicBrain:
             for key in ("temperature", "top_p"):
                 if key in options:
                     payload[key] = options[key]
-        data = self._request(payload)
+        self._thinking_options(payload, options)
+        try:
+            data = self._request(payload)
+        except RemoteBrainError:
+            if "thinking" not in payload:
+                raise
+            payload.pop("thinking", None)
+            data = self._request(payload)
         calls = []
         for block in data.get("content", []):
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 calls.append({"id": block.get("id", ""), "type": "function",
                               "function": {"name": block.get("name", ""),
                                            "arguments": json.dumps(block.get("input", {}), ensure_ascii=False)}})
-        return {"content": self._extract_text(data), "tool_calls": calls,
-                "finish_reason": "tool_calls" if calls else data.get("stop_reason", "stop")}
+        return {
+            "content": self._extract_text(data),
+            "thinking": self._extract_thinking_summary(data),
+            "provider_content": data.get("content", []),
+            "tool_calls": calls,
+            "finish_reason": "tool_calls" if calls else data.get("stop_reason", "stop"),
+        }
+
+    def generate_stream(
+        self, prompt, on_token, system_prompt=None, json_mode=False, options=None,
+        on_thought_delta=None, cancel_event=None,
+    ):
+        """Stream answer text and summarized thinking blocks from Anthropic."""
+        if not self.is_configured():
+            raise RemoteBrainError(
+                "Anthropic provider is not configured. " + self.configuration_help()
+            )
+        payload = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "system": str(system_prompt or _DEFAULT_SYSTEM_PROMPT),
+            "messages": [{"role": "user", "content": str(prompt)}],
+            "stream": True,
+        }
+        if isinstance(options, dict):
+            if "max_tokens" in options:
+                payload["max_tokens"] = int(options["max_tokens"])
+            elif "num_predict" in options:
+                payload["max_tokens"] = int(options["num_predict"])
+            for key in ("temperature", "top_p"):
+                if key in options:
+                    payload[key] = options[key]
+        self._thinking_options(payload, options)
+
+        def consume():
+            text_parts = []
+            request = urllib.request.Request(
+                f"{self.base_url}/v1/messages",
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+                headers={
+                    "content-type": "application/json",
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "accept": "text/event-stream",
+                    "user-agent": "NovaAgent/2.3",
+                },
+            )
+            with urllib.request.urlopen(
+                request, timeout=self.timeout, context=ssl.create_default_context()
+            ) as response:
+                for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
+                    line = raw_line.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") != "content_block_delta":
+                        continue
+                    delta = event.get("delta", {})
+                    if not isinstance(delta, dict):
+                        continue
+                    if delta.get("type") == "thinking_delta":
+                        summary = delta.get("thinking", "")
+                        if summary and callable(on_thought_delta):
+                            on_thought_delta(str(summary))
+                    elif delta.get("type") == "text_delta":
+                        token = delta.get("text", "")
+                        if token:
+                            token = str(token)
+                            text_parts.append(token)
+                            if callable(on_token):
+                                on_token(token)
+            return "".join(text_parts)
+
+        try:
+            return consume()
+        except urllib.error.HTTPError as exc:
+            # Older Claude models may not support adaptive thinking. Retry the
+            # same answer request without the optional summary channel.
+            if "thinking" in payload and exc.code == 400:
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+                payload.pop("thinking", None)
+                try:
+                    return consume()
+                except urllib.error.HTTPError as retry:
+                    detail = ""
+                    try:
+                        detail = retry.read().decode("utf-8", "replace")[:500]
+                    except Exception:
+                        pass
+                    finally:
+                        retry.close()
+                    self.last_error = _scrub(detail, self.api_key)
+                    raise RemoteBrainError(
+                        f"Anthropic API returned HTTP {retry.code}: {self.last_error}"
+                    ) from retry
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:500]
+            except Exception:
+                pass
+            finally:
+                exc.close()
+            self.last_error = _scrub(detail, self.api_key)
+            raise RemoteBrainError(
+                f"Anthropic API returned HTTP {exc.code}: {self.last_error}",
+                transient=exc.code in (408, 409, 429, 500, 502, 503, 504),
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            self.last_error = _scrub(str(exc), self.api_key)
+            raise RemoteBrainError(
+                f"Anthropic stream failed: {self.last_error}", transient=True
+            ) from exc

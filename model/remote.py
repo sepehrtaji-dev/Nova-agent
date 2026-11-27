@@ -18,6 +18,27 @@ import time
 import urllib.error
 import urllib.request
 
+from agent.cancellation import GenerationCancelled
+
+
+def _iter_stream_lines(response, cancel_event, timeout):
+    """Read SSE lines without timing out a buffered socket file mid-read.
+
+    urllib's HTTPResponse wraps the socket in a buffered reader. Changing the
+    underlying socket to a short polling timeout and then calling readline()
+    can permanently invalidate that reader (Python raises
+    "cannot read from timed out object" on the next read). Keep the socket's
+    configured request timeout instead; the agent runs on a worker thread, so
+    the GUI remains responsive, and cancellation is checked between SSE lines.
+    """
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
+        line = response.readline()
+        if not line:
+            break
+        yield line
+
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are Nova, an AI agent controlled by the Nova application. Runtime "
@@ -33,6 +54,37 @@ _DEFAULT_SYSTEM_PROMPT = (
     "do not add unrequested work. For multi-step tasks, preserve the requested "
     "order and scope."
 )
+
+def _extract_reasoning_summary(delta):
+    """Return only provider-labelled summaries; never expose raw reasoning tokens."""
+    if not isinstance(delta, dict):
+        return ""
+    summary = delta.get("reasoning_summary", "")
+    if isinstance(summary, str) and summary.strip():
+        return summary
+    details = delta.get("reasoning_details", [])
+    if isinstance(details, list):
+        parts = []
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type", "")).casefold()
+            if kind not in {"reasoning.summary", "summary", "summary_text"}:
+                continue
+            value = item.get("summary", item.get("text", ""))
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+        return "\n".join(parts)
+    return ""
+
+def _add_reasoning_request(payload, base_url, options):
+    """Enable provider summaries where the OpenAI-compatible gateway supports them."""
+    if not isinstance(options, dict) or not options.get("show_reasoning"):
+        return
+    if "openrouter.ai" in str(base_url or "").casefold():
+        effort = options.get("reasoning_effort", "medium")
+        payload["reasoning"] = {"effort": str(effort or "medium")}
+
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
@@ -153,6 +205,7 @@ class OpenAICompatibleBrain:
             for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
                 if key in options:
                     payload[key] = options[key]
+        _add_reasoning_request(payload, self.base_url, options)
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -223,17 +276,22 @@ class OpenAICompatibleBrain:
             content = ""
         elif not isinstance(content, str):
             content = str(content)
+        summary = _extract_reasoning_summary(message)
         return {
             "content": content,
+            "thinking": summary,
+            "reasoning_summary": summary,
             "tool_calls": calls,
             "finish_reason": choice.get("finish_reason"),
         }
 
     def generate_tool_turn_stream(
         self, messages, tools, system_prompt=None, options=None,
-        on_token=None, on_thought_delta=None,
+        on_token=None, on_thought_delta=None, cancel_event=None,
     ):
         """Stream an OpenAI-compatible native tool-call turn from SSE deltas."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
@@ -266,6 +324,7 @@ class OpenAICompatibleBrain:
             for key in ("temperature", "top_p", "max_tokens", "reasoning_effort"):
                 if key in options:
                     payload[key] = options[key]
+        _add_reasoning_request(payload, self.base_url, options)
 
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -283,8 +342,8 @@ class OpenAICompatibleBrain:
         tool_parts = {}
         try:
             context = ssl.create_default_context()
-            with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
-                for raw_line in response:
+            with urllib.request.urlopen(request, timeout=min(self.timeout, 15.0), context=context) as response:
+                for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
                         continue
@@ -301,7 +360,9 @@ class OpenAICompatibleBrain:
                     delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
                     if not isinstance(delta, dict):
                         continue
-                    thought = delta.get("reasoning_content", "")
+                    # Only provider-declared user-facing summaries are shown.
+                    # Raw reasoning_content/reasoning may contain private chain-of-thought.
+                    thought = _extract_reasoning_summary(delta)
                     if isinstance(thought, str) and thought:
                         thought_parts.append(thought)
                         if callable(on_thought_delta):
@@ -365,9 +426,38 @@ class OpenAICompatibleBrain:
                 arguments = call["function"]["arguments"]
             call["function"]["arguments"] = arguments
             calls.append(call)
+        summary = "\n".join(thought_parts)
+        if callable(on_thought_delta) and not summary:
+            # Providers that do not expose a summary still get a short,
+            # model-authored public explanation of the selected next action.
+            try:
+                user_request = next(
+                    (item.get("content", "") for item in reversed(messages or [])
+                     if isinstance(item, dict) and item.get("role") == "user"),
+                    "",
+                )
+                selected_tools = ", ".join(
+                    str(call.get("function", {}).get("name", ""))
+                    for call in calls if isinstance(call, dict)
+                )
+                summary = self.generate(
+                    "Write one concise user-facing sentence explaining the high-level "
+                    "approach for this request. Do not reveal private chain-of-thought. "
+                    "If a tool was selected, describe the intended action, not its result.\n\n"
+                    f"User request: {str(user_request)[:1200]}\n"
+                    f"Selected tools: {selected_tools or 'No tool selected'}",
+                    system_prompt="You produce concise, public-facing approach summaries only.",
+                    options={"max_tokens": 100},
+                )
+                summary = " ".join(str(summary or "").strip().split())[:500]
+                if summary:
+                    on_thought_delta(summary)
+            except Exception:
+                summary = ""
         return {
             "content": "".join(text_parts),
-            "thinking": "".join(thought_parts),
+            "thinking": summary,
+            "reasoning_summary": summary,
             "tool_calls": calls,
             "finish_reason": None,
         }
@@ -541,9 +631,11 @@ class OpenAICompatibleBrain:
 
     def generate_stream(
         self, prompt, on_token, system_prompt=None, json_mode=False, options=None,
-        on_thought_delta=None,
+        on_thought_delta=None, cancel_event=None,
     ):
         """Stream OpenAI-compatible SSE deltas to on_token and return full text."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise GenerationCancelled("Generation stopped by user.")
         if not self.is_configured():
             raise RemoteBrainError(
                 "Remote provider is not fully configured. " + self.configuration_help()
@@ -566,6 +658,7 @@ class OpenAICompatibleBrain:
                     payload[key] = options[key]
             if "reasoning_effort" in options:
                 payload["reasoning_effort"] = options["reasoning_effort"]
+        _add_reasoning_request(payload, self.base_url, options)
 
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -582,9 +675,9 @@ class OpenAICompatibleBrain:
         try:
             context = ssl.create_default_context()
             with urllib.request.urlopen(
-                request, timeout=self.timeout, context=context
+                request, timeout=min(self.timeout, 15.0), context=context
             ) as response:
-                for raw_line in response:
+                for raw_line in _iter_stream_lines(response, cancel_event, self.timeout):
                     line = raw_line.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
                         continue
@@ -601,7 +694,8 @@ class OpenAICompatibleBrain:
                     delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
                     if not isinstance(delta, dict):
                         continue
-                    thought = delta.get("reasoning_content", delta.get("reasoning", ""))
+                    # Never surface raw private reasoning tokens in the UI.
+                    thought = _extract_reasoning_summary(delta)
                     if thought and callable(on_thought_delta):
                         on_thought_delta(thought if isinstance(thought, str) else str(thought))
                     token = delta.get("content", "")
@@ -675,9 +769,8 @@ class OpenAICompatibleBrain:
         content = None
         if isinstance(message, dict):
             content = message.get("content")
-            if content is None:
-                # Some providers put text here instead.
-                content = message.get("reasoning_content")
+            # reasoning_content is a private reasoning channel, not a final answer.
+            # If content is absent, leave it empty instead of leaking that field.
         if content is None:
             content = first.get("text")
 

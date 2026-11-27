@@ -8,8 +8,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
 from model.ollama import OllamaBrain
+from model.anthropic import AnthropicBrain
 from model.provider import backend_kind, build_brain, describe_brain
-from model.remote import OpenAICompatibleBrain, RemoteBrainError
+from model.remote import OpenAICompatibleBrain, RemoteBrainError, _add_reasoning_request
 
 CAPTURED = []
 RESPONSES = {}
@@ -212,6 +213,78 @@ class RemoteBrainTests(unittest.TestCase):
         self.assertNotIn("id", assistant_call)
         self.assertNotIn("type", assistant_call)
 
+
+    def test_remote_stream_only_exposes_user_facing_reasoning_summary(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def __init__(self):
+                events = [
+                    {"choices": [{"delta": {"reasoning_summary": "The model is checking the request."}}]},
+                    {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.summary", "summary": "It has enough context to answer."}]}}]},
+                    {"choices": [{"delta": {"reasoning_content": "PRIVATE INTERNAL TRACE"}}]},
+                    {"choices": [{"delta": {"content": "Ready."}}]},
+                ]
+                self.lines = iter([
+                    ("data: " + json.dumps(event) + "\n").encode("utf-8")
+                    for event in events
+                ] + [b"data: [DONE]\n"])
+            def readline(self):
+                return next(self.lines, b"")
+
+        thoughts = []
+        with mock.patch("model.remote.urllib.request.urlopen", return_value=FakeResponse()):
+            result = self.brain.generate_tool_turn_stream(
+                messages=[{"role": "user", "content": "hello"}],
+                tools=[],
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual(thoughts, ["The model is checking the request.", "It has enough context to answer."])
+        self.assertEqual(result["thinking"], "The model is checking the request.\nIt has enough context to answer.")
+        self.assertNotIn("PRIVATE INTERNAL TRACE", "".join(thoughts))
+        self.assertEqual(result["content"], "Ready.")
+
+    def test_remote_stream_stops_when_cancellation_event_is_set(self):
+        class CancellableResponse:
+            def __init__(self):
+                self.lines = iter([
+                    ('data: ' + json.dumps({"choices": [{"delta": {"content": "partial"}}]}) + "\n").encode("utf-8"),
+                    b"data: [DONE]\n",
+                ])
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def readline(self):
+                return next(self.lines, b"")
+
+        event = threading.Event()
+        def stop_after_first_token(_token):
+            event.set()
+
+        from agent.cancellation import GenerationCancelled
+        with mock.patch("model.remote.urllib.request.urlopen", return_value=CancellableResponse()):
+            with self.assertRaises(GenerationCancelled):
+                self.brain.generate_tool_turn_stream(
+                    messages=[{"role": "user", "content": "hello"}],
+                    tools=[],
+                    on_token=stop_after_first_token,
+                    cancel_event=event,
+                )
+
+    def test_private_reasoning_content_is_not_used_as_a_final_answer(self):
+        payload = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": None,
+                    "reasoning_content": "PRIVATE INTERNAL TRACE",
+                }
+            }]
+        })
+        self.assertEqual(OpenAICompatibleBrain._extract_content(payload), "")
+
     def test_successful_call_parses_content(self):
         self.assertEqual(self.brain.generate("hi"), "ready")
         sent = CAPTURED[-1]
@@ -396,10 +469,11 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertIn("nothing is sent", text)
 
 
-    def test_ollama_native_tool_turn_returns_native_thinking(self):
+    def test_ollama_native_tool_turn_returns_user_facing_summary(self):
         response = {"message": {
             "content": "The answer is 42.",
-            "thinking": "I should calculate this carefully.",
+            "thinking": "PRIVATE INTERNAL TRACE",
+            "thinking_summary": "The calculation is 6 multiplied by 7.",
             "tool_calls": [],
         }}
         with mock.patch("model.ollama.ollama.show", return_value={
@@ -410,34 +484,96 @@ class ProviderSelectionTests(unittest.TestCase):
                 messages=[{"role": "user", "content": "Calculate 6 times 7."}],
                 tools=[],
             )
-        self.assertEqual(result["thinking"], "I should calculate this carefully.")
+        self.assertEqual(result["thinking"], "PRIVATE INTERNAL TRACE")
+        self.assertEqual(result["reasoning_summary"], "The calculation is 6 multiplied by 7.")
         self.assertEqual(result["content"], "The answer is 42.")
         self.assertIs(chat.call_args.kwargs["think"], True)
 
-    def test_ollama_native_tool_stream_emits_thinking_and_tool_calls(self):
+    def test_ollama_native_tool_stream_routes_thinking_live_without_a_second_generation(self):
         chunks = [
-            {"message": {"thinking": "First, inspect ", "content": ""}},
-            {"message": {"thinking": "the request.", "content": ""}},
+            {"message": {"thinking": "Reading the README first.", "content": ""}},
+            {"message": {"thinking": " Then summarizing it.", "content": ""}},
             {"message": {"thinking": "", "content": "", "tool_calls": [{
                 "function": {"name": "read_file", "arguments": {"path": "README.md"}}
             }]}},
             {"message": {"thinking": "", "content": "I inspected the README."}},
         ]
         thoughts = []
+
         with mock.patch("model.ollama.ollama.show", return_value={
             "thinking": {"values": [True], "default": True},
-        }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat:
+        }), mock.patch("model.ollama.ollama.chat", return_value=iter(chunks)) as chat, \
+             mock.patch.object(OllamaBrain, "_summarize_thinking",
+                               side_effect=AssertionError("blocking summarizer ran")):
             brain = OllamaBrain(model="test-model")
             result = brain.generate_tool_turn_stream(
                 messages=[{"role": "user", "content": "Read README"}],
                 tools=[],
                 on_thought_delta=thoughts.append,
             )
-        self.assertEqual("".join(thoughts), "First, inspect the request.")
-        self.assertEqual(result["thinking"], "First, inspect the request.")
+        # The panel fills as the thinking arrives, in order; no extra
+        # inference runs after the stream (that was the freeze).
+        self.assertEqual(thoughts, ["Reading the README first.", " Then summarizing it."])
+        self.assertEqual(result["thinking"], "Reading the README first. Then summarizing it.")
+        self.assertEqual(result["reasoning_summary"], "Reading the README first. Then summarizing it.")
         self.assertEqual(result["content"], "I inspected the README.")
         self.assertEqual(result["tool_calls"][0]["function"]["name"], "read_file")
+        self.assertEqual(chat.call_count, 1)
         self.assertIs(chat.call_args.kwargs["think"], True)
+
+    def test_openrouter_reasoning_summary_request_is_enabled_only_when_requested(self):
+        payload = {}
+        _add_reasoning_request(
+            payload,
+            "https://openrouter.ai/api/v1",
+            {"show_reasoning": True, "reasoning_effort": "high"},
+        )
+        self.assertEqual(payload["reasoning"], {"effort": "high"})
+
+        disabled = {}
+        _add_reasoning_request(
+            disabled,
+            "https://openrouter.ai/api/v1",
+            {"show_reasoning": False, "reasoning_effort": "high"},
+        )
+        self.assertNotIn("reasoning", disabled)
+
+    def test_anthropic_streams_summarized_thinking_blocks(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        events = [
+            {"type": "content_block_delta", "delta": {
+                "type": "thinking_delta", "thinking": "The request needs a concise explanation."
+            }},
+            {"type": "content_block_delta", "delta": {
+                "type": "text_delta", "text": "Ready."
+            }},
+        ]
+        lines = [
+            ("data: " + json.dumps(event) + "\n").encode("utf-8")
+            for event in events
+        ]
+        brain = AnthropicBrain(
+            model="claude-test", api_key="test-key",
+            base_url="https://api.anthropic.com",
+        )
+        thoughts, tokens = [], []
+        with mock.patch("model.anthropic.urllib.request.urlopen", return_value=FakeResponse()) as urlopen, \
+             mock.patch("model.anthropic._iter_stream_lines", return_value=iter(lines)):
+            result = brain.generate_stream(
+                "hello", tokens.append,
+                options={"show_reasoning": True},
+                on_thought_delta=thoughts.append,
+            )
+        self.assertEqual(result, "Ready.")
+        self.assertEqual(thoughts, ["The request needs a concise explanation."])
+        self.assertEqual(tokens, ["Ready."])
+        payload = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["thinking"], {"type": "adaptive", "display": "summarized"})
 
     def test_effort_wrapper_forwards_native_thought_callback(self):
         from model.effort import EffortAwareBrain
@@ -460,6 +596,28 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertEqual(thoughts, ["native thought"])
         self.assertEqual(result["thinking"], "native thought")
         self.assertTrue(callable(backend.received["on_thought_delta"]))
+
+    def test_think_toggle_forces_native_ollama_thinking_when_metadata_is_missing(self):
+        from model.effort import EffortAwareBrain
+
+        class Backend:
+            def __init__(self):
+                self.received = None
+
+            def think_value_for_effort(self, _effort):
+                return None
+
+            def generate_stream(self, prompt, on_token, **kwargs):
+                self.received = kwargs
+                on_token("answer")
+                return "answer"
+
+        backend = Backend()
+        wrapper = EffortAwareBrain(backend, "medium")
+        wrapper.set_thinking_enabled(True)
+        result = wrapper.generate_stream("hello", lambda _token: None)
+        self.assertEqual(result, "answer")
+        self.assertIs(backend.received["think"], True)
 
     def test_ollama_effort_uses_only_model_advertised_thinking_levels(self):
         with mock.patch("model.ollama.ollama.show", return_value={

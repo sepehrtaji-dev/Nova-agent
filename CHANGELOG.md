@@ -2,6 +2,20 @@
 
 All notable changes to Nova are documented in this file.
 
+## Unreleased
+
+### Added
+- **Task checklist the model controls**: new `update_plan` tool (`tools/task_plan.py`). The model creates its task list up front and ticks items off as it works; the Task Plan panel now shows a checkbox per task (☐ pending, ◉ in progress, ☑ done, ☒ failed) and up to 10 steps before collapsing.
+
+### Fixed
+- **Agent stopped after the search and never wrote the file**: three root causes, all in the native tool loop.
+  1. *Context window.* Tool turns sent Ollama no `num_ctx`, so the server fell back to its default (often 4096) and silently truncated the oldest part of the prompt: the user's request. The tool list and prompts alone are ~6k tokens. Tool turns now request `NOVA_TOOL_NUM_CTX` (default 16384), and the loop fits every turn into the model's window (`agent/context_budget.py`): old thinking and old results are shortened first, the newest results stay as complete as room allows, and the user's request is never dropped.
+  2. *No notion of the goal.* The loop treated "the model stopped calling tools" as done. `agent/goals.py` now infers deliverables from the request (search the web, write a file), ticks them only on successful tool calls, and refuses a final answer that skips one. A model that keeps talking instead of acting gets a second attempt with only the missing tool offered, each tool result carries a reminder of the original request, and an answer that is still incomplete says so instead of claiming success.
+  3. *Poor file content input.* `write_file` content generation received a JSON dump of the whole session; it now receives a compact ledger of what the tools returned (the research).
+- **Multi-second freeze while answering (local models)**: `OllamaBrain.generate_tool_turn_stream` held the model's thinking back and, after the stream ended, ran a *second blocking inference* just to summarize it, on every tool round. Thinking now streams to the panel as it arrives and the blocking summary call is gone. A model that rejects `think=` is retried once without it, as the plain stream already did.
+- **Thinking panel empty during tool turns**: the same change fills the panel live in the native tool loop instead of leaving it blank until the round is over.
+- **Tool loop stopped at the first answer**: a failed tool call, or checklist items still open, no longer end the turn. The premature answer is discarded and the model is sent back to keep working (at most 4 times per turn, and once per failure round; permission-disabled tools are never retried). The native loop now has its own budget (`NOVA_MAX_TOOL_ROUNDS`, default 30) separate from the planner's `NOVA_MAX_STEPS`, and tool calls beyond the per-step limit are reported to the model instead of silently dropped.
+
 ## 2.3 — 2026-11-11
 
 ### Added

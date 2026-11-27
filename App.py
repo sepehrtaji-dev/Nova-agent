@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime
 
@@ -23,8 +24,8 @@ from integrations.noviqx.settings import (
     save_settings as save_noviqx_settings,
 )
 
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QTimer, Signal, QSize, QThread, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPainterPath, QRadialGradient, QTextCursor, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -53,9 +54,12 @@ from PySide6.QtWidgets import (
     QSplitter,
     QToolButton,
     QWidgetAction,
+    QTabBar,
+    QTabWidget,
 )
 
 from agent.core import NovaCore
+from agent.cancellation import GenerationCancelled
 from utils.math_parser import format_response_math
 from storage.chat_store import ChatStore
 
@@ -265,7 +269,7 @@ class CodeBlock(QFrame):
 
 
 class MarkdownLabel(QTextBrowser):
-    def __init__(self, text, font_size=14, parent=None):
+    def __init__(self, text, font_size=16, parent=None):
         super().__init__(parent)
         self.setOpenExternalLinks(True)
         self.setFrameShape(QFrame.NoFrame)
@@ -273,6 +277,9 @@ class MarkdownLabel(QTextBrowser):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet("QTextBrowser { background: transparent; border: none; color: #c9d1d9; }")
         self.document().setDocumentMargin(0)
+        text_option = QTextOption()
+        text_option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.document().setDefaultTextOption(text_option)
         self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         
         body_style = f"""
@@ -282,7 +289,10 @@ class MarkdownLabel(QTextBrowser):
         strong {{ color: #ffffff; }}
         code {{ background: {BG_INPUT}; color: {TEXT}; padding: 2px 5px; border-radius: 4px; font-family: monospace; }}
         a {{ color: #58a6ff; text-decoration: none; }}
-        p {{ margin: 6px 0 12px 0; }}
+        p {{ margin: 6px 0 12px 0; white-space: normal; }}
+        li {{ margin: 3px 0; }}
+        td, th {{ vertical-align: top; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
         ul, ol {{ margin: 6px 0 12px 0; padding-left: 20px; }}
         blockquote {{ color: {TEXT_MUTED}; border-left: 3px solid {BORDER}; margin-left: 6px; padding-left: 12px; }}
         table {{ border-collapse: collapse; margin: 10px 0 16px 0; }}
@@ -294,14 +304,22 @@ class MarkdownLabel(QTextBrowser):
         self.document().setDefaultStyleSheet(body_style)
         self.setHtml(text)
         
+        self._last_document_width = 0
         self.document().contentsChanged.connect(self.update_height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def update_height(self):
         width = max(1, self.viewport().width())
         self.document().setTextWidth(width)
+        self._last_document_width = width
         height = int(self.document().size().height() + 10)
         self.setFixedHeight(max(24, height))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = max(1, self.viewport().width())
+        if width != self._last_document_width:
+            self.update_height()
 
     def wheelEvent(self, event):
         # This browser is sized to its full document height and has no
@@ -309,46 +327,285 @@ class MarkdownLabel(QTextBrowser):
         # mouse-wheel input instead of swallowing it here.
         event.ignore()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.update_height()
 
+def add_markdown_content(layout, text, font_size=14, incremental=False, on_block=None):
+    blocks = [
+        (kind, value, language)
+        for kind, value, language in split_markdown_blocks(text)
+        if kind == "code" or value.strip()
+    ]
+    if not blocks:
+        return
 
-def add_markdown_content(layout, text, font_size=14):
-    for kind, value, language in split_markdown_blocks(text):
+    def _emit(index):
+        kind, value, language = blocks[index]
         if kind == "code":
             layout.addWidget(CodeBlock(value, language))
-            continue
-        if not value.strip():
-            continue
-        
-        html = render_markdown_text(value)
-        label = MarkdownLabel(html, font_size=font_size)
-        layout.addWidget(label)
+        else:
+            html = render_markdown_text(value)
+            layout.addWidget(MarkdownLabel(html, font_size=font_size))
+        if callable(on_block):
+            on_block()
+
+    if not incremental:
+        for index in range(len(blocks)):
+            _emit(index)
+        return
+    # Incremental: render the first block now (so the bubble is not empty) and
+    # defer the rest one per event-loop tick. A large response no longer builds
+    # one giant QTextDocument layout synchronously on the UI thread (the
+    # multi-second freeze after the model stopped); blocks appear progressively
+    # and the UI keeps painting between them.
+    _emit(0)
+
+    def _rest(index=1):
+        if index >= len(blocks):
+            return
+        _emit(index)
+        QTimer.singleShot(0, lambda: _rest(index + 1))
+
+    QTimer.singleShot(0, _rest)
 
 
-class AgentWorker(QObject):
-    status = Signal(str)
-    finished = Signal(str)
-    failed = Signal(str)
+class TaskPlanWidget(QFrame):
+    """Compact task ledger; checkmarks reflect planner execution state."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("taskPlan")
+        self.setStyleSheet(f"QFrame#taskPlan {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 10px; }}")
+        self._root = QVBoxLayout(self)
+        self._root.setContentsMargins(12, 9, 12, 10)
+        self._root.setSpacing(6)
+        header = QHBoxLayout()
+        title = QLabel("TASK PLAN")
+        title.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; font-weight: 800; letter-spacing: 1px; border: none;")
+        header.addWidget(title)
+        header.addStretch(1)
+        self._progress = QLabel("0 / 0")
+        self._progress.setStyleSheet(f"color: {ACCENT}; font-size: 10px; font-weight: 700; border: none;")
+        header.addWidget(self._progress)
+        self._root.addLayout(header)
+        self._steps = QVBoxLayout()
+        self._steps.setContentsMargins(0, 0, 0, 0)
+        self._steps.setSpacing(5)
+        self._root.addLayout(self._steps)
 
-    def __init__(self, core, message):
-        super().__init__()
-        self.core = core
-        self.message = message
+    def set_plan(self, plan):
+        while self._steps.count():
+            item = self._steps.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        steps = plan.get("steps", []) if isinstance(plan, dict) else []
+        steps = [step for step in steps if isinstance(step, dict)]
+        completed = sum(
+            str(step.get("status", "pending") or "pending").casefold()
+            in {"completed", "complete", "done", "verified"}
+            for step in steps
+        )
+        for index, step in enumerate(steps[:10], 1):
+            status = str(step.get("status", "pending") or "pending").casefold()
+            done = status in {"completed", "complete", "done", "verified"}
+            failed = status in {"failed", "error"}
+            running = status in {"running", "in_progress", "in progress"}
+            # Checkbox style: every task the model creates is shown with a box
+            # that gets ticked when the step is completed.
+            marker = "☑" if done else "☒" if failed else "◉" if running else "☐"
+            color = "#7ee787" if done else "#ff7b72" if failed else ACCENT if running else TEXT_MUTED
+            title = str(step.get("description") or step.get("action") or step.get("tool") or f"Step {index}")
+            label = QLabel(f"{marker}  {title}")
+            label.setTextFormat(Qt.PlainText)
+            label.setWordWrap(True)
+            label.setStyleSheet(f"color: {color if done or failed or running else TEXT}; font-size: 11px; border: none; background: transparent;")
+            self._steps.addWidget(label)
+        if len(steps) > 10:
+            more = QLabel(f"+ {len(steps) - 10} more steps")
+            more.setTextFormat(Qt.PlainText)
+            more.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; border: none;")
+            self._steps.addWidget(more)
+        self._progress.setText(f"{completed} / {len(steps)} completed")
+        self.setVisible(bool(steps))
+
+
+class ModelDiscoveryWorker(QThread):
+    """Discover Ollama models without blocking the GUI event loop."""
+    models_ready = Signal(list)
+    discovery_failed = Signal(str)
 
     def run(self):
         try:
-            self.core.status_callback = self.status.emit
-            result = self.core.ask(self.message)
-            self.finished.emit(str(result))
+            import ollama
+            data = ollama.Client(timeout=3).list()
+            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
+            names = []
+            for item in items or []:
+                if isinstance(item, dict):
+                    name = item.get("model") or item.get("name")
+                else:
+                    name = getattr(item, "model", None) or getattr(item, "name", None)
+                if name:
+                    names.append(str(name).strip())
+            self.models_ready.emit(sorted(set(filter(None, names)), key=str.casefold))
         except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            self.discovery_failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class RemoteModelDiscoveryWorker(QThread):
+    """Fetch model catalogs from explicitly configured remote profiles."""
+    catalogs_ready = Signal(dict)
+
+    def __init__(self, profiles, parent=None):
+        super().__init__(parent)
+        self.profiles = [dict(item) for item in (profiles or []) if isinstance(item, dict)]
+
+    def run(self):
+        import urllib.request
+        catalogs = {}
+        for profile in self.profiles:
+            profile_id = str(profile.get("id", "") or "")
+            base_url = str(profile.get("base_url", "") or "").strip().rstrip("/")
+            api_key = str(profile.get("api_key", "") or "").strip()
+            provider = str(profile.get("provider", "openai") or "openai").casefold()
+            if not profile_id or not base_url or not api_key:
+                continue
+            if provider == "anthropic":
+                endpoint_base = base_url if base_url.endswith("/v1") else base_url + "/v1"
+                endpoint = endpoint_base + "/models?limit=1000"
+                headers = {
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Accept": "application/json",
+                }
+            else:
+                endpoint_base = base_url if base_url.endswith("/v1") else base_url + "/v1"
+                endpoint = endpoint_base + "/models"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json",
+                }
+            try:
+                request = urllib.request.Request(endpoint, headers=headers, method="GET")
+                with urllib.request.urlopen(request, timeout=4) as response:
+                    payload = json.loads(response.read().decode("utf-8", "replace"))
+                entries = payload.get("data", []) if isinstance(payload, dict) else []
+                models = sorted({
+                    str(item.get("id")).strip()
+                    for item in entries
+                    if isinstance(item, dict) and item.get("id")
+                }, key=str.casefold)
+                if models:
+                    catalogs[profile_id] = models
+            except Exception:
+                # Some compatible endpoints intentionally do not expose /models.
+                # The saved profile model remains available as a fallback.
+                continue
+        self.catalogs_ready.emit(catalogs)
+
+
+class AgentWorker(QThread):
+    """Run one agent turn outside the GUI thread with cooperative cancellation.
+
+    Token callbacks can arrive hundreds of times per second. Coalesce them on
+    the worker thread before crossing the Qt queued-signal boundary, otherwise
+    the GUI event queue and QTextDocument layout work can fall behind generation.
+    """
+    status = Signal(str)
+    completed = Signal(str)
+    title_generated = Signal(str, str)
+    failed = Signal(str)
+    cancelled = Signal()
+    _DELTA_PREFIXES = ("MODEL_ANSWER_DELTA:", "MODEL_THOUGHT_DELTA:")
+
+    def __init__(self, core, message, parent=None, generate_title=False, chat_id=None):
+        super().__init__(parent)
+        self.core = core
+        self.message = message
+        self.generate_title = bool(generate_title)
+        self.chat_id = str(chat_id or "")
+        self.cancel_event = threading.Event()
+        self._pending_deltas = []
+        self._last_delta_flush = 0.0
+        self._delta_interval = 1.0 / 30.0
+
+    def request_stop(self):
+        self.cancel_event.set()
+
+    def _flush_deltas(self):
+        pending, self._pending_deltas = self._pending_deltas, []
+        self._last_delta_flush = time.monotonic()
+        current_prefix = None
+        current_values = []
+        for prefix, value in pending:
+            if current_prefix is not None and prefix != current_prefix:
+                self.status.emit(current_prefix + "".join(current_values))
+                current_values = []
+            current_prefix = prefix
+            current_values.append(value)
+        if current_prefix is not None:
+            self.status.emit(current_prefix + "".join(current_values))
+
+    def _queue_status(self, message):
+        message = str(message)
+        for prefix in self._DELTA_PREFIXES:
+            if message.startswith(prefix):
+                value = message[len(prefix):]
+                if value:
+                    self._pending_deltas.append((prefix, value))
+                if time.monotonic() - self._last_delta_flush >= self._delta_interval:
+                    self._flush_deltas()
+                return
+        self._flush_deltas()
+        self.status.emit(message)
+
+    def run(self):
+        self.core.cancel_event = self.cancel_event
+        self.core.status_callback = self._queue_status
+        try:
+            result = self.core.ask(self.message)
+            self._flush_deltas()
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.completed.emit(str(result))
+                if self.generate_title and self.chat_id:
+                    try:
+                        title = self.core.brain.generate(
+                            "Create a concise title for this conversation. "
+                            "Use the same language as the user's message. "
+                            "Return only the title, without quotes or explanation, "
+                            "in at most 6 words.\n\n"
+                            f"User's first message:\n{self.message[:1200]}",
+                            system_prompt=(
+                                "You generate short, accurate chat titles. "
+                                "Do not answer the user's request; only name the conversation."
+                            ),
+                        )
+                        title = " ".join(str(title or "").strip().strip(chr(34) + chr(39) + chr(96)).split())
+                        title = re.sub(r"^(title|عنوان)\s*[:：-]\s*", "", title, flags=re.IGNORECASE)
+                        title = title[:64].strip()
+                        if title:
+                            self.title_generated.emit(self.chat_id, title)
+                    except Exception:
+                        # Title generation is auxiliary; a failed title call
+                        # must never turn a successful chat response into an error.
+                        pass
+        except GenerationCancelled:
+            self._flush_deltas()
+            self.cancelled.emit()
+        except Exception as exc:
+            self._flush_deltas()
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.failed.emit(f"{type(exc).__name__}: {exc}")
+        finally:
+            if getattr(self.core, "cancel_event", None) is self.cancel_event:
+                self.core.cancel_event = None
+                self.core.status_callback = None
 
 
 class StreamingMessageWidget(QFrame):
     """Plain-text assistant draft updated as model deltas arrive."""
-    def __init__(self, font_size=16, parent=None):
+    def __init__(self, font_size=18, parent=None):
         super().__init__(parent)
         self.setObjectName("streamingMessage")
         self.setStyleSheet("QFrame#streamingMessage { background: transparent; border: none; }")
@@ -377,9 +634,24 @@ class StreamingMessageWidget(QFrame):
     def append_delta(self, delta):
         if not delta:
             return
-        self.editor.moveCursor(self.editor.textCursor().MoveOperation.End)
-        self.editor.insertPlainText(str(delta))
-        self.editor.ensureCursorVisible()
+        editor = self.editor
+        bar = editor.verticalScrollBar()
+        # Mirror ThinkingPanel: follow the stream only while the reader is at
+        # the bottom. When they scrolled up, insert through a standalone
+        # document cursor so the viewport is not pulled to the end on every
+        # token.
+        at_bottom = bar.maximum() - bar.value() <= max(bar.singleStep(), 1)
+        if at_bottom:
+            editor.moveCursor(editor.textCursor().MoveOperation.End)
+            editor.insertPlainText(str(delta))
+            # setValue(maximum) is cheaper than ensureCursorVisible() (no
+            # extra cursor geometry work) and is all that is needed to keep
+            # the tail in view while following the stream.
+            bar.setValue(bar.maximum())
+        else:
+            cursor = QTextCursor(editor.document())
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(str(delta))
 
     def clear(self):
         self.editor.clear()
@@ -417,6 +689,52 @@ class ComposerEdit(QPlainTextEdit):
         self.fit_height()
 
 
+class _PulseDot(QWidget):
+    """Painted indicator dot for the Thinking panel.
+
+    The previous indicator animated by rebuilding its Qt stylesheet on every
+    tick (a CSS reparse plus a repaint, several times a second). That work
+    piled onto the same UI thread that streams reasoning tokens and made the
+    panel feel frozen during long generations. This widget repaints cheaply
+    from a numeric phase property instead — ``update()`` is coalesced by Qt
+    and never reparses a stylesheet.
+    """
+
+    _COLORS = (ACCENT, "#9b8cff", "#c084fc", "#9b8cff")
+    _RADII = (4, 5, 6, 5)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._phase = 0
+        self._finished = False
+        self.setFixedSize(14, 14)
+
+    def set_phase(self, phase):
+        self._phase = int(phase) % len(self._COLORS)
+        self.update()
+
+    def set_finished(self, finished):
+        self._finished = bool(finished)
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+        center = QPointF(rect.width() / 2, rect.height() / 2)
+        if self._finished:
+            pen = QPen(QColor(TEXT_MUTED))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(center, 4, 4)
+            return
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(self._COLORS[self._phase]))
+        radius = self._RADII[self._phase]
+        painter.drawEllipse(center, radius, radius)
+
+
 class ThinkingPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -427,6 +745,7 @@ class ThinkingPanel(QFrame):
         self._finished = False
         self._has_content = False
         self._expanded = True
+        self._pulse_phase = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 14, 10)
@@ -436,8 +755,7 @@ class ThinkingPanel(QFrame):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
 
-        self._indicator = QLabel("●")
-        self._indicator.setStyleSheet(f"color: {ACCENT}; font-size: 8px; border: none; background: transparent;")
+        self._indicator = _PulseDot()
         header.addWidget(self._indicator)
 
         self._title = QLabel("Thinking")
@@ -462,7 +780,7 @@ class ThinkingPanel(QFrame):
         self._body.setStyleSheet(f"QPlainTextEdit {{ background: transparent; color: {TEXT_MUTED}; border: none; font-family: 'Cascadia Mono', 'Consolas', monospace; font-size: 12px; }}")
         self._body.setReadOnly(True)
         self._body.setFrameShape(QFrame.NoFrame)
-        self._body.setPlaceholderText("Waiting for the model to reason...")
+        self._body.setPlaceholderText("Waiting for a user-facing reasoning summary...")
         self._body.setMaximumHeight(200)
         self._body.setMinimumHeight(60)
         root.addWidget(self._body)
@@ -471,6 +789,17 @@ class ThinkingPanel(QFrame):
         self._timer.setInterval(500)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(180)
+        self._pulse_timer.timeout.connect(self._pulse)
+        self._pulse_timer.start()
+
+    def _pulse(self):
+        if self._finished:
+            self._pulse_timer.stop()
+            return
+        self._pulse_phase = (self._pulse_phase + 1) % 4
+        self._indicator.set_phase(self._pulse_phase)
 
     def _tick(self):
         if self._finished:
@@ -483,15 +812,32 @@ class ThinkingPanel(QFrame):
         self._body.setVisible(self._expanded)
         self._toggle.setText("Hide" if self._expanded else "Show")
 
+    def set_phase(self, phase):
+        """Keep the panel title aligned with the active generation phase."""
+        if self._finished:
+            return
+        self._title.setText("Thinking" if str(phase).casefold() == "thinking" else "Reasoning summary")
+
     def append_delta(self, delta):
         if not delta:
             return
-        cursor = self._body.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-        self._body.setTextCursor(cursor)
-        self._body.insertPlainText(delta)
         bar = self._body.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        # Only follow the stream when the reader is already at the bottom.
+        # Moving the editor's own cursor to the end forces the viewport to
+        # follow it, which yanks the view away from someone who scrolled up to
+        # re-read earlier reasoning. When that happens, insert through a
+        # standalone document cursor that never touches the editor cursor.
+        at_bottom = bar.maximum() - bar.value() <= max(bar.singleStep(), 1)
+        if at_bottom:
+            cursor = self._body.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self._body.setTextCursor(cursor)
+            self._body.insertPlainText(delta)
+            bar.setValue(bar.maximum())
+        else:
+            cursor = QTextCursor(self._body.document())
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(delta)
         self._has_content = True
 
     def finish(self):
@@ -499,18 +845,33 @@ class ThinkingPanel(QFrame):
             return
         self._finished = True
         self._timer.stop()
+        self._pulse_timer.stop()
         self._tick()
-        self._indicator.setText("○")
-        self._indicator.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 8px; border: none; background: transparent;")
-        if not self._has_content:
-            self._body.setPlainText("The selected model did not return reasoning for this turn.")
-        self._expanded = False
-        self._body.setVisible(False)
-        self._toggle.setText("Show")
+        self._title.setText("Reasoning summary")
+        self._indicator.set_finished(True)
+        if self._has_content:
+            # Keep the reasoning on screen after the stream ends. Auto-collapsing
+            # here hid the summary the instant thinking finished — before the
+            # answer appeared — which read as the panel "not showing". The body
+            # is height-capped, so a finished summary stays compact until the
+            # user explicitly hides it.
+            self._expanded = True
+            self._body.setVisible(True)
+            self._toggle.setText("Hide")
+        # When no reasoning arrived, leave the body blank; the caller retires
+        # an empty panel instead of leaving a "no reasoning" chip behind.
+
+    @property
+    def has_content(self):
+        return bool(self._has_content)
+
+    def is_finished(self):
+        return bool(self._finished)
 
 
 class MessageWidget(QFrame):
-    def __init__(self, role, text, attachments=None, font_size=16, parent=None):
+    def __init__(self, role, text, attachments=None, font_size=16, parent=None,
+                 incremental=False, on_block=None):
         super().__init__(parent)
         is_user = role == "user"
         self.setObjectName("userMessageRow" if is_user else "assistantMessageRow")
@@ -532,7 +893,13 @@ class MessageWidget(QFrame):
         name = QLabel("You" if is_user else "Nova")
         name.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: 650; border: none; background: transparent;")
         content.addWidget(name)
-        add_markdown_content(content, text if text else ("Attached files" if attachments else " "), font_size=font_size if not is_user else 14)
+        add_markdown_content(
+            content,
+            text if text else ("Attached files" if attachments else " "),
+            font_size=font_size if not is_user else 14,
+            incremental=incremental and not is_user,
+            on_block=on_block,
+        )
         if is_user and attachments:
             badges = QHBoxLayout()
             badges.setContentsMargins(0, 4, 0, 0)
@@ -573,10 +940,37 @@ class EffortSlider(QSlider):
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self._phase = 0.0
+        self._visual_value = 0.0
+        self._level_animation = QPropertyAnimation(self, b"visualValue", self)
+        self._level_animation.setDuration(190)
+        self._level_animation.setEasingCurve(QEasingCurve.InOutCubic)
         self._pulse_timer = QTimer(self)
         self._pulse_timer.setInterval(40)
         self._pulse_timer.timeout.connect(self._advance_pulse)
+        self.valueChanged.connect(self._animate_level)
+
+    @Property(float)
+    def visualValue(self):
+        return self._visual_value
+
+    @visualValue.setter
+    def visualValue(self, value):
+        self._visual_value = float(value)
+        self.update()
+
+    def _animate_level(self, value):
+        self._level_animation.stop()
+        self._level_animation.setStartValue(self._visual_value)
+        self._level_animation.setEndValue(float(value))
+        self._level_animation.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
         self._pulse_timer.start()
+
+    def hideEvent(self, event):
+        self._pulse_timer.stop()
+        super().hideEvent(event)
 
     def _advance_pulse(self):
         self._phase = (self._phase + 0.055) % (2 * math.pi)
@@ -595,10 +989,14 @@ class EffortSlider(QSlider):
         y = groove.center().y()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        visual_index = max(0.0, min(float(self.maximum()), self._visual_value))
+        active_index = int(round(visual_index))
+        active_x = left + (right - left) * visual_index / (self.maximum() - self.minimum())
         for index, color_hex in enumerate(self.LEVEL_COLORS):
             x = left + (right - left) * index / (self.maximum() - self.minimum())
             color = QColor(color_hex)
-            if index == self.value():
+            if index == active_index:
+                x = active_x
                 pulse = (math.sin(self._phase) + 1.0) / 2.0
                 painter.setPen(Qt.NoPen)
                 if index == self.maximum():
@@ -918,21 +1316,67 @@ class ModelSettingsDialog(QDialog):
         font_hint.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
         font_row.addWidget(font_hint)
         font_row.addStretch(1)
-        self.font_value = QLabel(f'{settings.get("assistant_font_size", "16")} px')
+        self.font_value = QLabel(f'{settings.get("assistant_font_size", "18")} px')
         self.font_value.setStyleSheet(f"color: {ACCENT}; font-weight: 700;")
         font_row.addWidget(self.font_value)
         layout.addLayout(font_row)
         self.font_slider = QSlider(Qt.Horizontal)
-        self.font_slider.setRange(13, 20)
+        self.font_slider.setRange(15, 24)
         try:
-            self.font_slider.setValue(max(13, min(20, int(settings.get("assistant_font_size", "16")))))
+            self.font_slider.setValue(max(15, min(24, int(settings.get("assistant_font_size", "18")))))
         except (TypeError, ValueError):
-            self.font_slider.setValue(15)
+            self.font_slider.setValue(18)
         self.font_slider.setTickPosition(QSlider.TicksBelow)
         self.font_slider.setTickInterval(1)
         self.font_slider.valueChanged.connect(lambda value: self.font_value.setText(f"{value} px"))
         self.font_slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; background: {BORDER}; border-radius: 2px; }} QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }} QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -6px 0; border-radius: 7px; }}")
         layout.addWidget(self.font_slider)
+
+        # Turn the long settings form into clear product categories.
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.setObjectName("settingsTabs")
+        tabs.setStyleSheet(f"""
+            QTabWidget#settingsTabs::pane {{ border: 1px solid {BORDER}; border-radius: 10px; background: {BG_PANEL}; top: -1px; }}
+            QTabBar::tab {{ color: {TEXT_MUTED}; background: transparent; border: 1px solid transparent; padding: 10px 15px; margin-right: 4px; font-size: 12px; }}
+            QTabBar::tab:selected {{ color: {TEXT}; background: {BG_PANEL}; border-color: {BORDER}; border-bottom-color: {BG_PANEL}; border-top-left-radius: 7px; border-top-right-radius: 7px; }}
+            QTabBar::tab:hover:!selected {{ color: {TEXT}; background: {BG_INPUT}; border-radius: 7px; }}
+        """)
+        tab_pages = {}
+        tab_layouts = {}
+        for key, label in (("models", "Models"), ("instructions", "Instructions"), ("profile", "Profile"), ("appearance", "Appearance")):
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(16, 14, 16, 16)
+            page_layout.setSpacing(12)
+            tab_pages[key] = page
+            tab_layouts[key] = page_layout
+            tabs.addTab(page, label)
+
+        active_page = "models"
+        markers = {
+            "MODEL INSTRUCTIONS": "instructions",
+            "YOUR INFO": "profile",
+            "ASSISTANT TEXT SIZE": "appearance",
+        }
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None and isinstance(widget, QLabel):
+                marker = widget.text().strip()
+                if marker in markers:
+                    active_page = markers[marker]
+            if widget is not None:
+                tab_layouts[active_page].addWidget(widget)
+            elif item.layout() is not None:
+                nested_layout = item.layout()
+                nested_layout.setParent(None)
+                tab_layouts[active_page].addLayout(nested_layout)
+            else:
+                tab_layouts[active_page].addItem(item)
+        for page_layout in tab_layouts.values():
+            page_layout.addStretch(1)
+        layout.addWidget(tabs)
 
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -1056,16 +1500,28 @@ class NovaWindow(QMainWindow):
         
         self.chat_store = ChatStore()
         saved_chats = self.chat_store.list_chats()
-        self.current_chat_id = saved_chats[0]["id"] if saved_chats else self.chat_store.create_chat()
+        self.current_chat_id = saved_chats[0]["id"] if saved_chats else None
         self._restore_core_memory(self.current_chat_id)
         
         self.thread = None
         self.worker = None
+        self._active_workers = set()
         self.busy = False
         self.thinking_panel = None
+        self.task_plan_panel = None
         self.thinking_enabled = False
         self.streaming_message = None
         self.attachments = []
+        self._agent_sessions = [{
+            "id": uuid.uuid4().hex,
+            "title": "Agent 1",
+            "core": self.core,
+            "chat_id": self.current_chat_id,
+            "attachments": [],
+        }]
+        self._active_agent_index = 0
+        self._agent_tab_counter = 1
+        self._changing_agent_tabs = False
 
         self.setWindowTitle("Nova")
         logo = load_nova_logo(256)
@@ -1078,6 +1534,32 @@ class NovaWindow(QMainWindow):
         self._apply_theme()
         self._refresh_chat_history()
         self._render_current_chat()
+        self._installed_models = []
+        self._model_discovery_worker = None
+        self._remote_model_catalog = {}
+        self._remote_model_discovery_worker = None
+        self._start_model_discovery()
+
+    def closeEvent(self, event):
+        workers = list(getattr(self, "_active_workers", set()))
+        for active_worker in workers:
+            if active_worker.isRunning():
+                active_worker.request_stop()
+        for active_worker in workers:
+            if active_worker.isRunning() and not active_worker.wait(1800):
+                QMessageBox.information(
+                    self,
+                    "Nova is stopping",
+                    "The current model or tool call is still shutting down. Wait a moment, then close Nova again.",
+                )
+                event.ignore()
+                return
+        for discovery_worker in (self._model_discovery_worker, self._remote_model_discovery_worker):
+            if discovery_worker is not None and discovery_worker.isRunning():
+                if not discovery_worker.wait(4500):
+                    event.ignore()
+                    return
+        super().closeEvent(event)
 
     def _create_core(self):
         try:
@@ -1099,6 +1581,7 @@ class NovaWindow(QMainWindow):
         new_core.set_access(**{**DEFAULT_ACCESS, **access})
         self.core = new_core
         self._apply_effort(self._effort)
+        self._sync_active_agent_session()
         return True
 
     def _build_ui(self):
@@ -1109,11 +1592,13 @@ class NovaWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         splitter = QSplitter(Qt.Horizontal)
+        self.splitter = splitter
         splitter.setHandleWidth(1)
         main_layout.addWidget(splitter)
 
         # Sidebar
         sidebar = QFrame()
+        self.sidebar = sidebar
         sidebar.setObjectName("sidebar")
         sidebar.setMinimumWidth(236)
         sidebar.setMaximumWidth(292)
@@ -1201,6 +1686,41 @@ class NovaWindow(QMainWindow):
         self.model_selector.setStyleSheet(f"QPushButton {{ background: {BG_PANEL}; border: 1px solid {BORDER}; border-radius: 9px; padding: 0 12px; color: {TEXT}; font-size: 12px; font-weight: 600; text-align: left; }} QPushButton:hover {{ background: {BG_INPUT}; border-color: #405a76; }}")
         self.model_selector.clicked.connect(self._show_model_menu)
 
+        # Independent agent sessions, presented as browser-like tabs.
+        tabs_row = QWidget()
+        tabs_row.setObjectName("agentTabsRow")
+        tabs_layout = QHBoxLayout(tabs_row)
+        tabs_layout.setContentsMargins(14, 7, 14, 6)
+        tabs_layout.setSpacing(8)
+        self.agent_tabs = QTabWidget()
+        self.agent_tabs.setObjectName("agentTabs")
+        self.agent_tabs.setDocumentMode(True)
+        self.agent_tabs.setTabsClosable(False)
+        self.agent_tabs.setMovable(True)
+        self.agent_tabs.setFixedHeight(44)
+        self.agent_tabs.setStyleSheet(f"""
+            QTabWidget#agentTabs::pane {{ border: none; background: transparent; }}
+            QTabBar::tab {{ color: {TEXT_MUTED}; background: {BG_PANEL}; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 8px 34px 8px 13px; min-width: 94px; max-width: 190px; margin-right: 4px; }}
+            QTabBar::tab:selected {{ color: {TEXT}; background: {BG_INPUT}; border-color: #405a76; }}
+            QTabBar::tab:hover:!selected {{ color: {TEXT}; background: #17212c; }}
+        """)
+        self.agent_tab_bar = self.agent_tabs.tabBar()
+        self.agent_tab_bar.setExpanding(False)
+        self.agent_tab_bar.setDrawBase(False)
+        self.agent_tab_bar.setElideMode(Qt.ElideRight)
+        self.agent_tabs.addTab(QWidget(), "Agent 1")
+        self._install_agent_tab_close_button(0)
+        self.agent_tabs.currentChanged.connect(self._on_agent_tab_changed)
+        self.agent_tab_bar.tabMoved.connect(self._on_agent_tab_moved)
+        tabs_layout.addWidget(self.agent_tabs, 1)
+        add_agent_tab = QPushButton("+")
+        add_agent_tab.setFixedSize(28, 28)
+        add_agent_tab.setToolTip("New agent tab")
+        add_agent_tab.setStyleSheet(f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: 1px solid {BORDER}; border-radius: 7px; font-size: 17px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; }}")
+        add_agent_tab.clicked.connect(self._new_agent_tab)
+        tabs_layout.addWidget(add_agent_tab)
+        main_layout.addWidget(tabs_row)
+
         # Chat Area
         self.chat_scroll = QScrollArea()
         self.chat_scroll.setStyleSheet(f"QScrollArea {{ background: {BG_MAIN}; border: none; }}")
@@ -1271,10 +1791,20 @@ class NovaWindow(QMainWindow):
         add_btn.clicked.connect(self._choose_attachments)
         controls.addWidget(add_btn)
 
+        self.sidebar_toggle = QPushButton("☰")
+        self.sidebar_toggle.setFixedSize(30, 30)
+        self.sidebar_toggle.setToolTip("Hide or show the sidebar")
+        self.sidebar_toggle.setCursor(Qt.PointingHandCursor)
+        self.sidebar_toggle.setStyleSheet(f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 15px; }} QPushButton:hover {{ color: {TEXT}; background: {BG_INPUT}; border-color: {BORDER}; }}")
+        self.sidebar_toggle.clicked.connect(self._toggle_sidebar)
+        controls.addWidget(self.sidebar_toggle)
+        self._sidebar_collapsed = False
+        self._sidebar_animation = None
+
         self.think_button = QPushButton("Think")
         self.think_button.setCheckable(True)
         self.think_button.setChecked(False)
-        self.think_button.setToolTip("Show the model's native thinking output")
+        self.think_button.setToolTip("Show a concise, model-generated reasoning summary")
         self.think_button.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {TEXT_MUTED}; border: 1px solid {BORDER}; border-radius: 8px; padding: 0 11px; font-size: 11px; font-weight: 600; }}"
             f"QPushButton:checked {{ background: {BG_INPUT}; color: {ACCENT}; border-color: {ACCENT}; }}"
@@ -1413,6 +1943,141 @@ class NovaWindow(QMainWindow):
         self.chat_list.blockSignals(False)
         self._refresh_model_labels()
 
+    def _sync_active_agent_session(self):
+        sessions = getattr(self, "_agent_sessions", None)
+        index = getattr(self, "_active_agent_index", -1)
+        if isinstance(sessions, list) and 0 <= index < len(sessions):
+            sessions[index]["core"] = self.core
+            sessions[index]["chat_id"] = self.current_chat_id
+            sessions[index]["attachments"] = list(getattr(self, "attachments", []) or [])
+
+    def _on_agent_tab_changed(self, index):
+        if self._changing_agent_tabs or not (0 <= index < len(self._agent_sessions)):
+            return
+        if self.busy:
+            self.agent_tabs.blockSignals(True)
+            self.agent_tabs.setCurrentIndex(self._active_agent_index)
+            self.agent_tabs.blockSignals(False)
+            return
+        self._sync_active_agent_session()
+        self._active_agent_index = index
+        session = self._agent_sessions[index]
+        self.core = session["core"]
+        self.current_chat_id = session["chat_id"]
+        self.attachments = list(session.get("attachments", []))
+        self.thinking_panel = None
+        self.streaming_message = None
+        self._refresh_attachment_preview()
+        self._refresh_chat_history()
+        self._render_current_chat()
+
+    def _install_agent_tab_close_button(self, index):
+        """Install a close control with a real inset from the tab's right edge.
+
+        QTabBar positions a right-side tab button against the edge of the tab.
+        A wrapper reserves an explicit 8px trailing gutter so the visible ×
+        never touches the tab border, regardless of the active Qt style.
+        """
+        container = QWidget(self.agent_tab_bar)
+        container.setObjectName("agentTabCloseContainer")
+        container.setFixedSize(28, 24)
+
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(0, 2, 8, 2)
+        container_layout.setSpacing(0)
+
+        button = QToolButton(container)
+        button.setObjectName("agentTabCloseButton")
+        button.setText("×")
+        button.setCursor(Qt.PointingHandCursor)
+        button.setFixedSize(20, 20)
+        button.setFocusPolicy(Qt.NoFocus)
+        button.setStyleSheet(
+            "QToolButton { color: #9aa9b8; background: transparent; border: none; "
+            "border-radius: 6px; font-size: 16px; font-weight: 500; padding: 0px; }"
+            "QToolButton:hover { color: #e6edf3; background: #3a4654; }"
+        )
+        container_layout.addWidget(button)
+        button.clicked.connect(
+            lambda checked=False, control=button: self._close_agent_tab(
+                self.agent_tab_bar.tabAt(
+                    control.mapTo(self.agent_tab_bar, control.rect().center())
+                )
+            )
+        )
+        self.agent_tab_bar.setTabButton(index, QTabBar.RightSide, container)
+
+    def _new_agent_tab(self):
+        if self.busy:
+            return
+        self._sync_active_agent_session()
+        access = self.core.get_access()
+        apply_to_environment(self._settings)
+        core = self._create_core()
+        core.set_access(**access)
+        if hasattr(core, "set_effort"):
+            core.set_effort(self._effort)
+        # A tab is an empty agent session, not a persisted conversation.
+        # The chat row is created only when its first message is sent.
+        chat_id = None
+        self._agent_tab_counter += 1
+        title = f"Agent {self._agent_tab_counter}"
+        self._agent_sessions.append({
+            "id": uuid.uuid4().hex,
+            "title": title,
+            "core": core,
+            "chat_id": chat_id,
+            "attachments": [],
+        })
+        self._changing_agent_tabs = True
+        self.agent_tabs.blockSignals(True)
+        self.agent_tabs.addTab(QWidget(), title)
+        self._install_agent_tab_close_button(self.agent_tabs.count() - 1)
+        self.agent_tabs.setCurrentIndex(len(self._agent_sessions) - 1)
+        self.agent_tabs.blockSignals(False)
+        self._changing_agent_tabs = False
+        self._active_agent_index = len(self._agent_sessions) - 1
+        self.core = core
+        self.current_chat_id = chat_id
+        self.attachments = []
+        self._refresh_attachment_preview()
+        self._refresh_chat_history()
+        self._render_current_chat()
+
+    def _close_agent_tab(self, index):
+        if len(self._agent_sessions) <= 1 or not (0 <= index < len(self._agent_sessions)):
+            return
+        if self.busy and index == self._active_agent_index:
+            return
+        self._sync_active_agent_session()
+        self._changing_agent_tabs = True
+        self.agent_tabs.blockSignals(True)
+        self.agent_tab_bar.blockSignals(True)
+        self.agent_tabs.removeTab(index)
+        self._agent_sessions.pop(index)
+        if index < self._active_agent_index:
+            self._active_agent_index -= 1
+        elif index == self._active_agent_index:
+            self._active_agent_index = min(index, len(self._agent_sessions) - 1)
+        self.agent_tabs.setCurrentIndex(self._active_agent_index)
+        self.agent_tab_bar.blockSignals(False)
+        self.agent_tabs.blockSignals(False)
+        self._changing_agent_tabs = False
+        session = self._agent_sessions[self._active_agent_index]
+        self.core = session["core"]
+        self.current_chat_id = session["chat_id"]
+        self.attachments = list(session.get("attachments", []))
+        self._refresh_attachment_preview()
+        self._refresh_chat_history()
+        self._render_current_chat()
+
+    def _on_agent_tab_moved(self, from_index, to_index):
+        if from_index == to_index:
+            return
+        session = self._agent_sessions.pop(from_index)
+        self._agent_sessions.insert(to_index, session)
+        self._active_agent_index = self.agent_tab_bar.currentIndex()
+
     def _on_chat_selected(self, item):
         if self.busy:
             return
@@ -1426,6 +2091,7 @@ class NovaWindow(QMainWindow):
         self.core.set_access(**access)
         self._apply_effort(self._effort)
         self.current_chat_id = str(chat_id)
+        self._sync_active_agent_session()
         self._refresh_model_labels()
         self._render_current_chat()
 
@@ -1437,14 +2103,16 @@ class NovaWindow(QMainWindow):
         self.core = self._create_core()
         self.core.set_access(**access)
         self._apply_effort(self._effort)
-        self.current_chat_id = self.chat_store.create_chat()
+        self.current_chat_id = None
         self.core.short_memory.messages = []
+        self._sync_active_agent_session()
         self._refresh_model_labels()
         self._refresh_chat_history()
         self._render_current_chat()
 
     def _render_current_chat(self):
-        messages = self._restore_core_memory(self.current_chat_id)
+        self.task_plan_panel = None
+        messages = self._restore_core_memory(self.current_chat_id) if self.current_chat_id else []
         while self.chat_container_layout.count():
             item = self.chat_container_layout.takeAt(0)
             if item.widget():
@@ -1454,20 +2122,39 @@ class NovaWindow(QMainWindow):
             widget = MessageWidget(
                 item["role"], item["content"],
                 attachments=item.get("attachments") or [],
-                font_size=int(self._settings.get("assistant_font_size", "16") or 16),
+                font_size=int(self._settings.get("assistant_font_size", "18") or 18),
             )
             self.chat_container_layout.addWidget(widget)
             
         self.chat_container_layout.addStretch()
+        plan = getattr(self.core, "execution_state", {}).get("last_plan")
+        if isinstance(plan, dict) and plan.get("steps"):
+            self._insert_task_plan_panel().set_plan(plan)
         self._scroll_chat_to_bottom()
 
     def _add_message(self, role, text, attachments=None):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "16") or 16))
+        widget = MessageWidget(role, text, attachments=attachments, font_size=int(self._settings.get("assistant_font_size", "18") or 18))
         self.chat_container_layout.addWidget(widget)
         if stretch:
             self.chat_container_layout.addItem(stretch)
         self._scroll_chat_to_bottom()
+
+    def _clear_task_plan_panel(self):
+        if self.task_plan_panel is not None:
+            self.chat_container_layout.removeWidget(self.task_plan_panel)
+            self.task_plan_panel.deleteLater()
+            self.task_plan_panel = None
+
+    def _insert_task_plan_panel(self):
+        if self.task_plan_panel is not None:
+            return self.task_plan_panel
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        self.task_plan_panel = TaskPlanWidget()
+        self.chat_container_layout.addWidget(self.task_plan_panel)
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+        return self.task_plan_panel
 
     def _insert_thinking_panel(self):
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
@@ -1482,7 +2169,7 @@ class NovaWindow(QMainWindow):
         if self.streaming_message is not None:
             return self.streaming_message
         stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
-        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "16") or 16))
+        self.streaming_message = StreamingMessageWidget(font_size=int(self._settings.get("assistant_font_size", "18") or 18))
         self.chat_container_layout.addWidget(self.streaming_message)
         if stretch:
             self.chat_container_layout.addItem(stretch)
@@ -1498,6 +2185,76 @@ class NovaWindow(QMainWindow):
     def _scroll_chat_to_bottom(self):
         QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum()))
 
+    def _start_model_discovery(self):
+        worker = getattr(self, "_model_discovery_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = ModelDiscoveryWorker(self)
+        self._model_discovery_worker = worker
+        worker.models_ready.connect(self._on_models_discovered)
+        worker.discovery_failed.connect(lambda _error: None)
+        worker.finished.connect(lambda current=worker: self._on_model_discovery_finished(current))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _start_remote_model_discovery(self):
+        worker = self._remote_model_discovery_worker
+        if worker is not None and worker.isRunning():
+            return
+        try:
+            profiles = json.loads(self._settings.get("remote_models", "[]") or "[]")
+        except (TypeError, ValueError):
+            profiles = []
+        worker = RemoteModelDiscoveryWorker(profiles, self)
+        self._remote_model_discovery_worker = worker
+        worker.catalogs_ready.connect(self._on_remote_models_discovered)
+        worker.finished.connect(lambda current=worker: self._on_remote_model_discovery_finished(current))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_remote_models_discovered(self, catalogs):
+        self._remote_model_catalog = dict(catalogs or {})
+        self._refresh_model_labels()
+
+    def _on_remote_model_discovery_finished(self, worker):
+        if self._remote_model_discovery_worker is worker:
+            self._remote_model_discovery_worker = None
+
+    def _on_models_discovered(self, models):
+        self._installed_models = list(models or [])
+        self._refresh_model_labels()
+
+    def _on_model_discovery_finished(self, worker):
+        if self._model_discovery_worker is worker:
+            self._model_discovery_worker = None
+
+    def _toggle_sidebar(self):
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        collapsing = self._sidebar_collapsed
+        was_visible = self.sidebar.isVisible()
+        current_width = self.sidebar.width() if was_visible else 0
+        self.sidebar.setMinimumWidth(0)
+        self.sidebar.setVisible(True)
+        if self._sidebar_animation is not None:
+            self._sidebar_animation.stop()
+        animation = QPropertyAnimation(self.sidebar, b"maximumWidth", self)
+        animation.setDuration(240)
+        animation.setEasingCurve(QEasingCurve.InOutCubic)
+        animation.setStartValue(current_width)
+        animation.setEndValue(0 if collapsing else 272)
+        if not collapsing:
+            self.sidebar.setMaximumWidth(current_width)
+        def finish():
+            if collapsing:
+                self.sidebar.setVisible(False)
+                self.sidebar.setMaximumWidth(292)
+            else:
+                self.sidebar.setMinimumWidth(236)
+                self.sidebar.setMaximumWidth(292)
+        animation.finished.connect(finish)
+        self._sidebar_animation = animation
+        animation.start()
+
     def _show_model_menu(self, anchor=None):
         if self.busy:
             return
@@ -1505,26 +2262,66 @@ class NovaWindow(QMainWindow):
         menu.setMinimumWidth(390)
         remote = self._settings.get("provider") == "remote"
         
-        installed = []
-        try:
-            import ollama
-            # Short timeout: a hung Ollama server must not freeze the GUI event loop
-            data = ollama.Client(timeout=5).list()
-            items = data.get("models", []) if isinstance(data, dict) else getattr(data, "models", [])
-            for item in items or []:
-                name = item.get("model") if isinstance(item, dict) else getattr(item, "model", None)
-                if name: installed.append(str(name))
-        except Exception:
-            pass
-            
+        installed = list(getattr(self, "_installed_models", []) or [])
         current = str(getattr(getattr(self.core, "brain", None), "model", "")).strip()
-        if current and current not in installed:
+        if current and not remote and current not in installed:
             installed.insert(0, current)
 
-        title_action = menu.addSection("MODEL")
-        for name in sorted(set(installed), key=str.lower):
+        search_action = QWidgetAction(menu)
+        search_box = QLineEdit()
+        search_box.setPlaceholderText("Search available models…")
+        search_box.setClearButtonEnabled(True)
+        search_box.setStyleSheet(f"QLineEdit {{ background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 7px; padding: 7px 9px; min-width: 260px; }}")
+        search_action.setDefaultWidget(search_box)
+        menu.addAction(search_action)
+        menu.addSection("INSTALLED LOCAL MODELS")
+        searchable_actions = []
+        searchable_groups = []
+        for name in sorted(set(installed), key=str.casefold):
             action = menu.addAction(("✓  " if (not remote and name == current) else "    ") + name)
             action.triggered.connect(lambda _, n=name: self._select_model(n))
+            searchable_actions.append((action, name))
+
+        try:
+            remote_profiles = json.loads(self._settings.get("remote_models", "[]") or "[]")
+        except (TypeError, ValueError):
+            remote_profiles = []
+        remote_profiles = [item for item in remote_profiles if isinstance(item, dict) and item.get("model")]
+        if remote_profiles:
+            menu.addSection("SAVED REMOTE MODELS")
+            active_remote = str(self._settings.get("active_remote_model_id", "") or "")
+            for profile in remote_profiles:
+                profile_id = str(profile.get("id", ""))
+                model_name = str(profile.get("model", ""))
+                display_name = str(profile.get("name") or model_name or "Remote model")
+                submenu = menu.addMenu(display_name)
+                available_remote = list(self._remote_model_catalog.get(profile_id, []) or [])
+                if model_name and model_name not in available_remote:
+                    available_remote.insert(0, model_name)
+                for available_model in available_remote:
+                    action = submenu.addAction(
+                        ("✓  " if remote and profile_id == active_remote and available_model == model_name else "    ")
+                        + available_model
+                    )
+                    action.triggered.connect(
+                        lambda _, pid=profile_id, model=available_model: self._select_remote_model(pid, model)
+                    )
+                    searchable_actions.append((action, display_name + " " + available_model))
+                if not available_remote:
+                    action = submenu.addAction("No model catalog available")
+                    action.setEnabled(False)
+                searchable_groups.append((submenu, display_name, available_remote))
+        def filter_model_actions(query):
+            needle = query.strip().casefold()
+            for action, label in searchable_actions:
+                action.setVisible(not needle or needle in label.casefold())
+            for submenu, display_name, model_names in searchable_groups:
+                group_match = not needle or needle in display_name.casefold() or any(
+                    needle in model_name.casefold() for model_name in model_names
+                )
+                submenu.menuAction().setVisible(group_match)
+        search_box.textChanged.connect(filter_model_actions)
+        menu.aboutToShow.connect(search_box.setFocus)
 
         menu.addSeparator()
         effort_action = QWidgetAction(menu)
@@ -1553,6 +2350,8 @@ class NovaWindow(QMainWindow):
         effort_action.setDefaultWidget(effort_panel)
         menu.addAction(effort_action)
         menu.addSeparator()
+        menu.addAction("Refresh local models").triggered.connect(self._start_model_discovery)
+        menu.addAction("Refresh remote model catalogs").triggered.connect(self._start_remote_model_discovery)
         menu.addAction("API & model settings…").triggered.connect(self._open_model_settings)
         noviqx_label = "NoviqX GitHub App…" + (
             "  ✓" if noviqx_is_configured() else "  (not set up)"
@@ -1571,6 +2370,30 @@ class NovaWindow(QMainWindow):
             desired = QPoint(x, y)
         menu.exec(desired)
 
+    def _select_remote_model(self, profile_id, model_name=None):
+        if self.busy:
+            return
+        try:
+            profiles = json.loads(self._settings.get("remote_models", "[]") or "[]")
+        except (TypeError, ValueError):
+            profiles = []
+        profile = next((item for item in profiles if isinstance(item, dict) and str(item.get("id", "")) == str(profile_id)), None)
+        if profile is None:
+            return
+        if model_name:
+            profile["model"] = str(model_name)
+            self._settings["remote_models"] = json.dumps(profiles, ensure_ascii=False)
+        self._settings["provider"] = "remote"
+        self._settings["active_remote_model_id"] = str(profile_id)
+        self._settings["api_base_url"] = str(profile.get("base_url", ""))
+        self._settings["api_model"] = str(profile.get("model", ""))
+        self._settings["api_key"] = str(profile.get("api_key", ""))
+        save_settings(self._settings)
+        apply_to_environment(self._settings)
+        if self._rebuild_core():
+            self._refresh_model_labels()
+            self._render_current_chat()
+
     def _select_model(self, name):
         if self.busy or not name:
             return
@@ -1585,11 +2408,12 @@ class NovaWindow(QMainWindow):
     def _open_model_settings(self):
         if self.busy:
             return
-        dialog = ModelSettingsDialog(self._settings, [], self)
+        dialog = ModelSettingsDialog(self._settings, getattr(self, "_installed_models", []), self)
         if dialog.exec() == QDialog.Accepted:
             values = dialog.values()
             save_settings(values)
             self._settings.update(values)
+            self._remote_model_catalog = {}
             apply_to_environment(values)
             if self._rebuild_core():
                 self._refresh_model_labels()
@@ -1694,6 +2518,7 @@ class NovaWindow(QMainWindow):
 
     def _send(self):
         if self.busy:
+            self._stop_generation()
             return
         user_text = self.input.toPlainText().strip()
         attachments = list(self.attachments)
@@ -1706,13 +2531,21 @@ class NovaWindow(QMainWindow):
         self.input.clear()
         self.attachments.clear()
         self._refresh_attachment_preview()
+        created_new_chat = not self.current_chat_id
+        if created_new_chat:
+            self.current_chat_id = self.chat_store.create_chat()
+            self._sync_active_agent_session()
         self._add_message("user", user_text, attachments=attachments)
         self.chat_store.add_message(self.current_chat_id, "user", user_text, attachments=attachments, context=message)
         self._refresh_chat_history()
 
         self.busy = True
         self.input.setEnabled(False)
-        self.send_button.setEnabled(False)
+        self.send_button.setEnabled(True)
+        self.send_button.setText("Stop")
+        self.send_button.setIcon(QIcon())
+        self.send_button.setFixedSize(58, 32)
+        self.send_button.setToolTip("Stop generation")
         self._answer_started = False
         self._set_activity("Thinking")
 
@@ -1723,23 +2556,65 @@ class NovaWindow(QMainWindow):
             setter(self.thinking_enabled)
         self.think_button.setEnabled(False)
         self.thinking_panel = None
+        # The panel mounts lazily on the first MODEL_THOUGHT_START — i.e. when
+        # the model actually emits thinking. Pre-mounting it left an empty
+        # "Thinking" card visible for models that produce no reasoning.
+        self._clear_task_plan_panel()
+        execution_state = getattr(self.core, "execution_state", None)
+        if isinstance(execution_state, dict):
+            execution_state["last_plan"] = None
         self._discard_streaming_message()
-        if self.thinking_enabled:
-            self.thinking_panel = self._insert_thinking_panel()
 
-        self.worker = AgentWorker(self.core, message)
+        self.worker = AgentWorker(
+            self.core, message, self,
+            generate_title=created_new_chat,
+            chat_id=self.current_chat_id,
+        )
+        self._active_workers.add(self.worker)
         self.worker.status.connect(self._on_status)
-        self.worker.finished.connect(self._on_finished)
+        self.worker.title_generated.connect(self._on_chat_title_generated)
+        self.worker.completed.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
-        self.thread = threading.Thread(target=self.worker.run, daemon=True)
-        self.thread.start()
+        self.worker.cancelled.connect(self._on_cancelled)
+        self.worker.finished.connect(self._on_worker_thread_finished)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread = self.worker
+        self.worker.start()
+
+    def _stop_generation(self):
+        worker = self.worker
+        if worker is None or not self.busy:
+            return
+        worker.request_stop()
+        self.send_button.setEnabled(False)
+        self.send_button.setText("Stopping…")
+        self.send_button.setToolTip("Waiting for the active operation to stop safely")
+        self._set_activity("Stopping")
 
     def _on_status(self, message):
         message = str(message)
+        if message.startswith("TASK_PLAN:"):
+            try:
+                plan = json.loads(message[len("TASK_PLAN:"):])
+            except (TypeError, ValueError):
+                return
+            if isinstance(plan, dict) and isinstance(plan.get("steps"), list):
+                self._insert_task_plan_panel().set_plan(plan)
+            return
         if message.startswith("MODEL_ANSWER_DELTA:"):
             if not self._answer_started:
                 self._answer_started = True
-                self._set_activity("Writing")
+                # If the reasoning card already finished (the approach-preview
+                # path), separate it from the reply now. If it is still live
+                # (a reasoning model streaming native thinking interleaved with
+                # the answer), keep it mounted so later MODEL_THOUGHT_DELTA
+                # events keep filling it instead of freezing the UI.
+                if self.thinking_panel and self.thinking_panel.is_finished():
+                    self._separate_thinking_panel_from_reply()
+                # The Thinking panel is the only generation-phase UI. Hide the
+                # composer activity chip while the final answer streams.
+                self._status_timer.stop()
+                self.status_row.hide()
             self._ensure_streaming_message().append_delta(message[len("MODEL_ANSWER_DELTA:"):])
             return
         if message == "MODEL_ANSWER_RESET":
@@ -1747,10 +2622,18 @@ class NovaWindow(QMainWindow):
             return
         if message.startswith("MODEL_THOUGHT_START"):
             self._set_activity("Thinking")
+            if self.thinking_enabled and self.thinking_panel is None:
+                self.thinking_panel = self._insert_thinking_panel()
+            if self.thinking_panel:
+                self.thinking_panel.set_phase("Thinking")
             return
         if message.startswith("MODEL_THOUGHT_DELTA:"):
-            if self.thinking_panel:
-                self.thinking_panel.append_delta(message[20:])
+            thought = message[len("MODEL_THOUGHT_DELTA:"):]
+            if thought.strip():
+                if self.thinking_enabled and self.thinking_panel is None:
+                    self.thinking_panel = self._insert_thinking_panel()
+                if self.thinking_panel:
+                    self.thinking_panel.append_delta(thought)
             return
         if message == "MODEL_THOUGHT_END":
             if self.thinking_panel:
@@ -1777,6 +2660,12 @@ class NovaWindow(QMainWindow):
         if not self.busy:
             # A queued event arrived after the request finished; never
             # resurrect the hidden chip for stale activity.
+            return
+        if self.thinking_enabled:
+            # Think mode has a dedicated panel; do not show a second,
+            # competing Writing/activity phase above the composer.
+            self._status_timer.stop()
+            self.status_row.hide()
             return
         text = (text or "").strip() or "Working"
         self._activity_text = text
@@ -1814,21 +2703,55 @@ class NovaWindow(QMainWindow):
         return text[:28]
 
     def _separate_thinking_panel_from_reply(self):
-        """Add breathing room between the native-thinking card and Nova's reply."""
-        if not self.thinking_panel:
+        """Retire the Thinking panel and separate it from Nova's reply."""
+        panel = self.thinking_panel
+        if panel is None:
             return
-        self.thinking_panel.finish()
+        panel.finish()
         self.thinking_panel = None
+        if not panel.has_content:
+            # No reasoning arrived this turn — remove the empty placeholder
+            # instead of leaving a "no reasoning" chip above the reply.
+            self.chat_container_layout.removeWidget(panel)
+            panel.deleteLater()
+            return
         # The final layout item is the stretch spacer. Insert a real layout
         # gap immediately before it so the next assistant message is separated.
         index = max(0, self.chat_container_layout.count() - 1)
         self.chat_container_layout.insertSpacing(index, 18)
 
+    def _on_chat_title_generated(self, chat_id, title):
+        """Persist the title chosen by the configured language model."""
+        if not chat_id or not title:
+            return
+        setter = getattr(self.chat_store, "set_chat_title", None)
+        if callable(setter):
+            setter(chat_id, title)
+            self._refresh_chat_history()
+
     def _on_finished(self, response):
+        # Defer the markdown build by one event-loop tick so the final streaming
+        # tokens paint first, then render the response INCREMENTALLY (one block
+        # per tick). Building one giant QTextDocument layout synchronously froze
+        # the UI for several seconds after the model stopped; the streaming text
+        # stayed visible but frozen until the markdown "popped in". Now the
+        # bubble fills block-by-block and the UI keeps painting between them.
+        response = str(response)
+        QTimer.singleShot(0, lambda: self._finalize_response(response))
+
+    def _finalize_response(self, response):
         self._discard_streaming_message()
         self._separate_thinking_panel_from_reply()
-        self._add_message("nova", str(response))
-        self.chat_store.add_message(self.current_chat_id, "assistant", str(response))
+        font_size = int(self._settings.get("assistant_font_size", "18") or 18)
+        widget = MessageWidget(
+            "nova", response, font_size=font_size,
+            incremental=True, on_block=self._scroll_chat_to_bottom,
+        )
+        stretch = self.chat_container_layout.takeAt(self.chat_container_layout.count() - 1)
+        self.chat_container_layout.addWidget(widget)
+        if stretch:
+            self.chat_container_layout.addItem(stretch)
+        self.chat_store.add_message(self.current_chat_id, "assistant", response)
         self._refresh_chat_history()
         self._finish_request()
 
@@ -1841,10 +2764,29 @@ class NovaWindow(QMainWindow):
         self._refresh_chat_history()
         self._finish_request()
 
+    def _on_cancelled(self):
+        self._discard_streaming_message()
+        self._separate_thinking_panel_from_reply()
+        self._add_message("nova", "Generation stopped.")
+        self.chat_store.add_message(self.current_chat_id, "assistant", "Generation stopped.")
+        self._refresh_chat_history()
+        self._finish_request()
+
+    def _on_worker_thread_finished(self):
+        worker = self.sender()
+        self._active_workers.discard(worker)
+        if self.worker is worker:
+            self.worker = None
+            self.thread = None
+
     def _finish_request(self):
         self.busy = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.send_button.setText("")
+        self.send_button.setIcon(make_icon("arrow_up", BG_MAIN, 17, 2.5))
+        self.send_button.setFixedSize(32, 32)
+        self.send_button.setToolTip("Send message")
         self.think_button.setEnabled(True)
         self._status_timer.stop()
         self._activity_text = ""
